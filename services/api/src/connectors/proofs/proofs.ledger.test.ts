@@ -43,7 +43,8 @@ afterAll(async () => {
 
 describe('amount proofs on Devnet', () => {
   it('proves the deposit and the payout from the pool key; a public node checks both', async () => {
-    const deps = { ledger, poolAddress: sys.wallets.pool.classicAddress, poolKey: sys.poolKey }
+    const pool = sys.wallets.pool.classicAddress
+    const deps = { ledger, poolAddress: pool, poolKey: sys.poolKey, holderAddress: user.address }
     const outProof = await proveLine(deps, { direction: 'out', amountMinor: 1200, depositTxHash: hashes.deposit })
     const inProof = await proveLine(deps, { direction: 'in', amountMinor: 995, payoutTxHash: hashes.payout })
     expect(outProof).toMatch(/^mpt-dleq-v1:/)
@@ -68,14 +69,15 @@ describe('amount proofs on Devnet', () => {
     )
     const reader = xrplReader(new xrpl.Client(PUBLIC_NODES.devnet))
     try {
-      const r = await checkStatement(s, reader, { expectedSigner: key.address })
+      const anchors = { signer: key.address, pool, issuanceId: ledger.issuanceId }
+      const r = await checkStatement(s, reader, anchors)
       expect(r.lines).toMatchObject([
         { transactions: 'ok', amount: 'proven' },
         { transactions: 'ok', amount: 'proven' },
       ])
       expect(r.ok).toBe(true)
       const lie = signStatement({ ...s, lines: [{ ...s.lines[0], amountMinor: 120 }] }, key)
-      expect((await checkStatement(lie, reader)).lines[0].amount).toBe('invalid')
+      expect((await checkStatement(lie, reader, anchors)).lines[0].amount).toBe('invalid')
     } finally {
       await reader.close()
     }
