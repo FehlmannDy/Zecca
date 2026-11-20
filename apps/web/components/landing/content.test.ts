@@ -48,8 +48,8 @@ describe('landing copy (UI §5.1, final)', () => {
   })
   it('four building blocks, each naming the network it runs on today', () => {
     expect(copy.BUILDING_BLOCKS.map((b) => b.title)).toEqual(['Sponsored accounts', 'Confidential tokens', 'Batched transactions', 'Credentials'])
-    for (const b of copy.BUILDING_BLOCKS) expect(b.network).toMatch(/XRPL (Devnet|Testnet)/)
-    expect(copy.BUILDING_BLOCKS.find((b) => b.title === 'Confidential tokens')!.network).toMatch(/Testnet/)
+    for (const b of copy.BUILDING_BLOCKS) expect(b.networks[0]).toMatch(/XRPL (Devnet|Testnet)/)
+    expect(copy.BUILDING_BLOCKS.find((b) => b.title === 'Confidential tokens')!.networks.join(' ')).toMatch(/Top-up on XRPL Testnet/)
   })
   it('where Zecca earns: the first three lines of SPEC §4.13 live, the last three planned, fees from the defaults', () => {
     expect(copy.EARNINGS.live.map((e) => e.title)).toEqual(['Merchant fee', 'Metals spread', 'Share of Earn yield'])

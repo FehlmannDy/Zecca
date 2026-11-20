@@ -53,13 +53,13 @@ export const PAYMENT = {
       step: '1',
       title: 'You pay the pool',
       body: 'Your app seals the amount and you sign the payment with your own key.',
-      observer: { addresses: 'Your address and the pool: visible', amount: 'Amount: sealed' },
+      observer: { addresses: 'Your address and the pool: visible', amount: 'Sealed' },
     },
     {
       step: '2',
       title: 'The pool pays the merchant',
       body: `Zecca opens the amount, checks it, and the merchant sees "Paid" about 10 seconds after you approve. The payout, minus the ${percentFromBps(DEFAULTS.MERCHANT_FEE_BPS)} merchant fee, follows in the background.`,
-      observer: { addresses: 'The pool and the merchant: visible', amount: 'Amount: sealed' },
+      observer: { addresses: 'The pool and the merchant: visible', amount: 'Sealed' },
     },
   ],
   outcome: 'Someone watching sees two separate payments, one into the pool and one out of it. Never one from you to the merchant, and never an amount.',
@@ -71,30 +71,30 @@ export const LEDGER = {
   title: 'Built on the XRP Ledger, layer 1',
   intro: 'No sidechain and no smart contracts. Four features of the ledger itself do the work.',
 } as const
-export const BUILDING_BLOCKS: readonly { icon: BlockIcon; title: string; body: string; network: string }[] = [
+export const BUILDING_BLOCKS: readonly { icon: BlockIcon; title: string; body: string; networks: readonly string[] }[] = [
   {
     icon: 'sponsor',
     title: 'Sponsored accounts',
     body: 'Zecca opens your account and pays its fees and reserve, so you never need to hold XRP.',
-    network: 'Live on XRPL Devnet',
+    networks: ['Live on XRPL Devnet'],
   },
   {
     icon: 'sealed',
     title: 'Confidential tokens',
     body: 'Your dollars are a token whose balances and transfers are encrypted on the ledger, with proofs that every amount adds up.',
-    network: 'Live on XRPL Devnet. Top-ups arrive as RLUSD on XRPL Testnet.',
+    networks: ['Live on XRPL Devnet', 'Top-up on XRPL Testnet'],
   },
   {
     icon: 'batch',
     title: 'Batched transactions',
     body: 'Signing up is one approval: opening the account, the private balance and the demo credit go through together, or not at all.',
-    network: 'Live on XRPL Devnet',
+    networks: ['Live on XRPL Devnet'],
   },
   {
     icon: 'credential',
     title: 'Credentials',
     body: 'A verified identity becomes a credential on your account that raises your limits. Your personal data stays off the ledger.',
-    network: 'Tested on XRPL Devnet',
+    networks: ['Tested on XRPL Devnet'],
   },
 ]
 

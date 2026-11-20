@@ -1,8 +1,11 @@
+import type { Metadata } from 'next'
+import { Landing } from '@/components/landing/landing'
+
+export const metadata: Metadata = {
+  title: { absolute: 'Zecca · Money that moves like a message' },
+  description: 'Sign in with an email. Pay with a tap. Your balance stays between you and the people you pay.',
+}
+
 export default function Home() {
-  return (
-    <main style={{ padding: 48, fontFamily: 'system-ui' }}>
-      <h1>Zecca</h1>
-      <p>Money that moves like a message. Private by default.</p>
-    </main>
-  )
+  return <Landing />
 }
