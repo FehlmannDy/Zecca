@@ -22,7 +22,7 @@ import { createLiveTestnetReader, type TestnetReader } from './testnet'
 export type RampDeps = {
   /** MoonPay's public API (default: the real one with MOONPAY_PUBLISHABLE_KEY). */
   moonpay?: MoonPayApi
-  /** XRPL Testnet reads (default: a live client, XRPL_TESTNET_URL or the public endpoint). */
+  /** XRPL Testnet reads (default: a live client on the public Testnet endpoint). */
   testnet?: TestnetReader
   /** How often the watcher looks up open sessions at MoonPay, in ms (default 15000; 0 = only on treasury events). */
   pollMs?: number
@@ -71,7 +71,7 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
   let moonpay = deps.moonpay
   let testnet = deps.testnet
   const mp = () => (moonpay ??= createMoonPayApi({ publishableKey: keys()!.publishableKey }))
-  const ledger = () => (testnet ??= createLiveTestnetReader({ url: env.XRPL_TESTNET_URL, log: (m) => core.log.warn(m) }))
+  const ledger = () => (testnet ??= createLiveTestnetReader({ log: (m) => core.log.warn(m) }))
 
   /** Everything a session needs, or 503. */
   function ready(): { keys: { publishableKey: string; secretKey: string }; treasury: string } {
