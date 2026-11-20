@@ -15,6 +15,11 @@ object PayLinkStore {
 
     fun setUrl(ctx: Context, url: String) = prefs(ctx).edit().putString(KEY_URL, url).apply()
 
+    fun clearUrl(ctx: Context) = prefs(ctx).edit().remove(KEY_URL).apply()
+
+    /** The stored URL if [PayLinkPolicy] still allows it (a link saved by an older build may not pass). */
+    fun servedUrl(ctx: Context): String? = url(ctx)?.takeIf { PayLinkPolicy.check(it) == null }
+
     fun lastTap(ctx: Context): String? = prefs(ctx).getString(KEY_LAST_TAP, null)
 
     fun setLastTap(ctx: Context, summary: String) =

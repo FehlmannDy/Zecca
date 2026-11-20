@@ -19,7 +19,7 @@ class PayLinkApduService : HostApduService() {
     private var sessionUrl: String? = null
 
     override fun processCommandApdu(commandApdu: ByteArray, extras: Bundle?): ByteArray {
-        val emu = emulator ?: PayLinkStore.url(this)?.let { url ->
+        val emu = emulator ?: PayLinkStore.servedUrl(this)?.let { url ->
             sessionUrl = url
             Type4TagEmulator(NdefUri.message(url))
         }?.also { emulator = it }

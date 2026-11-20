@@ -5,5 +5,8 @@
     <string name="aid_group_description">NFC Forum Type 4 NDEF tag</string>
     <string name="url_hint">https://…/pay/demo</string>
     <string name="serve">Serve this link over NFC</string>
+    <string name="prompt_ready">Hold the customer\'s phone to the back of this one</string>
+    <string name="prompt_idle">No payment link yet. Open a payment request on the Zecca merchant page, or type its link below.</string>
+    <string name="refused">Link refused, not sent: %1$s</string>
     <string name="instructions">Keep this screen open and unlocked. Customer taps the back of their phone to the back of this phone.</string>
 </resources>

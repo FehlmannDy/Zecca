@@ -16,6 +16,19 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Chrome: intent:#Intent;action=android.intent.action.VIEW;package=ch.ixh.nfcpaylink;S.url=<encoded>;end -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+            </intent-filter>
+            <!-- Fallback deep link: zecca-nfc://emit?url=<encoded> -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="zecca-nfc" android:host="emit" />
+            </intent-filter>
         </activity>
 
         <service
