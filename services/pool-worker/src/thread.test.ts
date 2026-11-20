@@ -73,6 +73,17 @@ describe('pool worker in a worker thread', () => {
     await expect(createPoolWorkerInThread({ env: {}, log: () => {} })).rejects.toThrow(/createLiveLedger|KEYSTORE_PASSPHRASE/)
   })
 
+  it('watches the calling thread for event-loop stalls (the pool thread stalls by design during proofs)', async () => {
+    const logs: string[] = []
+    w = await createPoolWorkerInThread({ env: {}, log: (m) => logs.push(m), factory: FAKE, lagIntervalMs: 100 })
+    await sleep(50)
+    const until = Date.now() + 180
+    while (Date.now() < until) {
+      /* stall the main thread */
+    }
+    await waitFor(() => logs.some((l) => l.startsWith('[lag]')))
+  })
+
   it('rejects calls after stop()', async () => {
     const t = await createPoolWorkerInThread({ env: {}, log: () => {}, factory: FAKE })
     await t.stop()

@@ -37,7 +37,8 @@ async function main() {
     if (typeof mod.createPoolDeps !== 'function') throw new Error(`pool worker factory ${factory} does not export createPoolDeps`)
     deps = await mod.createPoolDeps(env, { log })
     const pollMs = env.POOL_POLL_MS ? Number(env.POOL_POLL_MS) : undefined
-    worker = createPoolWorker({ ledger: deps.ledger, keystore: deps.keystore, store: deps.store, log, pollMs })
+    // lagMonitor off here: this thread blocks on proofs by design; createPoolWorkerInThread watches the API's thread instead.
+    worker = createPoolWorker({ ledger: deps.ledger, keystore: deps.keystore, store: deps.store, log, pollMs, lagMonitor: false })
   } catch (e) {
     post({ type: 'fatal', message: msg(e) })
     return

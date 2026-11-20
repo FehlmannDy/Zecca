@@ -2,6 +2,7 @@
 // Same PoolWorker interface; every method is a message-passing RPC, events and logs are forwarded, status() is mirrored.
 import { Worker } from 'node:worker_threads'
 import type { PoolEvent, PoolWorker } from '@zecca/contracts'
+import { startLagMonitor } from './lag'
 import type { FromThread, RpcMethod } from './thread-entry'
 
 export type ThreadOptions = {
@@ -10,6 +11,10 @@ export type ThreadOptions = {
   log?: (m: string) => void
   /** Module (URL or absolute path) exporting createPoolDeps(env, { log }). Defaults to the devnet factory (live-deps.ts). Tests inject a fake. */
   factory?: string | URL
+  /** [lag] monitor on the calling (API) thread, on by default. The pool thread's own loop stalls by design during proofs. */
+  lagMonitor?: boolean
+  /** Check period of the [lag] monitor (default 5 s; tests shorten it). */
+  lagIntervalMs?: number
 }
 
 /** Keep the -r/--require preloads (the DNS fix on this laptop); drop process-only flags such as --env-file and loader flags. */
@@ -36,9 +41,12 @@ export function createPoolWorkerInThread(o: ThreadOptions): Promise<PoolWorker> 
   let status: ReturnType<PoolWorker['status']> = { spendableMinor: 0, inboxMinor: 0, queue: 0 }
   let seq = 0
   let dead: Error | null = null
+  let stopLag: (() => void) | undefined
 
   const failAll = (e: Error) => {
     dead ??= e
+    stopLag?.()
+    stopLag = undefined
     for (const p of pending.values()) p.reject(e)
     pending.clear()
   }
@@ -87,6 +95,7 @@ export function createPoolWorkerInThread(o: ThreadOptions): Promise<PoolWorker> 
       switch (m.type) {
         case 'ready':
           ready = true
+          if (o.lagMonitor !== false) stopLag = startLagMonitor({ log, intervalMs: o.lagIntervalMs })
           return resolve(proxy)
         case 'fatal':
           failAll(new Error(m.message))
