@@ -21,6 +21,11 @@ import { mountEvents } from './events'
 import { mountDev } from './dev'
 import { mountRamp, type RampDeps } from './connectors/ramp'
 import { mountDemoShop } from './demoShop'
+import { mountCard, registerCard } from './connectors/card'
+import { mountEarn, registerEarn } from './connectors/earn'
+import { mountMarket, registerMarket } from './connectors/market'
+import { mountIdentity, registerIdentity } from './connectors/identity'
+import { mountProofs, registerProofs } from './connectors/proofs'
 import { registerSendHandler, wirePoolEvents } from './intents/flow'
 import { createJobs, type Jobs } from './jobs'
 
@@ -28,6 +33,8 @@ export { publicConfig } from './config'
 export type { Env } from './config'
 
 export type AppDeps = {
+  /** Mount the phase-2 connectors (card, earn, market, identity, proofs). Default true; the test harness turns it off so connector tests mount their own with fakes. */
+  connectors?: boolean
   env: Env
   /** A database, or a path (default DATABASE_PATH, else ./.data/zecca.sqlite). Tests pass ':memory:'. */
   db?: Db | string
@@ -99,6 +106,19 @@ export function createApp(deps: AppDeps): ZeccaApp {
   mountDev(app, core)
   mountRamp(app, core, deps.ramp)
   mountDemoShop(app, core)
+  // Phase 2: each connector stays dark (404 feature_off) until its FEATURE_* flag is on.
+  if (deps.connectors !== false) {
+    registerCard(core)
+    mountCard(app, core)
+    registerEarn(core)
+    mountEarn(app, core)
+    registerMarket(core)
+    mountMarket(app, core)
+    registerIdentity(core)
+    mountIdentity(app, core)
+    registerProofs(core)
+    mountProofs(app, core)
+  }
   registerSendHandler(core)
   wirePoolEvents(core)
 

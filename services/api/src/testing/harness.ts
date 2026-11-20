@@ -48,6 +48,7 @@ export function makeHarness<L extends Ledger = FakeLedger, P extends PoolWorker 
     privy: o.privy,
     clock: () => clock.now,
     log: silentLogger,
+    connectors: false,
     ...o.extra,
   })
 
