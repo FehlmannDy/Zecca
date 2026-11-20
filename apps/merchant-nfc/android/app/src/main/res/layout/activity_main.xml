@@ -29,6 +29,7 @@
             android:id="@+id/refused"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:freezesText="true"
             android:paddingTop="8dp"
             android:textColor="#B00020"
             android:textSize="18sp"

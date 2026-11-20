@@ -63,12 +63,11 @@ class MainActivity : Activity() {
     }
 
     private fun handleIntent(intent: Intent) {
-        when (val incoming = PayLinkPolicy.incoming(intent.dataString, intent.getStringExtra(EXTRA_URL))) {
+        val incoming = PayLinkPolicy.incoming(intent.dataString, intent.getStringExtra(EXTRA_URL))
+        MerchantScreen.fieldAfter(incoming)?.let { urlField.setText(it) }
+        when (incoming) {
             PayLinkPolicy.Incoming.None -> Unit
-            is PayLinkPolicy.Incoming.Accepted -> {
-                urlField.setText(incoming.url)
-                serve(incoming.url)
-            }
+            is PayLinkPolicy.Incoming.Accepted -> serve(incoming.url)
             is PayLinkPolicy.Incoming.Refused -> refuse(incoming.reason)
         }
     }
@@ -85,7 +84,7 @@ class MainActivity : Activity() {
 
     private fun serve(url: String) {
         PayLinkStore.setUrl(this, url)
-        refused.visibility = View.GONE
+        refused.text = ""
         refresh()
     }
 
@@ -94,7 +93,6 @@ class MainActivity : Activity() {
         Log.w(PayLinkApduService.TAG, "link refused: $reason")
         PayLinkStore.clearUrl(this)
         refused.text = getString(R.string.refused, reason)
-        refused.visibility = View.VISIBLE
         refresh()
     }
 
@@ -149,6 +147,8 @@ class MainActivity : Activity() {
         prompt.setText(if (served != null) R.string.prompt_ready else R.string.prompt_idle)
         servingUrl.text = served ?: ""
         servingUrl.visibility = if (served != null) View.VISIBLE else View.GONE
+        // The refusal text survives rotation (freezesText), so show the line whenever it has text.
+        refused.visibility = if (refused.text.isNullOrEmpty()) View.GONE else View.VISIBLE
         lines += "Serving: " + (served ?: "(nothing yet)")
         status.text = lines.joinToString("\n")
         lastTap.text = "Last tap: " + (PayLinkStore.lastTap(this) ?: "none yet")
