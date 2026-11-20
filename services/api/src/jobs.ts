@@ -17,6 +17,14 @@ export async function expireIntents(core: Core): Promise<number> {
   for (const i of created) {
     if (i.submittedAt) continue // being submitted right now
     const ps = preparedForIntent(core, i.id)
+    // No prepared tx yet: still being built (proofs take seconds on Devnet). Only give up on it after 10 minutes.
+    if (!ps.length) {
+      if (core.now() - Date.parse(i.createdAt) > 10 * 60_000 && intents.transition(core, i.id, 'created', 'expired')) {
+        emitIntent(core, i.id)
+        n++
+      }
+      continue
+    }
     if (ps.some((p) => p.usedAt)) continue
     const dead = ps.every((p) => Date.parse(p.expiresAt) <= core.now() || (p.lastLedgerSequence !== undefined && index > p.lastLedgerSequence))
     if (dead && intents.transition(core, i.id, 'created', 'expired')) {
