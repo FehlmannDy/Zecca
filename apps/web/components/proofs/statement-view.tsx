@@ -137,10 +137,7 @@ function LineItem({ l, explorer }: { l: Line; explorer: PublicConfig['explorer']
   return (
     <li className="grid gap-2 px-4 py-3.5 sm:grid-cols-[1fr_auto] sm:items-start">
       <div className="min-w-0">
-        <p className="text-[15px] font-[660]">
-          {l.direction === 'in' ? 'From ' : 'To '}
-          {l.counterparty}
-        </p>
+        <p className="text-[15px] font-[660]">{l.counterparty}</p>
         <p className="text-[13px] text-muted">
           {day(l.date)} · {l.direction === 'in' ? 'Received' : 'Sent'}
           {l.feeMinor > 0 ? ` · Fee ${formatUsd(l.feeMinor)}` : ''}

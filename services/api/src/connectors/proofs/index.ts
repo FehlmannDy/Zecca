@@ -18,7 +18,7 @@ type StatementLine = Statement['lines'][number]
 /** Who the other side is when there is no Zecca user on it. */
 const NO_COUNTERPARTY: Record<string, string> = {
   welcome: 'Zecca demo credit',
-  topup: 'Top-up',
+  topup: 'Top up',
   card_load: 'Zecca card',
   earn_deposit: 'Earn',
   market_buy: 'Metals market',
