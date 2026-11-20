@@ -111,7 +111,7 @@ export function ProofsScreen() {
                     checked={sel.has(a.id)}
                     onChange={() => setSel((s) => toggle(s, a.id))}
                   />
-                  <ActivityRow activity={a} className="flex-1" />
+                  <ActivityRow activity={a} className="w-auto min-w-0 flex-1" />
                 </label>
               </li>
             ))}

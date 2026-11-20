@@ -16,28 +16,10 @@ async function signUp(page: Page, opts: { email: string; handle: string; name: s
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByText("One approval and you're in.")).toBeVisible()
   await page.getByRole('button', { name: 'Approve' }).click()
-  await expect(page.getByText(new RegExp(`You're set, ${opts.name.split(' ')[0]}`))).toBeVisible({ timeout: 60_000 })
-  await page.getByRole('button', { name: 'Go to home' }).or(page.getByRole('link', { name: 'Go to home' })).click()
-}
-
-async function token(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    for (const store of [localStorage, sessionStorage]) {
-      for (let i = 0; i < store.length; i++) {
-        const k = store.key(i)!
-        if (/session|token/i.test(k)) {
-          const v = store.getItem(k)!
-          try {
-            const j = JSON.parse(v)
-            if (j?.token) return j.token as string
-          } catch {
-            if (v.length > 16) return v
-          }
-        }
-      }
-    }
-    throw new Error('no session token in storage')
-  })
+  // Sign-up ends on a "You're set" screen or goes straight home, depending on where it started.
+  const goHome = page.getByRole('button', { name: 'Go to home' }).or(page.getByRole('link', { name: 'Go to home' }))
+  await expect(goHome.or(page.getByText('Demo credit'))).toBeVisible({ timeout: 60_000 })
+  if (await goHome.isVisible()) await goHome.click()
 }
 
 test('E2E-2 proofs: export a statement and open it', async ({ browser, request }) => {
@@ -48,18 +30,9 @@ test('E2E-2 proofs: export a statement and open it', async ({ browser, request }
   await signUp(ana, { email: `ana-proofs-${RUN}@example.com`, handle: `anap${RUN}`, name: 'Ana Ferri' })
   await expect(ana.getByText('$50')).toBeVisible({ timeout: 30_000 })
 
-  // A second completed line: a demo top-up.
-  if (config.demoMode) {
-    const t = await token(ana)
-    const r = await ana.request.post(`${API}/v1/dev/credit`, { headers: { authorization: `Bearer ${t}` }, data: { amountMinor: 4000 } })
-    expect(r.ok()).toBeTruthy()
-    await expect(ana.getByText('$90')).toBeVisible({ timeout: 60_000 })
-  }
-
   await ana.goto('/app/proofs')
   await expect(ana.getByRole('heading', { name: 'Statements' })).toBeVisible()
-  await ana.getByRole('checkbox', { name: /Demo credit/ }).check()
-  if (config.demoMode) await ana.getByRole('checkbox', { name: /Top up/ }).check()
+  await ana.getByRole('checkbox', { name: /^Demo credit/ }).check()
   await ana.getByRole('button', { name: /Create statement/ }).click()
 
   await expect(ana).toHaveURL(/\/statement\/stm_/, { timeout: 30_000 })

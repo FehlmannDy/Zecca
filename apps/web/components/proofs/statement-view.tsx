@@ -80,7 +80,7 @@ function StatementBody({ s, explorer }: { s: Statement; explorer: PublicConfig['
           <p className="mt-1 text-[14.5px] text-muted">@{s.holder.handle}</p>
           <p className="mt-1 break-all font-mono text-[12.5px] text-muted">{s.holder.address}</p>
         </div>
-        <dl className="text-right text-[13.5px]">
+        <dl className="text-[13.5px] sm:text-right">
           <dt className="text-muted">Issued</dt>
           <dd className="font-[620]">{when(s.createdAt)}</dd>
           <dt className="mt-1 text-muted">Reference</dt>
@@ -147,7 +147,9 @@ function LineItem({ l, explorer }: { l: Line; explorer: PublicConfig['explorer']
             {hashes.map((h) => (
               <span key={h.hash} className="flex items-center gap-1.5 text-[12.5px] text-muted">
                 {h.label}
-                <HashChip value={h.hash} href={txHref(explorer, l.network, h.hash)} label="Copy transaction" />
+                <span className="print:hidden">
+                  <HashChip value={h.hash} href={txHref(explorer, l.network, h.hash)} label="Copy transaction" />
+                </span>
                 <span className="hidden font-mono text-[10px] print:inline">{h.hash}</span>
               </span>
             ))}
@@ -160,7 +162,7 @@ function LineItem({ l, explorer }: { l: Line; explorer: PublicConfig['explorer']
           {formatUsd(l.amountMinor)}
         </p>
         <span className={cn('rounded-full border px-2.5 py-0.5 text-[12px] font-[620]', l.amountProof ? 'border-in/40 text-in' : 'border-line text-muted')}>
-          {l.amountProof ? 'Amount proven' : 'Attested by Zecca'}
+          {l.amountProof ? 'Amount proof included' : 'Attested by Zecca'}
         </span>
       </div>
     </li>
@@ -216,8 +218,8 @@ function SignatureBlock({ s }: { s: Statement }) {
         <dd className="break-all font-mono text-[11.5px]">{s.signature.value}</dd>
       </dl>
       <p className="mt-4 text-[12px] leading-relaxed text-muted">
-        How to check it yourself: take this statement as JSON, remove the signature field, sort every object&apos;s keys and drop all spaces; its SHA-256 is the
-        fingerprint above, and the signature is an ECDSA {s.signature.alg} signature of that fingerprint, as made by ripple-keypairs. Amount proofs can be checked
+        How to check it yourself: take this statement as JSON, remove the signature field, and write it as compact JSON with every object&apos;s keys sorted;
+        its SHA-256 is the fingerprint above, and the signature is an ECDSA {s.signature.alg} signature of that fingerprint, as made by ripple-keypairs. Amount proofs can be checked
         against the public ledger with the open-source verifier in Zecca&apos;s repository (services/api/src/connectors/proofs/verify-cli.ts).
       </p>
     </section>
