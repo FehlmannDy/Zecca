@@ -30,8 +30,12 @@ export function shopOrder(core: Core, orderId: string): ShopOrder | undefined {
   return { id: r.id, seq: r.seq, lines, amountMinor: r.amount_minor, paymentRequestId: r.payment_request_id ?? undefined }
 }
 
-const paidWithZecca = (core: Core, paymentRequestId?: string) =>
-  !!paymentRequestId && (core.db.prepare('SELECT status FROM payment_requests WHERE id = ?').get(paymentRequestId) as { status: string } | undefined)?.status === 'paid'
+/** Paid with Zecca, or a Zecca payment is on its way (claimed at submit, released if it fails). */
+const paidWithZecca = (core: Core, paymentRequestId?: string) => {
+  if (!paymentRequestId) return false
+  const r = core.db.prepare('SELECT status, claimed_intent_id FROM payment_requests WHERE id = ?').get(paymentRequestId) as { status: string; claimed_intent_id: string | null } | undefined
+  return r?.status === 'paid' || !!r?.claimed_intent_id
+}
 
 const fullYear = (y: number) => (y >= 0 && y < 100 ? 2000 + y : y)
 

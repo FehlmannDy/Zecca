@@ -416,6 +416,20 @@ describe('POST /v1/demo/shop/charge (the demo shop’s "Pay by card")', () => {
     expect(h.app.core.db.prepare('SELECT status FROM card_holds').all()).toEqual([{ status: 'completed' }])
   })
 
+  it('refuses an order whose "Pay with Zecca" payment is on its way (submitted, not yet received)', async () => {
+    const { h, lithic, ana } = await world()
+    await cardWith(h, ana, 2000)
+    const bob = await h.signUp('bob')
+    const o = await order(h)
+    const s = await secretOf(h, ana)
+    const pay = await h.json('POST', `/v1/payment-requests/${o.paymentRequest.id}/pay`, { token: bob.token })
+    expect((await h.submit(bob, pay.body.prepared)).body.status).toBe('validated')
+    const r = await payByCard(h, o.orderId, s)
+    expect([r.status, r.body.error?.code]).toEqual([409, 'already_paid'])
+    expect(lithic.calls).not.toContain('simulateAuthorize')
+    expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(2000)
+  })
+
   it('404 for an unknown order', async () => {
     const { h, ana } = await world()
     await cardWith(h, ana, 0)
