@@ -390,6 +390,23 @@ describe('mint in (top-up, SPEC §2.7)', () => {
     expect(s.ledger.t.events.filter((e) => e.tx.TransactionType === 'ConfidentialMPTConvert' && e.engineResult === 'tesSUCCESS').length).toBe(1)
   })
 
+  it('a tec issuer payment is final even when reported as not validated (as the live client does), so it can be retried', async () => {
+    const s = setup()
+    const orig = s.ledger.submitAs
+    let first = true
+    s.ledger.submitAs = async (role, tx) => {
+      if (first && tx.TransactionType === 'Payment') {
+        first = false
+        return { validated: false, engineResult: 'tecNO_AUTH', hash: 'E'.repeat(64) }
+      }
+      return orig(role, tx)
+    }
+    await expect(s.worker.mintIn(800, 'ref-7')).rejects.toThrow(/tecNO_AUTH/)
+    expect(s.store.getMint('ref-7')).toMatchObject({ status: 'failed' })
+    await s.worker.mintIn(800, 'ref-7')
+    expect(s.ledger.t.bal(ADDR.pool).inboxMinor).toBe(800)
+  })
+
   it('an issuer payment with an unknown outcome is left for a human, never resent', async () => {
     const s = setup()
     s.ledger.t.throwNextSubmit('socket hang up')

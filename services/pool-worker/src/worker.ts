@@ -282,7 +282,8 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
       const pay: UnsignedTx = { TransactionType: 'Payment', Account: keystore.getWallet('issuer').address, Destination: pool, Amount: { mpt_issuance_id: ledger.issuanceId, value: String(amount) } }
       const r = await ledger.submitAs('issuer', pay)
       if (r.engineResult !== 'tesSUCCESS') {
-        if (r.validated || /^(tef|tem|tel)/.test(r.engineResult)) store.putMint({ ...m, status: 'failed', error: r.engineResult }) // final: nothing moved
+        // Final, nothing moved: a tec (validated with a failure; the live client reports it as validated: false) or a tef/tem/tel.
+        if (r.validated || /^(tec|tef|tem|tel)/.test(r.engineResult)) store.putMint({ ...m, status: 'failed', error: r.engineResult })
         throw new PoolError(r.engineResult, `issuer payment for mint ${reference}: ${r.engineResult} tx=${r.hash}`)
       }
       m = { ...m, status: 'paid', paymentHash: r.hash }
