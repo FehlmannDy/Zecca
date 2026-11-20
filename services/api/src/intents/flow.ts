@@ -267,9 +267,11 @@ export async function onFailed(core: Core, e: Extract<PoolEvent, { type: 'failed
 
 // ---------- top-up (SPEC §2.7): mint into the pool, then a normal payout ----------
 export function startTopup(core: Core, user: UserRow, amountMinor: number, o: { note?: string; reference?: string } = {}): Intent {
-  checkIncoming(core, user, amountMinor, 'self')
   const id = core.id('int')
-  intents.insert(core, { id, kind: 'topup', status: 'created', fromUserId: ZECCA, toUserId: user.id, amountMinor, feeMinor: 0, note: o.note })
+  core.db.transaction(() => {
+    checkIncoming(core, user, amountMinor, 'self')
+    intents.insert(core, { id, kind: 'topup', status: 'created', fromUserId: ZECCA, toUserId: user.id, amountMinor, feeMinor: 0, note: o.note })
+  })()
   core.track(runTopup(core, id, o.reference ?? `dev-credit:${id}`), 'topup')
   return toIntent(intents.byId(core, id)!)
 }

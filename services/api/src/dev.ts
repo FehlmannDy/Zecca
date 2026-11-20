@@ -5,5 +5,8 @@ import { mount } from './http'
 import { startTopup } from './intents/flow'
 
 export function mountDev(app: Hono, core: Core): void {
-  mount(app, core, 'devCredit', ({ user, body }) => startTopup(core, user!, body.amountMinor, { note: 'Demo credit' }))
+  mount(app, core, 'devCredit', ({ user, body }) => {
+    core.rateLimit(user!.address)
+    return startTopup(core, user!, body.amountMinor, { note: 'Demo credit' })
+  })
 }

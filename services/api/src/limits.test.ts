@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from '@zecca/contracts'
 import { makeHarness } from './testing/harness'
+import { createFakePool } from './testing/fakes'
 import { users } from './users'
 
 const TIER0 = "You've reached the limit for unverified accounts. Verify your identity to lift it."
@@ -80,6 +81,47 @@ describe('limits (SPEC §4.8, UI.md §5.12)', () => {
     const r = await h.submit(ana, b.body.prepared)
     expect(r.status).toBe(403)
     expect(r.body.error.code).toBe('limit_reached')
+  })
+
+  it('tier 0 recipient: payments still on their way count against the $150 cap (prepare and submit)', async () => {
+    const pool = createFakePool({ auto: false }) // deposits stay 'submitted': the pool never reports them received
+    const h = makeHarness({ pool })
+    const carla = await h.signUp('carla', { displayName: 'Carla Rossi' }) // holds 5000
+    const [ana, bob, dino] = [await h.signUp('ana'), await h.signUp('bob'), await h.signUp('dino')]
+    const prepare = async (from: typeof ana) => h.json('POST', '/v1/transfers', { token: from.token, body: { to: carla.user.id, amountMinor: 4000 } })
+    const [a, b, d] = [await prepare(ana), await prepare(bob), await prepare(dino)]
+    expect([a.status, b.status, d.status]).toEqual([200, 200, 200])
+    expect((await h.submit(ana, a.body.prepared)).body.status).toBe('validated') // 9000 with the one on its way
+    expect((await h.submit(bob, b.body.prepared)).body.status).toBe('validated') // 13000
+    const r = await h.submit(dino, d.body.prepared)
+    expect(r.status).toBe(403)
+    expect(r.body.error.details).toEqual({ limit: 'balance', capMinor: 15000, usedMinor: 13000 })
+    expect(r.body.error.message).toBe("Carla Rossi can't receive that much yet. Unverified accounts can hold up to $150.00.")
+    expect((await prepare(dino)).status).toBe(403)
+    expect((await h.json('GET', '/v1/balance', { token: dino.token })).body.availableMinor).toBe(5000)
+  })
+
+  it('dev credit: a top-up still being minted counts against the cap', async () => {
+    const { h, ana } = await world()
+    let release!: () => void
+    const minted = new Promise<void>((r) => (release = r))
+    const mint = h.pool.mintIn.bind(h.pool)
+    h.pool.mintIn = async (amount, ref) => (await minted, mint(amount, ref))
+    expect((await h.json('POST', '/v1/dev/credit', { token: ana.token, body: { amountMinor: 10_000 } })).status).toBe(200)
+    const r = await h.json('POST', '/v1/dev/credit', { token: ana.token, body: { amountMinor: 10_000 } })
+    expect(r.status).toBe(403)
+    expect(r.body.error.details).toEqual({ limit: 'balance', capMinor: 15000, usedMinor: 15000 })
+    release()
+    await h.settle()
+    expect((await h.json('GET', '/v1/balance', { token: ana.token })).body).toMatchObject({ availableMinor: 15000, pendingMinor: 0 })
+  })
+
+  it('dev credit is rate-limited per user', async () => {
+    const { h, ana } = await world({ PREPARE_RATE_LIMIT_PER_MIN: '3' }) // the sign-up used one
+    for (let i = 0; i < 2; i++) expect((await h.json('POST', '/v1/dev/credit', { token: ana.token, body: { amountMinor: 100 } })).status).toBe(200)
+    const r = await h.json('POST', '/v1/dev/credit', { token: ana.token, body: { amountMinor: 100 } })
+    expect(r.status).toBe(429)
+    expect(r.body.error.code).toBe('rate_limited')
   })
 
   it('dev credit respects the tier-0 balance cap', async () => {

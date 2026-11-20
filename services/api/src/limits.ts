@@ -48,15 +48,32 @@ export function checkOutgoing(
   }
   const day = sentSince(core, sender.id, startOfUtcDay(now), opts.excludeIntentId)
   if (day + amountMinor > s.dailyCapMinor) throw Err.limit('daily_cap', s.dailyCapMinor, day, `You've reached today's limit of ${formatUsd(s.dailyCapMinor)}. Try again tomorrow.`)
-  if (recipient) checkIncoming(core, recipient, amountMinor - feeMinor, 'payment')
+  if (recipient) checkIncoming(core, recipient, amountMinor - feeMinor, 'payment', opts.excludeIntentId)
 }
 
-/** Tier-0 balance cap for money coming in. `who`: 'payment' (the sender is told) or 'self' (a top-up). */
-export function checkIncoming(core: Core, user: UserRow, netMinor: number, who: 'payment' | 'self'): void {
+/**
+ * Money on its way to a user that our books do not hold yet (net of fees): payments being submitted or submitted but not
+ * received, and top-ups still being minted. Received money is already in pending.
+ */
+export function incomingInFlight(core: Core, userId: string, excludeIntentId?: string): number {
+  const r = core.db
+    .prepare(
+      `SELECT COALESCE(SUM(amount_minor - fee_minor), 0) AS s FROM intents
+       WHERE to_user_id = ? AND id != ? AND (status = 'submitted' OR (status = 'created' AND (submitted_at IS NOT NULL OR kind = 'topup')))`,
+    )
+    .get(userId, excludeIntentId ?? '') as { s: number }
+  return r.s
+}
+
+/**
+ * Tier-0 balance cap for money coming in, counting what is already on its way. `who`: 'payment' (the sender is told) or 'self'
+ * (a top-up). Call it in the same transaction as the write that puts the new money on its way.
+ */
+export function checkIncoming(core: Core, user: UserRow, netMinor: number, who: 'payment' | 'self', excludeIntentId?: string): void {
   if (user.tier !== 0) return
   const cap = core.settings.tier0.balanceCapMinor
   const b = getBalance(core, user.id)
-  const held = b.availableMinor + b.pendingMinor
+  const held = b.availableMinor + b.pendingMinor + incomingInFlight(core, user.id, excludeIntentId)
   if (held + netMinor <= cap) return
   if (who === 'self') throw Err.limit('balance', cap, held, COPY.tier0Limit)
   const name = user.roles.includes('merchant') && user.businessName ? user.businessName : user.displayName
