@@ -10,6 +10,8 @@ export type EventBus = {
   subscribeRequest(paymentRequestId: string, l: BusListener): () => void
   /** Every event sent, in order (tests and debugging). */
   history(): Array<{ to: string; event: ZeccaEvent }>
+  /** Open subscriptions for one user / request (diagnostics). */
+  listenerCount(kind: 'user' | 'request', id: string): number
 }
 
 export function createEventBus(opts: { keepHistory?: number; log?: (msg: string) => void } = {}): EventBus {
@@ -44,5 +46,6 @@ export function createEventBus(opts: { keepHistory?: number; log?: (msg: string)
     subscribeUser: (userId, l) => add(users, userId, l),
     subscribeRequest: (id, l) => add(requests, id, l),
     history: () => hist.slice(),
+    listenerCount: (kind, id) => (kind === 'user' ? users : requests).get(id)?.size ?? 0,
   }
 }
