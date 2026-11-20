@@ -8,6 +8,7 @@ import { AlreadyOnboardedError, buildConvert, buildMergeInbox, buildOnboarding, 
 import { batchSigningPayload, byAccountId, tfInnerBatchTxn } from './batch'
 import { mockRawSigner } from './signer'
 import { generateWalletSecret } from './wallet'
+import { createTicketAllocator } from './tickets'
 
 const ID = '006C6AA175853178147D8F0D592D9DE3658C836F69985AB9'
 type Tx = Record<string, any>
@@ -24,8 +25,12 @@ function setup(opts: { base?: number } = {}) {
   const tokens: Record<string, Tx> = {}
   const issuance: Tx = { IssuerEncryptionKey: issuerKey.publicKey, ConfidentialOutstandingAmount: '900000' }
   const reqs: Tx[] = []
+  const issuerTickets: number[] = []
   const request = async (req: Tx): Promise<Tx> => {
     reqs.push(req)
+    if (req.command === 'account_objects' && req.type === 'ticket') {
+      return { result: { account_objects: (req.account === keystore.getWallet('issuer').address ? issuerTickets : []).map((t) => ({ TicketSequence: t })) } }
+    }
     if (req.command === 'ledger_entry' && req.mpt_issuance) return { result: { node: issuance } }
     if (req.command === 'ledger_entry' && req.mptoken) {
       const t = tokens[req.mptoken.account]
@@ -50,7 +55,7 @@ function setup(opts: { base?: number } = {}) {
   seqs[addr('issuer')] = 7
   seqs[addr('pool')] = 50
   const ctx = { client: client as never, keystore, issuanceId: ID }
-  return { ctx, keystore, seqs, tokens, issuance, issuerKey, addr, reqs }
+  return { ctx, keystore, seqs, tokens, issuance, issuerKey, addr, reqs, issuerTickets }
 }
 
 describe('decryptBounded', () => {
@@ -137,6 +142,41 @@ describe('buildOnboarding', () => {
       Sponsor: addr('sponsor'), SponsorFlags: 2, SponsorSignature: { SigningPubKey: '' },
     })
     expect(() => xrpl.encode(b as never)).not.toThrow()
+  })
+
+  it('with issuer tickets, the welcome-credit Payment uses a ticket (Sequence 0): two sign-ups prepared together do not share an issuer sequence', async () => {
+    const { ctx, keystore, seqs, addr, issuerTickets } = setup()
+    issuerTickets.push(41, 40)
+    const tctx = { ...ctx, tickets: createTicketAllocator(ctx.client) }
+    const users = [mockRawSigner(), mockRawSigner()]
+    for (const u of users) {
+      seqs[u.address] = 100
+      keystore.createUserElGamal(u.address)
+    }
+    const built = (await Promise.all(
+      users.map((u) => buildOnboarding(tctx, { address: u.address, publicKey: u.publicKey, holderKey: keystore.getElGamal({ user: u.address }), welcomeCreditMinor: 5000 })),
+    )) as Tx[]
+    const pays = built.map((b) => b.RawTransactions[1].RawTransaction)
+    expect(pays.map((p: Tx) => `${p.Account === addr('issuer')} ${p.Sequence} ${p.TicketSequence}`).sort()).toEqual(['true 0 40', 'true 0 41'])
+    for (const b of built) {
+      for (const { BatchSigner: s } of b.BatchSigners) expect(rk.verify(batchSigningPayload(b, s.Account), s.TxnSignature, s.SigningPubKey)).toBe(true)
+      expect(() => xrpl.encode(b as never)).not.toThrow()
+    }
+  })
+
+  it('with no free issuer ticket it falls back to the issuer sequence; a credit of 0 takes no ticket', async () => {
+    const { ctx, keystore, seqs, reqs } = setup()
+    const tctx = { ...ctx, tickets: createTicketAllocator(ctx.client) }
+    const user = mockRawSigner()
+    seqs[user.address] = 100
+    keystore.createUserElGamal(user.address)
+    const p = { address: user.address, publicKey: user.publicKey, holderKey: keystore.getElGamal({ user: user.address }) }
+    const b = (await buildOnboarding(tctx, { ...p, welcomeCreditMinor: 5000 })) as Tx
+    expect(b.RawTransactions[1].RawTransaction).toMatchObject({ TransactionType: 'Payment', Sequence: 7 })
+    expect(b.RawTransactions[1].RawTransaction.TicketSequence).toBeUndefined()
+    reqs.length = 0
+    await buildOnboarding(tctx, { ...p, welcomeCreditMinor: 0 })
+    expect(reqs.some((r) => r.command === 'account_objects')).toBe(false)
   })
 
   it('refuses an account that already holds the token: ALREADY_ONBOARDED when the key is this one (a retry Batch would fail on MPTokenAuthorize)', async () => {

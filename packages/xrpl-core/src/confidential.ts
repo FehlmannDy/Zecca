@@ -8,9 +8,16 @@ import { buildBatch, spfReserve } from './batch'
 import { fillTx, MAX_USER_FEE_DROPS, USER_LLS_WINDOW } from './fill'
 import { walletFrom } from './wallet'
 import type { XrplClient } from './client'
+import type { TicketAllocator } from './tickets'
 
 export type ConfidentialClient = Pick<XrplClient, 'request' | 'ledgerIndex' | 'nextSequence' | 'accountInfo' | 'baseFeeDrops'> & { raw: unknown }
-export type ConfidentialContext = { client: ConfidentialClient; keystore: KeyStore; issuanceId: string }
+export type ConfidentialContext = {
+  client: ConfidentialClient
+  keystore: KeyStore
+  issuanceId: string
+  /** Issuer tickets for the sign-up's welcome credit. Without one (none left), the issuer's next Sequence is used. */
+  tickets?: TicketAllocator
+}
 
 type Tx = Record<string, any>
 
@@ -92,12 +99,11 @@ export async function buildOnboarding(ctx: ConfidentialContext, p: OnboardingPar
   const credit = p.welcomeCreditMinor
   const acct = await client.accountInfo(p.address)
   if (!acct) throw new Error(`account ${p.address} does not exist: create it first (ensureAccount)`)
-  const [seq, ledger, base, issuance, issuerSeq, existing] = await Promise.all([
+  const [seq, ledger, base, issuance, existing] = await Promise.all([
     client.nextSequence(p.address),
     client.ledgerIndex(),
     client.baseFeeDrops(),
     fetchIssuance(client, issuanceId),
-    credit > 0 ? client.nextSequence(issuer.classicAddress) : Promise.resolve(0),
     fetchMPToken(client, p.address, issuanceId),
   ])
   if (existing) {
@@ -106,6 +112,14 @@ export async function buildOnboarding(ctx: ConfidentialContext, p: OnboardingPar
     throw new Error(`${p.address} already holds the token ${key ? 'with another encryption key' : 'without an encryption key'}`)
   }
   if (!issuance.IssuerEncryptionKey) throw new Error(`issuance ${issuanceId} has no IssuerEncryptionKey`)
+  const lastLedgerSequence = ledger + USER_LLS_WINDOW
+  // The issuer's slot for the credit: a ticket held until this Batch expires, else the issuer's next Sequence (which
+  // any issuer tx landing before the user approves invalidates: the Batch then fails as tecBATCH_INNER_FAILED).
+  let issuerSlot: Tx = {}
+  if (credit > 0) {
+    const ticket = ctx.tickets ? await ctx.tickets.take(issuer.classicAddress, lastLedgerSequence, ledger) : null
+    issuerSlot = ticket != null ? { Sequence: 0, TicketSequence: ticket } : { Sequence: await client.nextSequence(issuer.classicAddress) }
+  }
   const convertSeq = seq + 2
   const bf = await mc.generateBlindingFactor()
   const [hEnc, iEnc, aEnc, ctxHash] = await Promise.all([
@@ -120,7 +134,7 @@ export async function buildOnboarding(ctx: ConfidentialContext, p: OnboardingPar
     { TransactionType: 'MPTokenAuthorize', Account: user, Sequence: seq + 1, MPTokenIssuanceID: issuanceId, Sponsor: sponsor.classicAddress, SponsorFlags: spfReserve },
   ]
   if (credit > 0) {
-    inners.push({ TransactionType: 'Payment', Account: issuer.classicAddress, Sequence: issuerSeq, Destination: user, Amount: { mpt_issuance_id: issuanceId, value: String(credit) } })
+    inners.push({ TransactionType: 'Payment', Account: issuer.classicAddress, ...issuerSlot, Destination: user, Amount: { mpt_issuance_id: issuanceId, value: String(credit) } })
   }
   const convert: Tx = {
     TransactionType: 'ConfidentialMPTConvert', Account: user, Sequence: convertSeq, MPTokenIssuanceID: issuanceId, MPTAmount: String(credit),
@@ -136,7 +150,7 @@ export async function buildOnboarding(ctx: ConfidentialContext, p: OnboardingPar
     })
   }
   const batch = buildBatch({
-    outer: { Account: user, Sequence: seq, LastLedgerSequence: ledger + USER_LLS_WINDOW, SigningPubKey: p.publicKey },
+    outer: { Account: user, Sequence: seq, LastLedgerSequence: lastLedgerSequence, SigningPubKey: p.publicKey },
     inners,
     sponsor: sponsor.classicAddress,
     cosigners: credit > 0 ? [issuer, sponsor] : [sponsor],

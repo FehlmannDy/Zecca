@@ -6,6 +6,7 @@ import { fillTx } from './fill'
 import { cosignAsSponsor } from './sponsor'
 import { walletFrom } from './wallet'
 import * as conf from './confidential'
+import { createTicketAllocator } from './tickets'
 
 export type LiveLedgerOptions = {
   network: Network
@@ -42,7 +43,8 @@ export function createLiveLedger(opts: LiveLedgerOptions): LiveLedger {
   const issuanceId = opts.issuanceId ?? keystore.getMeta('cmptIssuanceId')
   if (!issuanceId) throw new Error('no CMPT issuance id: pass issuanceId or set key store meta cmptIssuanceId (scripts/bootstrap-ledger.ts)')
   const client = opts.client ?? createClient(network, { url: opts.url, log })
-  const ctx: conf.ConfidentialContext = { client, keystore, issuanceId }
+  // The sign-up's welcome credit takes an issuer ticket (scripts/bootstrap-ledger.ts creates them) instead of the issuer's sequence.
+  const ctx: conf.ConfidentialContext = { client, keystore, issuanceId, tickets: createTicketAllocator(client) }
   const sponsor = () => walletFrom(keystore.getWallet('sponsor'))
 
   async function submitAs(role: WalletRole, tx: UnsignedTx): Promise<SubmitResult> {
