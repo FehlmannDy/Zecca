@@ -71,7 +71,7 @@ export const PreparedTx = z.object({
 export type PreparedTx = z.infer<typeof PreparedTx>
 
 // ---------- intents ----------
-export const IntentKind = z.enum(['p2p', 'merchant', 'card_load', 'earn_deposit', 'market_buy', 'withdraw'])
+export const IntentKind = z.enum(['p2p', 'merchant', 'card_load', 'earn_deposit', 'market_buy', 'withdraw', 'topup'])
 export type IntentKind = z.infer<typeof IntentKind>
 
 export const IntentStatus = z.enum(['created', 'submitted', 'received', 'paid_out', 'failed', 'expired'])

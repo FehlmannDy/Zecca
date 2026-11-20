@@ -70,7 +70,8 @@ export const OnboardingPrepareRequest = z.object({
 // ---------- submit ----------
 export const TxSubmitRequest = z.object({ prepareId: Id, txBlob: z.string().regex(/^[0-9A-Fa-f]+$/) })
 export const TxSubmitResponse = z.object({
-  status: z.enum(['validated', 'failed']),
+  /** 'pending': sent, but no validated answer yet (network); the intent follows by events and the API settles it from the ledger. */
+  status: z.enum(['validated', 'failed', 'pending']),
   hash: TxHash,
   engineResult: z.string(),
   /** The intent this transaction belongs to, after the submit took effect. */

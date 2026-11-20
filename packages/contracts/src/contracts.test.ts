@@ -62,6 +62,13 @@ describe('schemas refuse what they must', () => {
   })
 })
 
+describe('additions requested by the API (C)', () => {
+  it("IntentKind includes 'topup' and a submit can answer 'pending'", () => {
+    expect(C.IntentKind.safeParse('topup').success).toBe(true)
+    expect(C.TxSubmitResponse.safeParse({ status: 'pending', hash: F.HASH.deposit, engineResult: 'terQUEUED' }).success).toBe(true)
+  })
+})
+
 describe('route table', () => {
   it('every route is under /v1 and unique', () => {
     const keys = Object.values(C.routes).map((r) => `${r.method} ${r.path}`)
