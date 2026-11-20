@@ -123,10 +123,11 @@ function ChargeScreen({ request, onRequest, onNew }: { request: PaymentRequest; 
   if (phase === 'paid') {
     return (
       <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[var(--in)] px-6 text-center motion-safe:animate-[z-fade-in_200ms_ease-out]" role="dialog" aria-modal="true" aria-label="Paid">
-        <div className="flex flex-col items-center" style={{ ['--in' as string]: '#ffffff', ['--line' as string]: 'rgb(255 255 255 / 28%)', color: '#ffffff' }}>
+        {/* Text in --paper on --in reads in both themes (white would not on the dark theme's light green). */}
+        <div className="flex flex-col items-center text-[var(--paper)]" style={{ ['--in' as string]: 'var(--paper)', ['--line' as string]: 'color-mix(in srgb, var(--paper) 30%, transparent)' }}>
           <ArchesProgress state="done" className="h-14" label="Payment complete" />
           <p className="mt-8 text-[56px] font-[760] leading-none tracking-[-0.04em]">Paid</p>
-          <Amount minor={request.amountMinor} size="hero" className="mt-4 !text-white" />
+          <Amount minor={request.amountMinor} size="hero" className="mt-4 !text-[var(--paper)]" />
           {request.reference && <p className="mt-3 text-[16px] opacity-85">{request.reference}</p>}
           <p className="mt-2 text-[15px] opacity-85">
             {new Date(request.paidAt ?? Date.now()).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
@@ -135,7 +136,7 @@ function ChargeScreen({ request, onRequest, onNew }: { request: PaymentRequest; 
             type="button"
             onClick={onNew}
             autoFocus
-            className="mt-10 inline-flex min-h-12 min-w-[220px] items-center justify-center rounded-[14px] bg-white px-6 text-[15px] font-[700] text-[#0c0c0d] hover:opacity-90"
+            className="mt-10 inline-flex min-h-12 min-w-[220px] items-center justify-center rounded-[14px] bg-[var(--paper)] px-6 text-[15px] font-[700] text-[var(--ink)] hover:opacity-90"
           >
             New charge
           </button>

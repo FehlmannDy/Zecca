@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Calculator, ChartColumn, UserRound } from 'lucide-react'
 import { useSession } from '@/lib/session'
+import { nextSpaceMode, type SpaceMode } from '@/lib/space-mode'
 import { useWide } from '@/lib/use-media'
 import { Dock, GlassRoot, Panel, type DockItem } from '@/components/zecca/glass'
 import { SignupGate } from '@/components/zecca/signup-gate'
@@ -20,10 +21,9 @@ export function MerchantSpace({ view }: { view: MerchantView }) {
   const session = useSession()
   const hydrated = useHydrated()
   const router = useRouter()
-  const [mode, setMode] = useState<'unknown' | 'signup' | 'space'>('unknown')
+  const [mode, setMode] = useState<SpaceMode>('unknown')
   useEffect(() => {
-    if (!hydrated) return
-    setMode((m) => (m === 'unknown' ? (session?.user ? 'space' : 'signup') : m))
+    setMode((m) => nextSpaceMode(m, hydrated, !!session?.user))
   }, [hydrated, session])
   // Signed out on a sub-page: sign up from /merchant.
   useEffect(() => {

@@ -224,7 +224,7 @@ function Notice({ title, line, href, label }: { title: string; line: string; hre
 function PaidView({ request, at, doneHref, doneLabel }: { request: PaymentRequest; at?: string; doneHref: string; doneLabel: string }) {
   return (
     <div className="flex flex-col items-center">
-      <span className="grid size-24 place-items-center rounded-full bg-[var(--in)] text-white motion-safe:animate-[z-fade-in_240ms_ease-out]" aria-hidden="true">
+      <span className="grid size-24 place-items-center rounded-full bg-[var(--in)] text-[var(--paper)] motion-safe:animate-[z-fade-in_240ms_ease-out]" aria-hidden="true">
         <Check className="size-12" strokeWidth={2.6} />
       </span>
       <h1 className="mt-6 text-[34px] font-[760] tracking-[-0.035em]">Paid</h1>
