@@ -13,7 +13,7 @@ async function signUp(page: Page, opts: { email: string; handle: string; name: s
   await expect(page.getByText('Pick your handle')).toBeVisible()
   await page.getByLabel(/handle/i).fill(opts.handle)
   await expect(page.getByText(`@${opts.handle} is yours`)).toBeVisible()
-  await page.getByLabel(/display name/i).fill(opts.name)
+  await page.getByLabel(/your name|display name/i).fill(opts.name)
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByText("One approval and you're in.")).toBeVisible()
   await page.getByRole('button', { name: 'Approve' }).click()
@@ -83,7 +83,7 @@ test('E2E-2 identity: mock mode lifts the tier', async ({ browser, request }) =>
 
   // $60 now goes to review and is sent.
   await startSend(ana, `carlaid${RUN}`, 'Carla Rossi', ['6', '0'])
-  await expect(ana.getByText('Send $60.00 to Carla Rossi')).toBeVisible({ timeout: 30_000 })
+  await expect(ana.getByText('Send $60.00 to Carla Rossi').first()).toBeVisible({ timeout: 30_000 })
   await ana.getByRole('button', { name: 'Approve' }).click()
-  await expect(ana.getByText(/Sent\. \$60\.00 to Carla/)).toBeVisible({ timeout: 60_000 })
+  await expect(ana.getByText(/Sent\. \$60\.00 to Carla/).first()).toBeVisible({ timeout: 60_000 })
 })
