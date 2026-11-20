@@ -227,6 +227,7 @@ describe('POST /v1/ramp/sign', () => {
       ['no session', (u) => u.searchParams.delete('externalTransactionId')],
       ['other user', (u) => u.searchParams.set('externalTransactionId', boSession.body.externalId)],
       ['currency', (u) => u.searchParams.set('currencyCode', 'btc')],
+      ['prototype key', (u) => u.searchParams.set('currencyCode', 'constructor')],
     ]
     for (const [why, edit] of bad) {
       const u = await sdkUrl(w, ana.token)

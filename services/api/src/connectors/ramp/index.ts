@@ -153,7 +153,7 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
     if (!s || s.userId !== u.id) return 'externalTransactionId is not a session of this user'
     if (q.get('walletAddress') !== s.walletAddress) return 'walletAddress is not our treasury'
     if (q.get('allowedIpAddress') !== s.ipHash) return 'allowedIpAddress was not issued for this session'
-    if (q.has('currencyCode') && !(q.get('currencyCode')! in DELIVERED)) return `currency ${q.get('currencyCode')}`
+    if (q.has('currencyCode') && !Object.hasOwn(DELIVERED, q.get('currencyCode')!)) return `currency ${q.get('currencyCode')}`
     return undefined
   }
 
@@ -220,7 +220,8 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
     if (inflight.has(tx.id) || inflight.has(hash)) return 'duplicate'
     inflight.add(tx.id).add(hash)
     try {
-      const currency = DELIVERED[tx.currency?.code ?? '']
+      const code = String(tx.currency?.code ?? '')
+      const currency = Object.hasOwn(DELIVERED, code) ? DELIVERED[code] : undefined
       if (!currency) return reject(tx, s, hash, `unexpected currency ${tx.currency?.code}`, source)
       let check: DeliveryCheck
       try {
