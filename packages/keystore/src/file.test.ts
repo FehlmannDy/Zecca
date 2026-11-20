@@ -1,4 +1,5 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, chmodSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -119,6 +120,75 @@ describe('file KeyStore', () => {
     expect(fresh.has({ user: 'rUser2' })).toBe(true)
     expect(fresh.getMeta('poolSequence')).toBe('42')
   })
+
+  const isRoot = process.getuid?.() === 0
+
+  it.skipIf(isRoot)('a write that fails on disk is not kept in memory: has() stays false and a retry writes for real', () => {
+    let n = 0
+    let breakDisk = false
+    // Runs inside the write, just before the file is saved: makes the save fail like EACCES/ENOSPC would.
+    const gen = () => {
+      if (breakDisk) chmodSync(path.dirname(file), 0o500)
+      return { publicKey: `PUB${++n}`, privateKey: `PRIV${n}` }
+    }
+    const ks = createFileKeyStore({ path: file, passphrase: PASS, generateElGamal: gen, scryptN: FAST })
+    breakDisk = true
+    try {
+      expect(() => ks.createUserElGamal('rUserA')).toThrow()
+    } finally {
+      chmodSync(path.dirname(file), 0o700)
+      breakDisk = false
+    }
+    expect(ks.has({ user: 'rUserA' })).toBe(false)
+    expect(() => ks.getElGamal({ user: 'rUserA' })).toThrow(/no ElGamal key/)
+    expect(createFileKeyStore({ path: file, passphrase: PASS, scryptN: FAST }).has({ user: 'rUserA' })).toBe(false)
+    expect(ks.createUserElGamal('rUserA')).toBe('PUB2')
+    expect(createFileKeyStore({ path: file, passphrase: PASS, scryptN: FAST }).getElGamal({ user: 'rUserA' })).toEqual({ publicKey: 'PUB2', privateKey: 'PRIV2' })
+  })
+
+  it.skipIf(isRoot)('keeps failing (never pretends) while the folder cannot be written, then works once it can', () => {
+    let n = 0
+    const gen = () => ({ publicKey: `PUB${++n}`, privateKey: `PRIV${n}` })
+    const ks = createFileKeyStore({ path: file, passphrase: PASS, generateElGamal: gen, scryptN: FAST })
+    chmodSync(path.dirname(file), 0o500)
+    try {
+      expect(() => ks.createUserElGamal('rUserA')).toThrow()
+      expect(() => ks.createUserElGamal('rUserA')).toThrow()
+      expect(() => ks.setMeta('k', 'v')).toThrow()
+      expect(ks.has({ user: 'rUserA' })).toBe(false)
+      expect(ks.getMeta('k')).toBeUndefined()
+    } finally {
+      chmodSync(path.dirname(file), 0o700)
+    }
+    const pub = ks.createUserElGamal('rUserA')
+    expect(createFileKeyStore({ path: file, passphrase: PASS, scryptN: FAST }).getElGamal({ user: 'rUserA' }).publicKey).toBe(pub)
+  })
+
+  it('two processes writing the same file at the same time lose no key', async () => {
+    createFileKeyStore({ path: file, passphrase: PASS, scryptN: FAST })
+    const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+    const tsx = path.join(repo, 'node_modules/tsx/dist/cli.mjs')
+    const writer = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures/concurrent-writer.ts')
+    const COUNT = 120
+    const run = (tag: string) =>
+      new Promise<{ code: number | null; err: string }>((resolve) => {
+        const p = spawn(process.execPath, [tsx, writer, file, PASS, tag, String(COUNT)], { stdio: ['ignore', 'ignore', 'pipe'] })
+        let err = ''
+        p.stderr.on('data', (d) => (err += d))
+        p.on('close', (code) => resolve({ code, err }))
+      })
+    const done = Promise.all([run('A'), run('B')])
+    const deadline = Date.now() + 20_000
+    while (!(existsSync(`${file}.ready.A`) && existsSync(`${file}.ready.B`)) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10))
+    writeFileSync(`${file}.go`, '')
+    const results = await done
+    for (const r of results) expect(r, r.err).toMatchObject({ code: 0 })
+    const users = createFileKeyStore({ path: file, passphrase: PASS, scryptN: FAST }).snapshot().elgamal.users
+    expect(Object.keys(users).length).toBe(2 * COUNT)
+    expect(users.rA0).toEqual({ publicKey: 'PA1', privateKey: 'KA1' })
+    expect(users[`rB${COUNT - 1}`]).toEqual({ publicKey: `PB${COUNT}`, privateKey: `KB${COUNT}` })
+    expect(readdirSync(path.dirname(file)).filter((f) => f.endsWith('.lock') || f.endsWith('.tmp'))).toEqual([])
+  }, 60_000)
 
   it('ignores a stale temp file left by a crashed write', () => {
     createFileKeyStore({ path: file, passphrase: PASS, scryptN: FAST }).setWallet('sponsor', secret)

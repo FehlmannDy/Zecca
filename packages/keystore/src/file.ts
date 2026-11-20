@@ -1,12 +1,14 @@
 // KeyStore persisted to one file, encrypted with AES-256-GCM under a key derived by scrypt from the passphrase.
 // File: JSON envelope { v:1, kdf:'scrypt', n, r, p, salt, iv, tag, data } (base64), mode 0600, written atomically.
-// Several processes may open the same file (API and pool worker): a store reloads when the file changed on disk
-// before every read and write, so nobody overwrites keys written by another. Errors never contain a secret.
+// Several processes and threads may open the same file (API and pool worker): every write is a read-modify-write
+// under a lock file (<file>.lock), so nobody overwrites keys written by another; reads reload when the file changed.
+// A write that fails on disk is dropped from memory too. Errors never contain a secret.
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
 import { chmodSync, closeSync, fchmodSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ElGamalKeyPair, KeyStore } from '@zecca/contracts'
+import { threadId } from 'node:worker_threads'
 import { createMemoryKeyStore, type KeyStoreState } from './memory'
 
 export const MIN_PASSPHRASE_LENGTH = 16
@@ -54,6 +56,81 @@ export function writeFileAtomic(target: string, contents: string, hooks: { befor
   }
 }
 
+const LOCK_STALE_MS = 10_000
+const LOCK_TIMEOUT_MS = 15_000
+const nap = new Int32Array(new SharedArrayBuffer(4))
+const sleepSync = (ms: number) => Atomics.wait(nap, 0, 0, ms)
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/**
+ * Runs fn while holding `lockPath` (created with O_EXCL; holds "pid:threadId"), shared by processes and threads.
+ * A lock is stale when its holder process is gone, when it was left by this very thread (a thread never waits on
+ * itself: the store's calls are synchronous), or when it is older than LOCK_STALE_MS (a holder keeps it for ms).
+ */
+export function withFileLock<T>(lockPath: string, fn: () => T): T {
+  const deadline = Date.now() + LOCK_TIMEOUT_MS
+  let delay = 1
+  for (;;) {
+    let fd: number
+    try {
+      fd = openSync(lockPath, 'wx', 0o600)
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+      const seen = readLock(lockPath)
+      if (seen && isStale(seen)) {
+        // Remove only the lock we judged stale, not one another waiter took meanwhile.
+        const again = readLock(lockPath)
+        if (again && again.text === seen.text && again.mtimeMs === seen.mtimeMs) rmSync(lockPath, { force: true })
+        continue
+      }
+      if (Date.now() > deadline) throw new Error(`key store: timed out waiting for the lock ${lockPath}`)
+      sleepSync(delay)
+      delay = Math.min(delay * 2, 25)
+      continue
+    }
+    try {
+      writeFileSync(fd, `${process.pid}:${threadId}`)
+    } finally {
+      closeSync(fd)
+    }
+    break
+  }
+  try {
+    return fn()
+  } finally {
+    try {
+      rmSync(lockPath, { force: true })
+    } catch {
+      // Keep fn's own error; a lock we could not remove is ours, so our next call treats it as stale.
+    }
+  }
+}
+
+const readLock = (lockPath: string): { text: string; mtimeMs: number } | null => {
+  try {
+    return { text: readFileSync(lockPath, 'utf8'), mtimeMs: statSync(lockPath).mtimeMs }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw e
+  }
+}
+
+const isStale = ({ text, mtimeMs }: { text: string; mtimeMs: number }) => {
+  if (Date.now() - mtimeMs > LOCK_STALE_MS) return true
+  const m = /^(\d+):(\d+)$/.exec(text)
+  if (!m) return false // just created, holder still writing its pid
+  const pid = Number(m[1])
+  if (pid === process.pid && Number(m[2]) === threadId) return true
+  return !alive(pid)
+}
+
 const isEnvelope = (x: unknown): x is Envelope => {
   const e = x as Envelope
   return (
@@ -67,6 +144,7 @@ export function createFileKeyStore(opts: FileKeyStoreOptions): KeyStore & { snap
   if (typeof opts.passphrase !== 'string' || opts.passphrase.length < MIN_PASSPHRASE_LENGTH)
     throw new Error(`key store: the passphrase (KEYSTORE_PASSPHRASE) must be at least ${MIN_PASSPHRASE_LENGTH} characters`)
   const file = path.resolve(opts.path)
+  const lockPath = `${file}.lock`
   let kdf: { salt: Buffer; n: number; r: number; p: number; key: Buffer } | null = null
   let stamp: string | null = null
 
@@ -94,7 +172,7 @@ export function createFileKeyStore(opts: FileKeyStoreOptions): KeyStore & { snap
     const data = Buffer.concat([c.update(JSON.stringify(state), 'utf8'), c.final()])
     const env: Envelope = { v: 1, kdf: 'scrypt', n, r, p, salt: salt.toString('base64'), iv: iv.toString('base64'), tag: c.getAuthTag().toString('base64'), data: data.toString('base64') }
     writeFileAtomic(file, JSON.stringify(env))
-    stamp = currentStamp()
+    stamp = currentStamp() // under the lock: nobody else can have renamed a newer file in between
   }
 
   const read = (): { state: KeyStoreState; stamp: string } => {
@@ -128,38 +206,57 @@ export function createFileKeyStore(opts: FileKeyStoreOptions): KeyStore & { snap
   const make = (initial?: KeyStoreState) => createMemoryKeyStore({ initial, generateElGamal: opts.generateElGamal, onChange: persist })
 
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
-  let inner: ReturnType<typeof make>
-  if (currentStamp() === null) {
-    inner = make()
-    persist(inner.snapshot())
-  } else {
+  let inner: ReturnType<typeof make> | undefined
+  if (currentStamp() === null)
+    withFileLock(lockPath, () => {
+      if (currentStamp() !== null) return // another process created it first
+      inner = make()
+      persist(inner.snapshot())
+    })
+  if (!inner) {
     const r = read()
     inner = make(r.state)
     stamp = r.stamp
     if ((statSync(file).mode & 0o777) !== 0o600) chmodSync(file, 0o600)
   }
+  let current = inner
 
   /** Reload when another process rewrote the file since we last read or wrote it. */
   const fresh = () => {
     const s = currentStamp()
     if (s !== null && s !== stamp) {
       const r = read()
-      inner = make(r.state)
+      current = make(r.state)
       stamp = r.stamp
     }
-    return inner
+    return current
   }
+
+  /** Read-modify-write under the lock, starting from what is on disk now; if the save fails, memory goes back to disk. */
+  const write = <T>(fn: (ks: typeof current) => T): T =>
+    withFileLock(lockPath, () => {
+      const base = currentStamp() === null ? { state: current.snapshot(), stamp: null } : read()
+      current = make(base.state)
+      stamp = base.stamp
+      try {
+        return fn(current)
+      } catch (e) {
+        current = make(base.state)
+        stamp = base.stamp
+        throw e
+      }
+    })
 
   return {
     getWallet: (role) => fresh().getWallet(role),
     hasWallet: (role) => fresh().hasWallet(role),
-    setWallet: (role, secret) => fresh().setWallet(role, secret),
+    setWallet: (role, secret) => write((ks) => ks.setWallet(role, secret)),
     getElGamal: (owner) => fresh().getElGamal(owner),
-    setElGamal: (owner, keyPair) => fresh().setElGamal(owner, keyPair),
-    createUserElGamal: (address) => fresh().createUserElGamal(address),
+    setElGamal: (owner, keyPair) => write((ks) => ks.setElGamal(owner, keyPair)),
+    createUserElGamal: (address) => write((ks) => ks.createUserElGamal(address)),
     has: (owner) => fresh().has(owner),
     getMeta: (key) => fresh().getMeta(key),
-    setMeta: (key, value) => fresh().setMeta(key, value),
+    setMeta: (key, value) => write((ks) => ks.setMeta(key, value)),
     snapshot: () => fresh().snapshot(),
   }
 }
