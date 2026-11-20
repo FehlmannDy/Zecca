@@ -20,7 +20,7 @@ class PayLinkPolicyTest {
     // ---- accepted links ----
 
     @Test fun `accepts https pay links on the allowed hosts`() {
-        ok("https://crystal-conducted-diagnosis-real.trycloudflare.com/pay/demo")
+        ok("https://abc-def-ghi.trycloudflare.com/pay/demo")
         ok("https://localhost/pay/pr_coffee")
         ok("https://app.zecca.example/pay/pr_1")
         ok("https://app.zecca.example/pay/pr_1?ref=table-4")
