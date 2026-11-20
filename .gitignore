@@ -1,0 +1,9 @@
+node_modules/
+.next
+.env*
+!.env.example
+*.db
+local.properties
+data/
+next-env.d.ts
+secrets/
