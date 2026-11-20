@@ -15,17 +15,19 @@ import { Button, EmptyState, HashChip, Skeleton } from '@/components/zecca/bits'
 import { Badge, Panel } from '@/components/zecca/glass'
 import { AddToEarnSheet } from './add-sheet'
 import { WithdrawSheet } from './withdraw-sheet'
-import { chartSeries, EXPLORERS, feeLine, OPENING_MS, pollEvery, rateText, statusLine, timeText, xrpText, type EarnPositionView } from './earn-model'
+import { chartSeries, EXPLORERS, feeLine, OPENING_MS, pollEvery, rateText, statusLine, timeText, xrpText } from './earn-model'
+import { useEarnApi } from './use-earn-api'
 
 const HONEST = ['Earnings are paid in XRP and their dollar value moves with its price.', 'Withdrawals take a few hours.']
 
 export function EarnScreen() {
-  const { api, config } = useApp()
+  const { config } = useApp()
+  const earn = useEarnApi()
   const user = useSession()?.user
   const wide = useWide()
   const on = !!config?.features.earn
   const verified = user?.tier === 1
-  const pos = useResource(() => api.call('earnPosition') as Promise<EarnPositionView>, [api], on && verified)
+  const pos = useResource(() => earn.position(), [earn], on && verified)
   const [adding, setAdding] = useState(false)
   const [withdrawing, setWithdrawing] = useState(false)
 
@@ -91,7 +93,7 @@ export function EarnScreen() {
 
   const series = chartSeries(p.history)
   const inFlight = p.status === 'funding' || p.status === 'opening'
-  const empty = p.status === 'none' && p.valueDrops === 0
+  const empty = p.status === 'none' && p.valueDrops === 0 && !p.pendingWithdrawal
   const canWithdraw = p.valueDrops > 0 && !p.pendingWithdrawal && !inFlight
   const mock = p.mode === 'mock'
 
@@ -140,13 +142,15 @@ export function EarnScreen() {
         headline
       )}
 
-      {inFlight && p.inFlight && (
+      {inFlight && (
         <Panel className="flex flex-col items-center gap-3 text-center" aria-live="polite">
           <ArchesProgress state="running" expectedMs={p.status === 'opening' ? OPENING_MS : 20_000} className="h-11" label={statusLine(p) ?? 'In progress'} />
           <p className="text-[15px] font-[650]">{statusLine(p)}</p>
-          <p className="text-[14px] text-muted">
-            {formatUsd(p.inFlight.amountMinor)} as {xrpText(p.inFlight.xrpDrops)} XRP
-          </p>
+          {p.inFlight && (
+            <p className="text-[14px] text-muted">
+              {formatUsd(p.inFlight.amountMinor)} as {xrpText(p.inFlight.xrpDrops)} XRP
+            </p>
+          )}
         </Panel>
       )}
 

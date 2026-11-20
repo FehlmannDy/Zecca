@@ -4,9 +4,11 @@ import { formatUsd } from '@zecca/contracts'
 import { useApp } from '@/lib/app'
 import { ApproveSheet } from '@/components/zecca/approve-sheet'
 import { feeLine, timeText, xrpText, type EarnPositionView } from './earn-model'
+import { useEarnApi } from './use-earn-api'
 
 export function WithdrawSheet({ open, onClose, position, onRequested }: { open: boolean; onClose: () => void; position: EarnPositionView; onRequested: () => void }) {
-  const { api, config } = useApp()
+  const { config } = useApp()
+  const earn = useEarnApi()
   return (
     <ApproveSheet
       open={open}
@@ -22,7 +24,7 @@ export function WithdrawSheet({ open, onClose, position, onRequested }: { open: 
         </div>
       }
       run={async () => {
-        const r = await api.call('earnWithdraw', { body: { amountDrops: position.valueDrops } })
+        const r = await earn.withdraw(position.valueDrops)
         return {
           title: 'Requested, available in a few hours',
           line: `Available after ${timeText(r.claimableAt)}.`,

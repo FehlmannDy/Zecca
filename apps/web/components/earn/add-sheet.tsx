@@ -1,7 +1,7 @@
 'use client'
 // "Add to Earn": the amount, then the quote and the fees before the one approval (UI.md §5.10, SPEC §4.7, §4.13).
 import { useEffect, useState } from 'react'
-import { formatUsd, spokenUsd, type Intent, type PreparedTx } from '@zecca/contracts'
+import { formatUsd, spokenUsd } from '@zecca/contracts'
 import { useApp } from '@/lib/app'
 import { isApiError, type ApiErrorDetails } from '@/lib/api'
 import { signAndSubmit } from '@/lib/wallet/sign-and-submit'
@@ -11,14 +11,17 @@ import { ApproveSheet } from '@/components/zecca/approve-sheet'
 import { Button } from '@/components/zecca/bits'
 import { LimitSheet } from '@/components/zecca/limit-sheet'
 import { Sheet } from '@/components/zecca/sheet'
-import { feeLine, percentText, rateText, xrpText, type EarnQuoteView } from './earn-model'
+import { feeLine, percentText, rateText, xrpText } from './earn-model'
+import type { EarnDepositView } from './earn-api'
+import { useEarnApi } from './use-earn-api'
 
 const CHIPS = [1000, 2500, 5000]
 
-type Prepared = { intent: Intent; prepared: PreparedTx; quote: EarnQuoteView }
+type Prepared = EarnDepositView
 
 export function AddToEarnSheet({ open, onClose, onAdded }: { open: boolean; onClose: () => void; onAdded: () => void }) {
   const { api, config, getSigner } = useApp()
+  const earn = useEarnApi()
   const [text, setText] = useState('')
   const [minor, setMinor] = useState<number | null>(null)
   const [error, setError] = useState<string | undefined>()
@@ -39,7 +42,7 @@ export function AddToEarnSheet({ open, onClose, onAdded }: { open: boolean; onCl
     setBusy(true)
     setError(undefined)
     try {
-      setReady((await api.call('earnDeposit', { body: { amountMinor: minor } })) as Prepared)
+      setReady(await earn.deposit(minor))
     } catch (e) {
       if (isApiError(e) && e.code === 'limit_reached') setLimit(e.details ?? {})
       else setError(e instanceof Error && e.message ? e.message : "That didn't work. Try again.")
