@@ -88,6 +88,11 @@ export function ensureSchema(core: Core): void {
       verified_at TEXT
     );
     CREATE INDEX IF NOT EXISTS identity_sessions_user ON identity_sessions (user_id, created_at);
+    -- Every approval a session ever held: a submit that lands after a newer one was prepared still finds its session.
+    CREATE TABLE IF NOT EXISTS identity_prepares (
+      prepare_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL
+    );
   `)
   ready.add(core.db)
 }
@@ -109,7 +114,9 @@ export function sessionById(core: Core, id: string): IdentitySessionRow | undefi
 
 export function sessionByPrepareId(core: Core, prepareId: string): IdentitySessionRow | undefined {
   ensureSchema(core)
-  const r = core.db.prepare('SELECT * FROM identity_sessions WHERE prepare_id = ?').get(prepareId) as Raw | undefined
+  const r = core.db
+    .prepare('SELECT * FROM identity_sessions WHERE prepare_id = ? OR id = (SELECT session_id FROM identity_prepares WHERE prepare_id = ?)')
+    .get(prepareId, prepareId) as Raw | undefined
   return r && fromRaw(r)
 }
 
@@ -129,7 +136,16 @@ export function setCredentialHash(core: Core, id: string, hash: string): void {
 }
 
 export function setPrepareId(core: Core, id: string, prepareId: string): void {
-  core.db.prepare('UPDATE identity_sessions SET prepare_id = ? WHERE id = ?').run(prepareId, id)
+  core.db.transaction(() => {
+    core.db.prepare('INSERT OR IGNORE INTO identity_prepares (prepare_id, session_id) VALUES (?, ?)').run(prepareId, id)
+    core.db.prepare('UPDATE identity_sessions SET prepare_id = ? WHERE id = ?').run(prepareId, id)
+  })()
+}
+
+/** The submit outcome of a PreparedTx (shared prepared_txs table, read only): unset until a submit answered. */
+export function preparedOutcome(core: Core, prepareId: string): 'unknown' | 'final' | undefined {
+  const r = core.db.prepare('SELECT outcome FROM prepared_txs WHERE id = ?').get(prepareId) as { outcome: 'unknown' | 'final' | null } | undefined
+  return r?.outcome ?? undefined
 }
 
 export function markAccepted(core: Core, id: string, hash: string): void {

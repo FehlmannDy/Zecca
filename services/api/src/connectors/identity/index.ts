@@ -11,7 +11,7 @@ import type { Env } from '../../config'
 import { Err } from '../../errors'
 import { mount } from '../../http'
 import { emitBalance } from '../../books'
-import { preparedById, storePrepared } from '../../prepared/store'
+import { preparedById, storePrepared, type PreparedRow } from '../../prepared/store'
 import { users, toUser, type UserRow } from '../../users'
 import { isOver18 } from './lib'
 import { createEudiVerifier, createMockVerifier, type IdentityVerifier, type VerifierStatus } from './verifier'
@@ -21,6 +21,7 @@ import {
   insertSession,
   markAccepted,
   markVerified,
+  preparedOutcome,
   sessionById,
   sessionByPrepareId,
   setCredentialHash,
@@ -45,15 +46,17 @@ const COPY = {
   alreadyVerified: 'Your identity is already verified.',
   notSetUp: 'Identity checks are not set up yet.',
   credentialFailed: "We couldn't record your verification. Try again in a moment.",
+  confirming: 'Your approval is being confirmed. This takes a few seconds, sometimes a few minutes.',
   startAgain: 'Start the identity check again.',
 } as const
 
 /**
- * IDENTITY_MODE: 'eudi' (or 'live') = the public EU reference verifier (https://verifier-backend.eudiw.dev, intended use
- * TEST-01); anything else = the fixed test identity.
+ * IDENTITY_MODE: unset or 'mock' = the fixed test identity; 'eudi' (or 'live') = the public EU reference verifier
+ * (https://verifier-backend.eudiw.dev, intended use TEST-01). Any other value throws: a typo must not mean the test identity.
  */
 export function verifierFromEnv(env: Env, o: { now: () => number; fetch?: typeof fetch; log?: Logger }): IdentityVerifier {
   const mode = (env.IDENTITY_MODE ?? '').trim().toLowerCase()
+  if (mode === '' || mode === 'mock') return createMockVerifier({ now: o.now })
   if (mode === 'eudi' || mode === 'live') {
     return createEudiVerifier({
       fetch: o.fetch,
@@ -62,7 +65,15 @@ export function verifierFromEnv(env: Env, o: { now: () => number; fetch?: typeof
       log: o.log,
     })
   }
-  return createMockVerifier({ now: o.now })
+  throw new Error(`IDENTITY_MODE must be mock or eudi (or live), not "${env.IDENTITY_MODE}".`)
+}
+
+/** tecDUPLICATE on a CredentialAccept: the credential is already accepted (XLS-70), e.g. by an earlier approval of this check. */
+const ACCEPTED = new Set(['tesSUCCESS', 'tecDUPLICATE'])
+
+/** A used approval is done with only once its submit has a final answer that is not an acceptance; until then it is being confirmed. */
+function spent(core: Core, p: PreparedRow): boolean {
+  return preparedOutcome(core, p.id) === 'final' && !ACCEPTED.has(p.engineResult ?? '')
 }
 
 function rejectionCopy(st: Extract<VerifierStatus, { state: 'rejected' | 'error' }>): string {
@@ -76,7 +87,7 @@ const identityOf = (r: IdentitySessionRow): VerifiedIdentity => ({ givenName: r.
  * Tier 1 for the session's user, once: tier, display name (only when it was empty or the handle), session accepted,
  * a balance event so open screens refresh their limits. Calling it again changes nothing.
  */
-export function liftTier(core: Core, row: IdentitySessionRow, acceptHash: string): UserRow {
+export function liftTier(core: Core, row: Pick<IdentitySessionRow, 'userId'> & Partial<IdentitySessionRow>, acceptHash: string): UserRow {
   const before = users.byId(core, row.userId)
   if (!before) throw Err.notFound()
   const first = before.tier !== 1
@@ -89,7 +100,7 @@ export function liftTier(core: Core, row: IdentitySessionRow, acceptHash: string
         core.db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(verifiedName, before.id)
       }
     }
-    markAccepted(core, row.id, acceptHash)
+    if (row.id) markAccepted(core, row.id, acceptHash)
   })()
   const after = users.byId(core, before.id)!
   if (first) {
@@ -101,11 +112,18 @@ export function liftTier(core: Core, row: IdentitySessionRow, acceptHash: string
 
 export function mountIdentity(app: Hono, core: Core, o: { verifier?: IdentityVerifier; fetch?: typeof fetch } = {}): void {
   ensureSchema(core)
-  const verifier = o.verifier ?? verifierFromEnv(core.env, { now: () => core.now(), fetch: o.fetch, log: core.log })
-  const inflight = new Map<string, Promise<PreparedTx>>()
+  // With the flag off nothing is ever asked, so a bad IDENTITY_MODE only stops the start when the feature is on.
+  const verifier =
+    o.verifier ??
+    (core.settings.features.identity ? verifierFromEnv(core.env, { now: () => core.now(), fetch: o.fetch, log: core.log }) : createMockVerifier({ now: () => core.now() }))
+  const inflight = new Map<string, Promise<PreparedTx | undefined>>()
 
-  /** CredentialCreate (once per session), then a fresh or still valid CredentialAccept to approve. Single flight per session. */
-  async function approvalFor(sessionId: string, u: UserRow): Promise<PreparedTx> {
+  /**
+   * CredentialCreate (once per session), then a still valid or a fresh CredentialAccept to approve. Single flight per session.
+   * Undefined while the approval already sent is being confirmed: a second one could not apply (same sequence, or already
+   * accepted), so a new one is prepared only once the first has finally failed.
+   */
+  async function approvalFor(sessionId: string, u: UserRow): Promise<PreparedTx | undefined> {
     const kyc = core.keystore.getWallet('kycIssuer').address
     const row = sessionById(core, sessionId)!
     if (!row.credentialHash) {
@@ -117,11 +135,10 @@ export function mountIdentity(app: Hono, core: Core, o: { verifier?: IdentityVer
         throw Err.ledger(COPY.credentialFailed)
       }
     }
-    if (row.prepareId) {
-      const p = preparedById(core, row.prepareId)
-      const live = p && !p.usedAt && Date.parse(p.expiresAt) > core.now() && (p.lastLedgerSequence === undefined || (await core.ledger.ledgerIndex()) <= p.lastLedgerSequence)
-      if (p && live) return { prepareId: p.id, kind: p.kind, tx: p.tx as PreparedTx['tx'], expiresAt: p.expiresAt }
-    }
+    const p = row.prepareId ? preparedById(core, row.prepareId) : undefined
+    if (p?.usedAt && !spent(core, p)) return undefined
+    const live = p && !p.usedAt && Date.parse(p.expiresAt) > core.now() && (p.lastLedgerSequence === undefined || (await core.ledger.ledgerIndex()) <= p.lastLedgerSequence)
+    if (p && live) return { prepareId: p.id, kind: p.kind, tx: p.tx as PreparedTx['tx'], expiresAt: p.expiresAt }
     const tx = await core.ledger.prepareSponsored(
       { TransactionType: 'CredentialAccept', Account: u.address, Issuer: kyc, CredentialType: CREDENTIAL_TYPE },
       { reserve: true, publicKey: u.publicKey },
@@ -148,7 +165,8 @@ export function mountIdentity(app: Hono, core: Core, o: { verifier?: IdentityVer
       p = approvalFor(row.id, u).finally(() => inflight.delete(row.id))
       inflight.set(row.id, p)
     }
-    return { status: 'verified' as const, identity, prepared: await p }
+    const prepared = await p
+    return prepared ? { status: 'verified' as const, identity, prepared } : { status: 'verified' as const, identity, message: COPY.confirming }
   }
 
   mount(app, core, 'identitySessionCreate', async ({ user }) => {
@@ -198,9 +216,14 @@ export function registerIdentity(core: Core): void {
       if (!row || !u || row.userId !== u.id || row.status !== 'verified') throw Err.policy(COPY.startAgain)
     },
     after(core, p, r) {
-      if (!r.validated) return {}
-      const row = sessionByPrepareId(core, p.id)!
-      return { user: toUser(liftTier(core, row, r.hash)) }
+      // finish() passes a validated tec as not validated: tecDUPLICATE (already accepted) still means the check stands.
+      if (!r.validated && r.engineResult !== 'tecDUPLICATE') return {}
+      const row = sessionByPrepareId(core, p.id)
+      if (row) return { user: toUser(liftTier(core, row, r.hash)) }
+      // Not expected (every approval is kept with its session), but the credential is accepted on the ledger: lift the account.
+      core.log.error(`[identity] approval ${p.id} accepted without a session; lifting the account's tier`)
+      const u = users.byAddress(core, p.address)
+      return u ? { user: toUser(liftTier(core, { userId: u.id }, r.hash)) } : {}
     },
   })
 }

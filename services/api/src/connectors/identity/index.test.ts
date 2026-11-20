@@ -4,7 +4,10 @@ import xrpl from 'xrpl'
 import { IdentitySession, IdentitySessionStatus, type KeyStore, type Ledger, type PoolWorker, type UnsignedTx, type WalletRole } from '@zecca/contracts'
 import { createMockEnvironment, type MockLedger } from '@zecca/ledger-mock'
 import { createMemoryPoolStore, createPoolWorker } from '@zecca/pool-worker'
+import type { FakeLedger } from '../../testing/fakes'
 import { makeHarness, type Harness } from '../../testing/harness'
+import { preparedById } from '../../prepared/store'
+import { settleUnknownSubmits } from '../../prepared/submit'
 import { CREDENTIAL_TYPE, liftTier, mountIdentity, registerIdentity, SESSION_TTL_MS, verifierFromEnv } from './index'
 import { sessionById } from './store'
 import type { IdentityVerifier, VerifierStatus } from './verifier'
@@ -88,6 +91,15 @@ describe('identity: feature flag', () => {
     expect(verifierFromEnv({ IDENTITY_MODE: 'mock' }, { now }).mode).toBe('mock')
     expect(verifierFromEnv({ IDENTITY_MODE: 'eudi' }, { now }).mode).toBe('live')
     expect(verifierFromEnv({ IDENTITY_MODE: 'live' }, { now }).mode).toBe('live')
+  })
+
+  it('an unknown IDENTITY_MODE stops the start with the flag on; it never quietly means the test identity', () => {
+    const now = () => 0
+    for (const v of ['eudiw', 'real', 'EU']) expect(() => verifierFromEnv({ IDENTITY_MODE: v }, { now })).toThrow(/IDENTITY_MODE.*mock.*eudi/)
+    const on = makeHarness({ env: { FEATURE_IDENTITY: '1', IDENTITY_MODE: 'real' } })
+    expect(() => mountIdentity(on.app, on.app.core)).toThrow(/IDENTITY_MODE/)
+    const off = makeHarness({ env: { IDENTITY_MODE: 'real' } })
+    expect(() => mountIdentity(off.app, off.app.core)).not.toThrow()
   })
 })
 
@@ -312,6 +324,115 @@ describe('identity: live verifier outcomes (fake verifier)', () => {
     expect(r.status).toBe('error')
     expect(r.message).toMatch(/not set up/i)
     expect(spy.calls).toHaveLength(0)
+  })
+})
+
+describe('identity: the approval while it is being confirmed', () => {
+  /** A verified session and its approval, with the ledger's answer to the next submit held until `release()`. */
+  async function held() {
+    const w = world<FakeLedger>()
+    const ana = await w.h.signUp('ana')
+    const id = (await w.start(ana.token)).body.id
+    w.h.clock.advance(3_000)
+    const prepared = (await w.status(ana.token, id)).body.prepared
+    const orig = w.h.ledger.submitUserSigned.bind(w.h.ledger)
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const inSubmit = new Promise<void>((r) => (entered = r))
+    w.h.ledger.submitUserSigned = async (blob) => {
+      entered()
+      await gate
+      w.h.ledger.submitUserSigned = orig
+      return orig(blob)
+    }
+    return { ...w, ana, id, prepared, release, inSubmit }
+  }
+
+  it('a poll during the submit prepares no second approval; the submit then lifts the tier', async () => {
+    const { h, ana, id, prepared, release, inSubmit, status } = await held()
+    const sub = h.submit(ana, prepared)
+    await inSubmit
+    const during = await status(ana.token, id)
+    expect(during.status).toBe(200)
+    expect(during.body).toMatchObject({ status: 'verified', identity: { givenName: 'Ana' }, message: expect.stringMatching(/confirm/i) })
+    expect(during.body.prepared).toBeUndefined()
+    expect(sessionById(h.app.core, id)?.prepareId).toBe(prepared.prepareId)
+    release()
+    const r = await sub
+    expect(r.status).toBe(200)
+    expect(r.body).toMatchObject({ status: 'validated', user: { tier: 1 } })
+    expect(sessionById(h.app.core, id)?.status).toBe('accepted')
+  })
+
+  it('an unconfirmed submit stays "confirming" until the jobs settle it; once applied, the tier lifts', async () => {
+    const { h, start, status } = world<FakeLedger>()
+    const ana = await h.signUp('ana')
+    const id = (await start(ana.token)).body.id
+    h.clock.advance(3_000)
+    const prepared = (await status(ana.token, id)).body.prepared
+    h.ledger.loseNext({ applied: true })
+    const sub = await h.submit(ana, prepared)
+    expect(sub.status).toBe(502)
+    const waiting = (await status(ana.token, id)).body
+    expect(waiting.prepared).toBeUndefined()
+    expect(waiting.message).toMatch(/confirm/i)
+    expect(await settleUnknownSubmits(h.app.core)).toBe(1)
+    expect((await h.json('GET', '/v1/me', { token: ana.token })).body.tier).toBe(1)
+    expect(sessionById(h.app.core, id)?.status).toBe('accepted')
+  })
+
+  it('once the first approval has finally failed, the next poll prepares a fresh one, and that one lifts the tier', async () => {
+    const { h, start, status } = world<FakeLedger>()
+    const ana = await h.signUp('ana')
+    const id = (await start(ana.token)).body.id
+    h.clock.advance(3_000)
+    const first = (await status(ana.token, id)).body.prepared
+    // Lost, never applied: unconfirmed until its LastLedgerSequence has passed.
+    h.ledger.loseNext({ applied: false })
+    expect((await h.submit(ana, first)).status).toBe(502)
+    expect((await status(ana.token, id)).body.prepared).toBeUndefined()
+    h.ledger.advance(200)
+    expect(await settleUnknownSubmits(h.app.core)).toBe(1)
+    const second = (await status(ana.token, id)).body.prepared
+    expect(second.kind).toBe('credential_accept')
+    expect(second.prepareId).not.toBe(first.prepareId)
+    // A refused one (final at once) is replaced the same way.
+    h.ledger.failNext('tefPAST_SEQ')
+    expect((await h.submit(ana, second)).body.status).toBe('failed')
+    const third = (await status(ana.token, id)).body.prepared
+    expect(third.prepareId).not.toBe(second.prepareId)
+    const ok = await h.submit(ana, third)
+    expect(ok.body).toMatchObject({ status: 'validated', user: { tier: 1 } })
+  })
+
+  it('the session is found by any approval it ever held', async () => {
+    const { h, start, status } = world<FakeLedger>()
+    const ana = await h.signUp('ana', { displayName: 'ana' })
+    const id = (await start(ana.token)).body.id
+    h.clock.advance(3_000)
+    const first = (await status(ana.token, id)).body.prepared
+    h.clock.advance(10 * 60_000) // the first approval expires unused; the next poll prepares another
+    const second = (await status(ana.token, id)).body.prepared
+    expect(second.prepareId).not.toBe(first.prepareId)
+    const handler = h.app.core.submitHandlers.get('credential_accept')!
+    const out = await handler.after(h.app.core, preparedById(h.app.core, first.prepareId)!, { validated: true, engineResult: 'tesSUCCESS', hash: 'B'.repeat(64) })
+    expect(out.user).toMatchObject({ tier: 1, displayName: 'Ana Ferri' })
+    expect(sessionById(h.app.core, id)?.status).toBe('accepted')
+  })
+
+  it('a credential the ledger says is already accepted (tecDUPLICATE) counts: the tier lifts', async () => {
+    const { h, start, status } = world<FakeLedger>()
+    const ana = await h.signUp('ana')
+    const id = (await start(ana.token)).body.id
+    h.clock.advance(3_000)
+    const prepared = (await status(ana.token, id)).body.prepared
+    h.ledger.failNext('tecDUPLICATE')
+    const sub = await h.submit(ana, prepared)
+    expect(sub.status).toBe(200)
+    expect(sub.body).toMatchObject({ engineResult: 'tecDUPLICATE', user: { tier: 1 } })
+    expect((await h.json('GET', '/v1/me', { token: ana.token })).body.tier).toBe(1)
+    expect(sessionById(h.app.core, id)?.status).toBe('accepted')
   })
 })
 
