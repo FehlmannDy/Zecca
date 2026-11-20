@@ -102,6 +102,21 @@ export const ENV_GROUPS: EnvGroup[] = [
     ],
   },
   {
+    title: 'Phase 2 connectors (only read when their feature is on)',
+    vars: [
+      { name: 'LITHIC_ASA_SECRET', comment: 'Card: test-only override of the Lithic ASA signing secret; leave empty (fetched from Lithic)', optional: true },
+      { name: 'CARD_SETTLEMENT_ADDRESS', comment: 'Card: where approved card spend settles on Devnet; unset = the key store cardSettlement wallet', optional: true },
+      { name: 'CARD_DEV_TIER1', comment: 'Card dev server only: treat test users as verified', optional: true },
+      { name: 'EARN_MODE', comment: 'Earn: live (Testnet + Coston2) or mock (in-memory, labelled Test position)', optional: true },
+      { name: 'EARN_PRICE', comment: 'Earn: fixed XRP price in cents for tests; unset = live feed with fixture fallback', optional: true },
+      { name: 'EARN_JOBS', comment: 'Earn: 0 turns off the background deposit/withdrawal jobs (tests)', optional: true },
+      { name: 'EARN_MOCK_EXECUTE_MS', comment: 'Earn mock: delay before the mock vault position appears, in ms', optional: true },
+      { name: 'MARKET_PRICE_SOURCE', comment: 'Market: live (public metals feeds) or fixture', optional: true },
+      { name: 'MARKET_ORACLE', comment: 'Market: 1 publishes prices on Devnet with OracleSet and reads them back', optional: true },
+      { name: 'IDENTITY_EXTRA_CA_B64', comment: 'Identity: an extra public issuer CA (PEM, base64), e.g. for a Paradym test PID', optional: true },
+    ],
+  },
+  {
     title: 'Feature flags (1 = on); each stays off until its end-to-end test is green',
     vars: [
       { name: 'FEATURE_RAMP', comment: 'Top-up with MoonPay', default: '0' },
