@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CardAuthorization } from '@zecca/contracts'
-import { authLine, authStatusLabel, cardFormErrors, formatCardNumberInput, formatExpiry, formatPan, parseExpiry, tiltFrom, upsertAuthorization } from './card-logic'
+import { authLine, authStatusLabel, cardFormErrors, formatCardNumberInput, formatExpiry, formatPan, latestOnly, parseExpiry, tiltFrom, upsertAuthorization } from './card-logic'
 
 const a = (id: string, status: CardAuthorization['status'], o: Partial<CardAuthorization> = {}): CardAuthorization => ({
   id,
@@ -67,5 +67,17 @@ describe('tilt', () => {
     expect(tiltFrom(0.5, 0.5)).toEqual({ rx: 0, ry: 0, lx: 50, ly: 50 })
     expect(tiltFrom(1, 0)).toEqual({ rx: 6, ry: 6, lx: 100, ly: 0 })
     expect(tiltFrom(-3, 7)).toEqual({ rx: -6, ry: -6, lx: 0, ly: 100 })
+  })
+})
+
+describe('latestOnly (card details: an answer that arrives after Hide is dropped)', () => {
+  it('keeps only the answer of the latest request, and none after a cancel', () => {
+    const req = latestOnly()
+    const first = req.begin()
+    expect(first()).toBe(true)
+    const second = req.begin()
+    expect([first(), second()]).toEqual([false, true])
+    req.cancel() // the user tapped Hide before the answer came back
+    expect(second()).toBe(false)
   })
 })

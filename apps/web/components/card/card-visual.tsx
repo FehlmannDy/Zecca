@@ -205,7 +205,7 @@ export function CardVisual({
           >
             <div className="absolute inset-x-0 top-[13%] h-[17%] bg-[#1d1e21]" aria-hidden="true" />
             <div className="relative flex h-full flex-col justify-end gap-2 p-[6%]">
-              {secret ? (
+              {secret && turn ? (
                 <>
                   <Field label="Card number" value={formatPan(secret.pan)} copy={secret.pan} wide />
                   <div className="flex items-center gap-6">

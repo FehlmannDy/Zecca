@@ -18,7 +18,7 @@ import { useSession } from '@/lib/session'
 import { cn } from '@/lib/cn'
 import { CardReceipt } from './card-receipt'
 import { CardVisual } from './card-visual'
-import { authLine, SECRET_SHOW_MS, upsertAuthorization } from './card-logic'
+import { authLine, latestOnly, SECRET_SHOW_MS, upsertAuthorization } from './card-logic'
 import { LoadSheet } from './load-sheet'
 
 type Details = z.infer<typeof CardDetails>
@@ -70,8 +70,11 @@ function CardHome({ api, verifyHref }: { api: ReturnType<typeof useApp>['api']; 
   const [secretError, setSecretError] = useState<string | null>(null)
   const [left, setLeft] = useState(0)
   const hideAt = useRef(0)
+  // An answer that arrives after Hide (or after a newer flip) is dropped: the details are never kept unseen.
+  const secretReq = useRef(latestOnly())
 
   const hide = useCallback(() => {
+    secretReq.current.cancel()
     setFlipped(false)
     setSecret(null)
     setSecretError(null)
@@ -82,10 +85,11 @@ function CardHome({ api, verifyHref }: { api: ReturnType<typeof useApp>['api']; 
     setSecretError(null)
     hideAt.current = Date.now() + SECRET_SHOW_MS
     setLeft(SECRET_SHOW_MS / 1000)
+    const live = secretReq.current.begin()
     api
       .call('cardSecret')
-      .then((s) => setSecret(s))
-      .catch((e) => setSecretError(e instanceof Error ? e.message : 'The card details could not be shown. Try again.'))
+      .then((s) => live() && setSecret(s))
+      .catch((e) => live() && setSecretError(e instanceof Error ? e.message : 'The card details could not be shown. Try again.'))
   }, [flipped, hide, api])
   useEffect(() => {
     if (!flipped) return

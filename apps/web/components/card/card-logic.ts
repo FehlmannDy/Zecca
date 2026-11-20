@@ -75,3 +75,17 @@ export function tiltFrom(px: number, py: number): { rx: number; ry: number; lx: 
   const r = (v: number) => Math.round(v * 100) / 100 || 0
   return { rx: r((0.5 - y) * 2 * MAX_TILT_DEG), ry: r((x - 0.5) * 2 * MAX_TILT_DEG), lx: Math.round(x * 100), ly: Math.round(y * 100) }
 }
+
+/** Keeps only the latest request's answer: `begin()` returns a check that turns false after a newer begin or a cancel. */
+export function latestOnly() {
+  let n = 0
+  return {
+    begin(): () => boolean {
+      const mine = ++n
+      return () => mine === n
+    },
+    cancel(): void {
+      n++
+    },
+  }
+}
