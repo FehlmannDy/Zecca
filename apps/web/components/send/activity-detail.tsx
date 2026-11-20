@@ -17,6 +17,7 @@ import { cn } from '@/lib/cn'
 import { useLiveEvents } from '@/lib/hooks'
 import { useSession } from '@/lib/session'
 import { cachedActivity, rememberActivities } from './activity-cache'
+import { ConfigProblem } from './config-problem'
 import { applyIntent, findActivity, ledgerCaption, ledgerRows, statusWord, type LedgerMode, type LedgerRow } from './ledger-view'
 
 const MAX_PAGES = 10
@@ -123,7 +124,7 @@ export function ActivityDetail({ id }: { id: string }) {
         <>
           <Summary a={a} />
           {a.receipt && <ReceiptPanel r={a.receipt} />}
-          {config && <LedgerPanel a={a} config={config} />}
+          {config ? <LedgerPanel a={a} config={config} /> : <ConfigProblem />}
         </>
       )}
     </div>
