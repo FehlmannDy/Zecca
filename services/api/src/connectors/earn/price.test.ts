@@ -44,6 +44,6 @@ describe('XRP/USD price feed', () => {
   it('never calls the network when not live (tests, EARN_MODE=mock)', async () => {
     const feed = createXrpPriceFeed({ live: false, fetch: async () => { throw new Error('no network') } })
     expect(await feed.rate()).toEqual(FIXTURE_RATE)
-    expect(FIXTURE_RATE.source).toMatch(/^Fixture/)
+    expect(FIXTURE_RATE.source).toMatch(/^Saved rate/)
   })
 })

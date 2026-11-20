@@ -8,7 +8,7 @@ export interface XrpPriceFeed {
 }
 
 /** Read from CoinGecko on 2026-11-20 at 22:28:51 UTC, while building. Used offline and when the API is down. */
-export const FIXTURE_RATE: XrpRate = { microUsdPerXrp: 912_630, at: '2026-11-20T22:28:51.000Z', source: 'Fixture (CoinGecko, 2026-11-20 22:28 UTC)' }
+export const FIXTURE_RATE: XrpRate = { microUsdPerXrp: 912_630, at: '2026-11-20T22:28:51.000Z', source: 'Saved rate from CoinGecko' }
 
 export const COINGECKO_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=ripple&vs_currencies=usd&include_last_updated_at=true'
 
