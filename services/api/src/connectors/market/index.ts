@@ -31,7 +31,7 @@ import { holders, initMarketTables, orders, type OrderRow } from './repo'
 export const LOCKED = 'Verify your identity to trade metals.'
 const HISTORY_POINTS = 30
 
-type MarketCtx = { feed: PriceFeed; spreadBps: number; retryMs: number; ready: Promise<void> }
+type MarketCtx = { feed: PriceFeed; spreadBps: number; retryMs: number; ready: Promise<void>; registered: boolean }
 const contexts = new WeakMap<Core, MarketCtx>()
 
 export type MarketOptions = {
@@ -60,7 +60,7 @@ function ctx(core: Core, o: MarketOptions = {}): MarketCtx {
   let c = contexts.get(core)
   if (!c) {
     initMarketTables(core)
-    c = { feed: o.feed ?? defaultFeed(core), spreadBps: spreadOf(core), retryMs: o.retryMs ?? 2000, ready: Promise.resolve() }
+    c = { feed: o.feed ?? defaultFeed(core), spreadBps: spreadOf(core), retryMs: o.retryMs ?? 2000, ready: Promise.resolve(), registered: false }
     contexts.set(core, c)
   } else {
     if (o.feed) c.feed = o.feed
@@ -236,6 +236,9 @@ async function placeSell(core: Core, u: UserRow, symbol: MetalSymbol, issuanceId
 // ---------- start-up: submit handlers, the received handler, background work ----------
 export function registerMarket(core: Core, o: MarketOptions = {}): void {
   const m = ctx(core, o)
+  // Once per core: a second call only updates the options (it must not start a second issuance bootstrap).
+  if (m.registered) return
+  m.registered = true
 
   core.submitHandlers.set('market_authorize', {
     before(core, p) {

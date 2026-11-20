@@ -108,6 +108,13 @@ async function buy(h: H, u: TestUser, body: Record<string, unknown>) {
 }
 
 describe('market connector (SPEC §4.9, §6.3)', () => {
+  it('registers once per app, however often registerMarket is called', async () => {
+    const { h } = setup()
+    const before = h.app.core.submitHandlers.get('market_sell')
+    registerMarket(h.app.core, { feed: createFixtureFeed() })
+    expect(h.app.core.submitHandlers.get('market_sell')).toBe(before)
+  })
+
   it('is invisible with the flag off', async () => {
     const { h } = setup({ env: { FEATURE_MARKET: '0' } })
     const u = await h.signUp('ana')
