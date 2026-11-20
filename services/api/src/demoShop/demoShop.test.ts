@@ -87,7 +87,7 @@ describe('demo shop: orders', () => {
     expect(h.app.core.db.prepare("SELECT COUNT(*) AS n FROM users WHERE handle = 'settearchi'").get()).toEqual({ n: 1 })
   })
 
-  it('without a demoShop wallet the order fails with a clear 503-style message', async () => {
+  it('without a demoShop wallet the order fails with a clear 502 (upstream_error) message', async () => {
     const h = makeHarness()
     h.app.core.keystore.hasWallet = () => false
     const r = await order(h as never, [{ sku: 'moka-3', qty: 1 }])
@@ -143,7 +143,7 @@ describe('demo shop: orders', () => {
     expect(pushed.at(-1)?.receipt?.orderNumber).toBe('SA-1001')
   })
 
-  it('attaches the receipt on read when the live hook was missed (e.g. after a restart), once', async () => {
+  it('attaches the receipt on read when the live hook left none, and only once', async () => {
     const pool = createFakePool({ auto: false })
     const { h } = await world({ pool })
     const ana = await h.signUp('ana')
@@ -158,6 +158,27 @@ describe('demo shop: orders', () => {
     expect(o.status).toBe('paid')
     const buy = (await h.json('GET', '/v1/activity', { token: ana.token })).body.items[0]
     expect(buy.receipt.orderNumber).toBe('SA-1001')
+    // A second read changes nothing and pushes nothing again.
+    const pushes = () => h.app.core.bus.history().filter((x) => x.to === `user:${ana.user.id}` && x.event.type === 'activity.created').length
+    const before = pushes()
+    expect(ShopOrder.parse((await h.json('GET', `/v1/demo/shop/orders/${created.orderId}`)).body).receipt?.orderNumber).toBe('SA-1001')
+    expect(pushes()).toBe(before)
+    expect((await h.json('GET', '/v1/activity', { token: ana.token })).body.items[0].receipt).toEqual(buy.receipt)
+  })
+
+  it('reading an order whose request ran out tells the request stream it expired and drops the order watcher', async () => {
+    const { h } = await world()
+    const created = ShopOrderCreated.parse((await order(h, [{ sku: 'guji-250', qty: 1 }])).body)
+    const prId = created.paymentRequest.id
+    expect(h.app.core.bus.listenerCount('request', prId)).toBe(1)
+    h.clock.advance(h.app.core.settings.paymentRequestTtlMs + 60_000)
+    expect((await h.json('GET', `/v1/demo/shop/orders/${created.orderId}`)).status).toBe(200)
+    await h.app.jobs.tick()
+    const expired = h.app.core.bus
+      .history()
+      .filter((x) => x.to === `request:${prId}` && x.event.type === 'payment_request.updated' && (x.event.data as PaymentRequest).status === 'expired')
+    expect(expired).toHaveLength(1)
+    expect(h.app.core.bus.listenerCount('request', prId)).toBe(0)
   })
 
   it('GET /orders/:id for an unknown order is a 404', async () => {

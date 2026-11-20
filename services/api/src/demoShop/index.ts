@@ -9,6 +9,7 @@ import { mount } from '../http'
 import { emitActivity } from '../books'
 import { seedDemoShop } from '../seed'
 import { requests, toPaymentRequest, type RequestRow } from '../paymentRequests/repo'
+import { emitRequest } from '../paymentRequests/routes'
 import { catalog, priceOrder, SHOP_NAME, type ShopLine } from './catalog'
 
 type OrderRow = { id: string; seq: number; lines: ShopLine[]; amountMinor: number; paymentRequestId: string; createdAt: string }
@@ -115,7 +116,10 @@ export function mountDemoShop(app: Hono, core: Core): void {
     const o = orders.byId(core, params.id)
     if (!o) throw Err.notFound("We couldn't find this order.")
     // refresh() only expires a due request; unlike the public request read it never marks it opened.
+    const before = requests.byId(core, o.paymentRequestId)?.status
     const pr = requests.refresh(core, o.paymentRequestId)
+    // The expire job skips a row refresh() already expired, so tell the stream (and the order watcher) here.
+    if (pr?.status === 'expired' && before !== 'expired') emitRequest(core, pr.id)
     const paid = pr?.status === 'paid'
     if (paid) attachReceipt(core, o, pr)
     return {
