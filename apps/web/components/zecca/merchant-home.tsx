@@ -9,6 +9,7 @@ import { formatUsd } from '@zecca/contracts'
 import { useApp } from '@/lib/app'
 import { useResource } from '@/lib/hooks'
 import { useSession } from '@/lib/session'
+import { nextSpaceMode, type SpaceMode } from '@/lib/space-mode'
 import { Amount } from './amount'
 import { EmptyState, Skeleton } from './bits'
 import { GlassRoot, Metric, Panel } from './glass'
@@ -19,12 +20,11 @@ import { Logo } from './wordmark'
 export function MerchantHome() {
   const session = useSession()
   const hydrated = useHydrated()
-  const [mode, setMode] = useState<'unknown' | 'signup' | 'till'>('unknown')
+  const [mode, setMode] = useState<SpaceMode>('unknown')
   useEffect(() => {
-    if (!hydrated) return
-    setMode((m) => (m === 'unknown' ? (session?.user ? 'till' : 'signup') : m))
+    setMode((m) => nextSpaceMode(m, hydrated, !!session?.user))
   }, [hydrated, session])
-  if (mode === 'signup') return <SignupGate business onFinished={() => setMode('till')} />
+  if (mode === 'signup') return <SignupGate business onFinished={() => setMode('space')} />
   if (mode === 'unknown') return null
   return <Till />
 }
