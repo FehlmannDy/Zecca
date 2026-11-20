@@ -5,6 +5,7 @@ import { getBalance } from './books'
 import { intents } from './intents/repo'
 import { emitIntent, recoverIntents } from './intents/flow'
 import { preparedForIntent } from './prepared/store'
+import { settleUnknownSubmits } from './prepared/submit'
 import { expireRequests } from './paymentRequests/routes'
 import { users } from './users'
 
@@ -69,6 +70,7 @@ export function createJobs(core: Core): Jobs {
     try {
       expireRequests(core)
       await expireIntents(core)
+      await settleUnknownSubmits(core)
       recoverIntents(core)
     } catch (e) {
       core.log.warn(`[jobs] tick: ${(e as Error).message}`)

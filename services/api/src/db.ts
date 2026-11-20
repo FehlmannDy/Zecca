@@ -146,6 +146,11 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE intents ADD COLUMN reference TEXT;
   `,
+  // 4: a submit whose answer was lost stays 'unknown' until the ledger shows what happened ('final' once it did).
+  `
+  ALTER TABLE prepared_txs ADD COLUMN outcome TEXT CHECK (outcome IN ('unknown', 'final'));
+  CREATE INDEX prepared_outcome ON prepared_txs (outcome);
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

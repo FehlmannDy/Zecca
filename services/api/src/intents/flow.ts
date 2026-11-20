@@ -107,7 +107,7 @@ export function registerSendHandler(core: Core): void {
       emitBalance(core, i.fromUserId)
       emitIntent(core, i.id)
     },
-    after(core, p: PreparedRow, r, session) {
+    after(core, p: PreparedRow, r) {
       const id = p.intentId!
       if (!r.validated) return { intent: toIntent(intents.byId(core, id)!) }
       let actId: string | undefined
@@ -129,7 +129,7 @@ export function registerSendHandler(core: Core): void {
       emitIntent(core, id)
       emitActivity(core, actId)
       emitBalance(core, i.fromUserId)
-      core.pool.expectDeposit({ intentId: id, txHash: r.hash, from: session.address, amountMinor: i.amountMinor })
+      core.pool.expectDeposit({ intentId: id, txHash: r.hash, from: p.address, amountMinor: i.amountMinor })
       return { intent: toIntent(i) }
     },
   })

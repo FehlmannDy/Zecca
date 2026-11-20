@@ -141,8 +141,22 @@ export function markUsed(core: Core, id: string): boolean {
   return core.db.prepare('UPDATE prepared_txs SET used_at = ? WHERE id = ? AND used_at IS NULL').run(core.iso(), id).changes === 1
 }
 
-export function recordResult(core: Core, id: string, r: { hash?: string; engineResult: string }): void {
-  core.db.prepare('UPDATE prepared_txs SET ledger_hash = ?, engine_result = ? WHERE id = ?').run(r.hash ?? null, r.engineResult, id)
+export function recordResult(core: Core, id: string, r: { hash?: string; engineResult: string }, outcome: 'unknown' | 'final' = 'final'): void {
+  core.db.prepare('UPDATE prepared_txs SET ledger_hash = ?, engine_result = ?, outcome = ? WHERE id = ?').run(r.hash || null, r.engineResult, outcome, id)
+}
+
+/** Records the final result of an 'unknown' submit. False when someone else settled it first (the caller skips the effects). */
+export function settleRecorded(core: Core, id: string, r: { hash?: string; engineResult: string }): boolean {
+  return (
+    core.db
+      .prepare("UPDATE prepared_txs SET ledger_hash = COALESCE(?, ledger_hash), engine_result = ?, outcome = 'final' WHERE id = ? AND outcome = 'unknown'")
+      .run(r.hash || null, r.engineResult, id).changes === 1
+  )
+}
+
+/** Submits whose answer was lost, oldest first. */
+export function preparedUnknown(core: Core): PreparedRow[] {
+  return (core.db.prepare("SELECT * FROM prepared_txs WHERE outcome = 'unknown' ORDER BY created_at").all() as Raw[]).map(fromRaw)
 }
 
 export const POLICY_COPY = REFUSED

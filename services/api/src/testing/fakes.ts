@@ -49,6 +49,13 @@ export type FakeLedger = Ledger & {
   advance(n: number): void
   failNext(engineResult: string): void
   throwNext(message: string): void
+  /**
+   * The next submit loses its answer, like the live client when the node stops answering: it answers SUBMIT_ERROR (or throws
+   * with `throws`), and the transaction is on the ledger afterwards only when `applied`.
+   */
+  loseNext(o: { applied: boolean; throws?: boolean }): void
+  /** Validated transactions, oldest first (what txByHash and accountTx read). */
+  applied: LedgerTxEvent[]
   submitted: Array<{ blob: string; tx: Record<string, unknown>; result: SubmitResult }>
   setConfidential(address: string, b: ConfidentialBalance): void
 }
@@ -60,6 +67,7 @@ export function createFakeLedger(keystore: KeyStore): FakeLedger {
   const conf = new Map<string, ConfidentialBalance>()
   let fail: string | undefined
   let throwMsg: string | undefined
+  let lost: { applied: boolean; throws?: boolean } | undefined
   const nextSeq = (a: string) => {
     const s = seqs.get(a) ?? 100
     seqs.set(a, s + 10)
@@ -81,6 +89,7 @@ export function createFakeLedger(keystore: KeyStore): FakeLedger {
     issuanceId: keystore.getMeta('cmptIssuanceId') ?? FAKE_CMPT,
     index: 1000,
     submitted: [],
+    applied: [],
     advance(n) {
       ledger.index += n
     },
@@ -89,6 +98,9 @@ export function createFakeLedger(keystore: KeyStore): FakeLedger {
     },
     throwNext(m) {
       throwMsg = m
+    },
+    loseNext(o) {
+      lost = o
     },
     setConfidential(address, b) {
       conf.set(address, b)
@@ -167,9 +179,15 @@ export function createFakeLedger(keystore: KeyStore): FakeLedger {
         fail = undefined
       }
       // The ledger hash differs from the hash at signing (sponsor co-signature).
-      const result: SubmitResult = { validated: engineResult === 'tesSUCCESS', engineResult, hash: sha512Half(blob + '53504E00'), ledgerIndex: ledger.index }
-      ledger.submitted.push({ blob, tx, result })
-      return result
+      const hash = sha512Half(blob + '53504E00')
+      const result: SubmitResult = { validated: engineResult === 'tesSUCCESS', engineResult, hash, ledgerIndex: ledger.index }
+      const l = lost
+      lost = undefined
+      if (result.validated && (!l || l.applied)) ledger.applied.push({ hash, ledgerIndex: ledger.index, validated: true, engineResult, tx })
+      if (l?.throws) throw new Error('socket hang up')
+      const answer: SubmitResult = l ? { validated: false, engineResult: 'SUBMIT_ERROR', hash } : result
+      ledger.submitted.push({ blob, tx, result: answer })
+      return answer
     },
     async submitAs(_role, tx) {
       return { validated: true, engineResult: 'tesSUCCESS', hash: sha512Half(Buffer.from(JSON.stringify(tx)).toString('hex')) }
@@ -186,11 +204,11 @@ export function createFakeLedger(keystore: KeyStore): FakeLedger {
     watchAccount() {
       return () => {}
     },
-    async accountTx(): Promise<LedgerTxEvent[]> {
-      return []
+    async accountTx(address, limit = 20): Promise<LedgerTxEvent[]> {
+      return ledger.applied.filter((e) => e.tx.Account === address).reverse().slice(0, limit)
     },
-    async txByHash() {
-      return null
+    async txByHash(hash) {
+      return ledger.applied.find((e) => e.hash === hash.toUpperCase()) ?? null
     },
     async close() {},
   }

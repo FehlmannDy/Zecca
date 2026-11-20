@@ -161,12 +161,12 @@ describe('sponsor policy', () => {
     expect((await h.submit(ana, prepared)).status).toBe(403)
   })
 
-  it('a network error on submit answers 502 ledger_error and refunds', async () => {
+  it('a network error on submit answers 502 ledger_error and keeps the reservation until the ledger says (unknown.test.ts)', async () => {
     const { h, ana, prepared } = await setup()
     h.ledger.throwNext('socket hang up')
     const r = await h.submit(ana, prepared)
     expect(r.status).toBe(502)
     expect(r.body.error.code).toBe('ledger_error')
-    expect((await h.json('GET', '/v1/balance', { token: ana.token })).body.availableMinor).toBe(5000)
+    expect((await h.json('GET', '/v1/balance', { token: ana.token })).body.availableMinor).toBe(3800)
   })
 })
