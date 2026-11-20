@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
-import { MerchantHome } from '@/components/zecca/merchant-home'
+import { MerchantSpace } from '@/components/merchant/merchant-space'
 
 export const metadata: Metadata = { title: 'Business' }
 
 export default function MerchantPage() {
-  return <MerchantHome />
+  return <MerchantSpace view="home" />
 }
