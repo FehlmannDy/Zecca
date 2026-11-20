@@ -161,7 +161,7 @@ export function SignupFlow({ business = false, homeHref = '/app' }: { business?:
   const google = config?.signerMode === 'privy' && config.features.googleLogin
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-[440px] flex-col px-5 pb-10 pt-6">
+    <div className="mx-auto flex min-h-svh w-full max-w-[440px] flex-col px-5 pb-10 pt-6 lg:max-w-[520px] lg:justify-center">
       <header className="flex items-center justify-between">
         <Logo />
         {step !== 'welcome' && step !== 'done' && (
@@ -171,7 +171,7 @@ export function SignupFlow({ business = false, homeHref = '/app' }: { business?:
         )}
       </header>
 
-      <main className="flex flex-1 flex-col justify-center py-8">
+      <main className="flex flex-1 flex-col justify-center py-8 lg:my-10 lg:flex-none lg:rounded-[28px] lg:border lg:border-[color-mix(in_srgb,var(--ink)_8%,transparent)] lg:bg-[color-mix(in_srgb,var(--surface)_72%,transparent)] lg:px-10 lg:py-10 lg:shadow-[var(--shadow-float)] lg:backdrop-blur-md">
         {step === 'welcome' && (
           <form
             className="flex flex-col"

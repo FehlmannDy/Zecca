@@ -23,7 +23,7 @@ export function GlassBackdrop() {
           <path d="M680 132 V 178 H 760 V 132" />
           {/* pediment */}
           <path d="M676 186 L 250 318 M 764 186 L 1190 318" />
-          <path d="M240 344 H 1200 M 240 380 H 1200" />
+          <path className="max-lg:hidden" d="M240 344 H 1200 M 240 380 H 1200" />
           {/* cornice above the arcade (wide screens only: on a phone it would run through the text) */}
           <path className="max-lg:hidden" d="M150 640 H 1290 M 150 676 H 1290" />
         </g>

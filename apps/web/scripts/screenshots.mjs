@@ -27,6 +27,7 @@ for (const scheme of ['light', 'dark']) {
     await page.goto(`${BASE}/app/signup`)
     await page.getByRole('heading', { name: 'Welcome to Zecca' }).waitFor()
     await page.getByLabel('Email').fill('ana@example.com')
+    await page.getByRole('button', { name: 'Continue' }).and(page.locator(':not([disabled])')).waitFor()
     await shot('1-welcome')
     await page.getByRole('button', { name: 'Continue' }).click()
     await page.getByRole('heading', { name: 'Pick your handle' }).waitFor()
