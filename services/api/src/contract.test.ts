@@ -73,9 +73,12 @@ const CALLS: Record<string, (w: World) => Promise<Response>> = {
   devCredit: ({ h, carla }) => h.call('POST', routePath('devCredit'), { token: carla.token, body: { amountMinor: 1000 } }),
   shopItems: ({ h }) => h.call('GET', routePath('shopItems')),
   shopOrderCreate: ({ h }) => h.call('POST', routePath('shopOrderCreate'), { body: { items: [{ sku: 'guji-250', qty: 1 }] } }),
-  shopOrderGet: ({ h }) => h.call('GET', routePath('shopOrderGet', { id: 'ord_1' })),
+  shopOrderGet: async ({ h }) => {
+    const o = await h.json('POST', routePath('shopOrderCreate'), { body: { items: [{ sku: 'guji-250', qty: 1 }] } })
+    return h.call('GET', routePath('shopOrderGet', { id: o.body.orderId }))
+  },
 }
-const NOT_YET: ReadonlySet<string> = new Set(['rampSession', 'rampSign', 'moonpayWebhook', 'shopItems', 'shopOrderCreate', 'shopOrderGet'])
+const NOT_YET: ReadonlySet<string> = new Set(['rampSession', 'rampSign', 'moonpayWebhook'])
 
 const phase1 = (Object.entries(routes) as [RouteName, RouteDef][]).filter(([, d]) => d.phase === 1)
 
