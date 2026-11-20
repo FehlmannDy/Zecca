@@ -67,6 +67,7 @@ export function createApp(deps: AppDeps): ZeccaApp {
     iso: (ms) => new Date(ms ?? now()).toISOString(),
     id: deps.ids ?? randomId,
     submitHandlers: new Map(),
+    receivedHandlers: new Map(),
     track(p, what) {
       const t = p.catch((e) => log.error(`[api] background ${what} failed: ${(e as Error)?.message ?? e}`)).finally(() => tasks.delete(t))
       tasks.add(t)

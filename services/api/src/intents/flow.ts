@@ -149,6 +149,14 @@ export async function onReceived(core: Core, e: Extract<PoolEvent, { type: 'rece
   if (e.amountMinor !== i.amountMinor) {
     return onFailed(core, { type: 'failed', intentId: i.id, stage: 'deposit', code: 'amount_mismatch', message: `deposit ${e.amountMinor} != ${i.amountMinor}` })
   }
+  const custom = core.receivedHandlers.get(i.kind)
+  if (custom) {
+    if (!intents.transition(core, i.id, 'submitted', 'received')) return
+    if (!claimEffect(core, `${i.id}:received`)) return
+    emitIntent(core, i.id)
+    core.track(Promise.resolve(custom(core, i.id)), `received:${i.kind}`)
+    return
+  }
   applyReceived(core, i.id)
 }
 

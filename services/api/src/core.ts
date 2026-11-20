@@ -26,6 +26,11 @@ export type Core = {
   id(prefix: string): string
   /** What happens around POST /v1/tx/submit, per PreparedTx kind. */
   submitHandlers: Map<string, SubmitHandler>
+  /**
+   * What happens when the pool confirms a deposit, per intent kind (phase-2 connectors: card_load, market_buy, earn_deposit).
+   * Called once per intent, after submitted -> received. Kinds without a handler get the p2p/merchant effects (credit + payout).
+   */
+  receivedHandlers: Map<string, (core: Core, intentId: string) => void | Promise<void>>
   /** Background work started by request handlers (payouts, merges); tests await it. */
   track(p: Promise<unknown>, what: string): void
   idle(): Promise<void>
