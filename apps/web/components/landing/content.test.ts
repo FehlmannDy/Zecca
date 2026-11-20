@@ -46,6 +46,10 @@ describe('landing copy (UI §5.1, final)', () => {
       expect(hop.observer.amount).toMatch(/sealed/i)
     }
   })
+  it('says who seals the amount: Zecca builds the payment and its proof, you only approve and sign (SPEC §2.3, §11)', () => {
+    expect(copy.PAYMENT.hops[0].body).toBe('Zecca seals the amount, and you approve and sign the payment with your own key.')
+    expect(strings(copy).join('\n')).not.toMatch(/\b(your (app|phone|device)|on your (phone|device))\b[^.]*\b(seals?|encrypts?)\b/i)
+  })
   it('four building blocks, each naming the network it runs on today', () => {
     expect(copy.BUILDING_BLOCKS.map((b) => b.title)).toEqual(['Sponsored accounts', 'Confidential tokens', 'Batched transactions', 'Credentials'])
     for (const b of copy.BUILDING_BLOCKS) expect(b.networks[0]).toMatch(/XRPL (Devnet|Testnet)/)

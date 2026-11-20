@@ -52,7 +52,7 @@ export const PAYMENT = {
     {
       step: '1',
       title: 'You pay the pool',
-      body: 'Your app seals the amount and you sign the payment with your own key.',
+      body: 'Zecca seals the amount, and you approve and sign the payment with your own key.',
       observer: { addresses: 'Your address and the pool: visible', amount: 'Sealed' },
     },
     {
