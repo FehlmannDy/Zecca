@@ -11,7 +11,7 @@ import { signAndSubmit } from '@/lib/wallet/sign-and-submit'
 import { cn } from '@/lib/cn'
 import { Amount } from './amount'
 import { ArchesProgress } from './arches'
-import { Button } from './bits'
+import { Button, Skeleton } from './bits'
 import { Logo } from './wordmark'
 
 type Step = 'welcome' | 'handle' | 'approve' | 'done'
@@ -44,8 +44,8 @@ function Field({ label, id, children, help, helpTone }: { label: string; id: str
 const inputCls =
   'h-12 w-full rounded-[14px] border border-line bg-surface px-4 text-[16px] text-ink placeholder:text-muted/80 outline-none transition-colors focus-visible:border-ink/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brass)] aria-[invalid=true]:border-alert'
 
-export function SignupFlow({ business = false, homeHref = '/app' }: { business?: boolean; homeHref?: string }) {
-  const { api, config, signIn, getSigner } = useApp()
+export function SignupFlow({ business = false, homeHref = '/app', onFinished }: { business?: boolean; homeHref?: string; /** Replaces the navigation at the end (e.g. /merchant switches to the till in place). */ onFinished?: (user: User) => void }) {
+  const { api, config, configError, reloadConfig, signIn, getSigner } = useApp()
   const session = useSession()
   const router = useRouter()
   const [step, setStep] = useState<Step>('welcome')
@@ -88,13 +88,18 @@ export function SignupFlow({ business = false, homeHref = '/app' }: { business?:
     return () => clearTimeout(t)
   }, [api, handle, step])
 
+  function finish(u: User) {
+    if (onFinished) onFinished(u)
+    else router.replace(u.role.includes('merchant') && business ? '/merchant' : homeHref)
+  }
+
   async function onWelcome(method: 'email' | 'google' = 'email') {
     setError('')
     setBusy(true)
     try {
       const r = await signIn({ email, method })
       if (r.user) {
-        router.replace(r.user.role.includes('merchant') && business ? '/merchant' : homeHref)
+        finish(r.user)
         return
       }
       if (!handle && email) setHandle(suggestHandle(email))
@@ -184,6 +189,25 @@ export function SignupFlow({ business = false, homeHref = '/app' }: { business?:
               {business ? 'Open your business account' : 'Welcome to Zecca'}
             </h1>
             <p className="mt-3 text-[16px] text-muted">{business ? 'Take payments with a tap. One approval and you are set.' : 'Money that moves like a message. Private by default.'}</p>
+            {!config ? (
+              <div className="mt-8 flex flex-col gap-3" aria-busy={!configError}>
+                {configError ? (
+                  <div role="alert" className="flex flex-col gap-3">
+                    <p className="text-[15px] text-ink">{configError.message}</p>
+                    <Button variant="secondary" onClick={reloadConfig}>
+                      Retry
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <Skeleton className="h-5 w-16" />
+                    <Skeleton className="h-12 w-full rounded-[14px]" />
+                    <Skeleton className="mt-6 h-12 w-full rounded-[14px]" />
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
             <div className="mt-8 flex flex-col gap-3">
               {google && (
                 <Button variant="secondary" onClick={() => onWelcome('google')} disabled={busy || !config}>
@@ -206,7 +230,8 @@ export function SignupFlow({ business = false, homeHref = '/app' }: { business?:
               )}
             </div>
             {mock && <p className="mt-8 text-center text-[12px] text-muted">Test sign-in. No code is sent in this mode.</p>}
-            {!config && <p className="mt-8 text-center text-[13px] text-muted">Connecting…</p>}
+              </>
+            )}
           </form>
         )}
 
@@ -323,7 +348,7 @@ export function SignupFlow({ business = false, homeHref = '/app' }: { business?:
               <Amount minor={balanceMinor ?? 0} size="hero" className="mt-3" />
               {(balanceMinor ?? 0) > 0 && <span className="mt-3 rounded-full border border-line bg-surface px-3 py-1 text-[13px] font-[600] text-muted">Demo credit</span>}
             </div>
-            <Button className="mt-10 w-full" onClick={() => router.replace(user.role.includes('merchant') && business ? '/merchant' : homeHref)}>
+            <Button className="mt-10 w-full" onClick={() => finish(user)}>
               Go to home
             </Button>
           </section>

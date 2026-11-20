@@ -24,7 +24,7 @@ export function MerchantHome() {
     if (!hydrated) return
     setMode((m) => (m === 'unknown' ? (session?.user ? 'till' : 'signup') : m))
   }, [hydrated, session])
-  if (mode === 'signup') return <SignupGate business />
+  if (mode === 'signup') return <SignupGate business onFinished={() => setMode('till')} />
   if (mode === 'unknown') return null
   return <Till />
 }

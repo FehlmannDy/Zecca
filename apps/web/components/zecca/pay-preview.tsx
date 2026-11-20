@@ -18,9 +18,9 @@ export function PayRequestPreview({ id }: { id: string }) {
   return (
     <div className="relative min-h-svh">
       <GlassBackdrop />
-      <div className="mx-auto flex min-h-svh max-w-[440px] flex-col px-5 py-6">
+      <div className="mx-auto flex min-h-svh max-w-[440px] flex-col px-5 py-6 lg:max-w-[520px] lg:justify-center">
         <Logo />
-        <main className="flex flex-1 flex-col items-center justify-center text-center">
+        <main className="flex flex-1 flex-col items-center justify-center text-center lg:my-10 lg:flex-none lg:rounded-[28px] lg:border lg:border-[color-mix(in_srgb,var(--ink)_8%,transparent)] lg:bg-[color-mix(in_srgb,var(--surface)_72%,transparent)] lg:px-10 lg:py-12 lg:shadow-[var(--shadow-float)] lg:backdrop-blur-md">
           {req.error ? (
             <p className="text-[16px] text-ink" role="alert">
               {req.error}
@@ -49,7 +49,7 @@ export function PayRequestPreview({ id }: { id: string }) {
                         : null}
               </p>
               {!session?.user && (pr.status === 'created' || pr.status === 'opened') && (
-                <Link href="/app/signup" className="mt-2 inline-flex min-h-12 w-full items-center justify-center rounded-[14px] bg-ink px-5 text-[15px] font-[680] text-paper">
+                <Link href={`/app/signup?next=${encodeURIComponent(`/pay/${id}`)}`} className="mt-2 inline-flex min-h-12 w-full items-center justify-center rounded-[14px] bg-ink px-5 text-[15px] font-[680] text-paper">
                   Sign in to pay
                 </Link>
               )}
