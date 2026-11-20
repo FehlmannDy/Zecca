@@ -179,16 +179,29 @@ export function createGate(minMs: number, c: Clock = {}) {
   }
 }
 
-/** Reads the decision of a simulated purchase: GET the transaction every 250 ms until it carries a result, up to 5 s. */
+/** A failure worth reading again: the network, a 429 or a 5xx. */
+const transient = (e: unknown) => !(e instanceof LithicError) || e.status === 429 || e.status >= 500
+
+/**
+ * Reads the decision of a simulated purchase: GET the transaction every 250 ms until it carries a result, up to 5 s.
+ * A transient read error is read again until the deadline (the purchase may already be approved by then).
+ */
 export async function waitForResult(api: Pick<LithicApi, 'getTransaction'>, token: string, c: Clock & { intervalMs?: number; timeoutMs?: number } = {}): Promise<LithicTx> {
   const now = c.now ?? Date.now
   const sleep = c.sleep ?? realSleep
   const interval = c.intervalMs ?? 250
   const end = now() + (c.timeoutMs ?? 5000)
   for (;;) {
-    const tx = await api.getTransaction(token)
+    let tx: LithicTx | null = null
+    let failure: unknown
+    try {
+      tx = await api.getTransaction(token)
+    } catch (e) {
+      if (!transient(e)) throw e
+      failure = e
+    }
     if (tx?.result) return tx
-    if (now() + interval > end) throw new LithicError(504, `Lithic transaction ${token} has no result after ${c.timeoutMs ?? 5000} ms`)
+    if (now() + interval > end) throw failure ?? new LithicError(504, `Lithic transaction ${token} has no result after ${c.timeoutMs ?? 5000} ms`)
     await sleep(interval)
   }
 }

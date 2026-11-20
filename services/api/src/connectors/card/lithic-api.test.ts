@@ -116,4 +116,26 @@ describe('waitForResult (simulate returns 201 even on a decline)', () => {
     const api = { getTransaction: async () => ({ token: 'tx1', status: 'PENDING' }) } as unknown as LithicApi
     await expect(waitForResult(api, 'tx1', { now: () => t, sleep: async (ms) => void (t += ms) })).rejects.toThrow(/no result/)
   })
+
+  it('reads again after a transient error (5xx, 429, network) instead of giving up at once', async () => {
+    const errors = [new LithicError(503, 'Lithic GET /v1/transactions -> HTTP 503'), new LithicError(429, 'slow down'), new TypeError('fetch failed')]
+    const api = {
+      getTransaction: async () => {
+        const e = errors.shift()
+        if (e) throw e
+        return { token: 'tx1', status: 'PENDING', result: 'APPROVED' }
+      },
+    } as unknown as LithicApi
+    expect((await waitForResult(api, 'tx1', { sleep: async () => {} })).result).toBe('APPROVED')
+  })
+
+  it('throws at once on an error that will not go away (a 4xx other than 429), and the last error at the deadline', async () => {
+    let reads = 0
+    const bad = { getTransaction: async () => (reads++, Promise.reject(new LithicError(401, 'bad key'))) } as unknown as LithicApi
+    await expect(waitForResult(bad, 'tx1', { sleep: async () => {} })).rejects.toThrow(/bad key/)
+    expect(reads).toBe(1)
+    let t = 0
+    const down = { getTransaction: async () => Promise.reject(new LithicError(502, 'upstream down')) } as unknown as LithicApi
+    await expect(waitForResult(down, 'tx1', { now: () => t, sleep: async (ms) => void (t += ms) })).rejects.toThrow(/upstream down/)
+  })
 })
