@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULTS, type Limits } from '@zecca/contracts'
-import { checkSendAmount, firstName, matchContacts, sendProblemOf, sentTitle } from './send-rules'
+import { checkSendAmount, firstName, followText, matchContacts, sendProblemOf, sentTitle } from './send-rules'
 
 const limits: Limits = {
   txCapMinor: DEFAULTS.TX_CAP_MINOR,
@@ -78,6 +78,20 @@ describe('copy', () => {
   it('writes the success line', () => {
     expect(sentTitle(1200, { displayName: 'Carla Rossi', isMerchant: false })).toBe('Sent. $12.00 to Carla.')
     expect(sentTitle(450, { displayName: 'Caffè Bruno', isMerchant: true })).toBe('Sent. $4.50 to Caffè Bruno.')
+  })
+})
+
+describe('followText', () => {
+  const carla = { displayName: 'Carla Rossi', isMerchant: false }
+  it('follows the payment to the recipient', () => {
+    expect(followText({ status: 'created' }, carla)).toEqual({ tone: 'muted', text: 'On its way to Carla.' })
+    expect(followText({ status: 'submitted' }, carla)).toEqual({ tone: 'muted', text: 'On its way to Carla.' })
+    expect(followText({ status: 'received' }, carla)).toEqual({ tone: 'muted', text: 'Carla has it.' })
+    expect(followText({ status: 'paid_out' }, carla)).toEqual({ tone: 'muted', text: 'Carla has it.' })
+  })
+  it('says when it did not go through, expired included', () => {
+    expect(followText({ status: 'failed', failure: { code: 'x', message: 'The payment didn’t go through.' } }, carla)).toEqual({ tone: 'alert', text: 'The payment didn’t go through.' })
+    expect(followText({ status: 'expired' }, carla)).toEqual({ tone: 'alert', text: "This payment didn't go through. Nothing was taken." })
   })
 })
 

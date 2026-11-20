@@ -2,6 +2,7 @@
 // Send (UI.md §5.4): "To" (handle, phone or email, resolved as you type; recent contacts below), then the amount
 // and an optional note, then the approve sheet. Continue creates the transfer (POST /v1/transfers), so a limit or a
 // short balance shows before anything is signed; Approve signs and submits it. /app/send?to=<handle> preselects.
+// A submit whose answer was lost is followed here until it settles, never paid a second time (approve-flow.ts).
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -12,27 +13,61 @@ import { ApproveSheet, type ApproveOutcome } from '@/components/zecca/approve-sh
 import { Avatar, Button } from '@/components/zecca/bits'
 import { Panel } from '@/components/zecca/glass'
 import { LimitSheet } from '@/components/zecca/limit-sheet'
-import { isApiError, type ApiErrorDetails } from '@/lib/api'
+import { isApiError, type ApiErrorDetails, type ZeccaApiError } from '@/lib/api'
 import { useApp } from '@/lib/app'
 import { cn } from '@/lib/cn'
 import { useLiveEvents, useResource } from '@/lib/hooks'
 import { useSession } from '@/lib/session'
 import { signAndSubmit } from '@/lib/wallet/sign-and-submit'
+import { approveTransfer, type Transfer } from './approve-flow'
+import { ConfigProblem } from './config-problem'
 import { RecipientRow, RecipientRowSkeleton } from './recipient-row'
 import { sendToParam } from './request-link'
 import { createResolver, lookupQuery, type ResolverState } from './resolver'
-import { checkSendAmount, matchContacts, recipientShortName, sendProblemOf, sentTitle, type SendProblem } from './send-rules'
+import { checkSendAmount, followText, matchContacts, recipientShortName, sendProblemOf, sentTitle, type SendProblem } from './send-rules'
 
 const FollowCtx = createContext<{ intent: Intent | null; to: PublicProfile | null }>({ intent: null, to: null })
 
-/** Under "Sent.": where the money is now, from intent.updated (D4: "received" is done for both sides). */
+/** Under "Sent.": where the money is now, from intent.updated. */
 function FollowLine() {
   const { intent, to } = useContext(FollowCtx)
   if (!intent || !to) return null
-  const name = recipientShortName(to)
-  if (intent.status === 'failed') return <span className="text-alert">{intent.failure?.message ?? "This payment didn't go through."}</span>
-  if (intent.status === 'received' || intent.status === 'paid_out') return <span>{name} has it.</span>
-  return <span>On its way to {name}.</span>
+  const f = followText(intent, to)
+  return <span className={f.tone === 'alert' ? 'text-alert' : undefined}>{f.text}</span>
+}
+
+const SENT = new Set<Intent['status']>(['submitted', 'received', 'paid_out'])
+
+/** In place of the keypad while a payment whose answer was lost settles: it updates by itself (intent.updated). */
+function StillSending({ amountMinor, message, onAgain, onDetails }: { amountMinor: number; message: string; onAgain: () => void; onDetails: () => void }) {
+  const { intent, to } = useContext(FollowCtx)
+  const router = useRouter()
+  if (!intent || !to) return null
+  const sent = SENT.has(intent.status)
+  const over = intent.status === 'failed' || intent.status === 'expired'
+  return (
+    <Panel className="flex flex-col items-center text-center" aria-live="polite">
+      <p className="mt-1 text-[17px] font-[680] tracking-[-0.01em]">
+        {sent ? sentTitle(amountMinor, to) : over ? 'Not sent' : `Sending ${formatUsd(amountMinor)} to ${recipientShortName(to)}`}
+      </p>
+      <p className={cn('mt-2 max-w-[34ch] text-[15px]', over ? 'text-alert' : 'text-muted')}>{sent || over ? <FollowLine /> : message}</p>
+      <div className="mt-6 flex w-full flex-col gap-2">
+        {over && (
+          <Button className="w-full" onClick={onAgain}>
+            Try again
+          </Button>
+        )}
+        <Button className="w-full" variant={over ? 'ghost' : 'primary'} onClick={() => router.push('/app')}>
+          Done
+        </Button>
+        {sent && (
+          <Button variant="ghost" className="w-full" onClick={onDetails}>
+            View details
+          </Button>
+        )}
+      </div>
+    </Panel>
+  )
 }
 
 const inputCls =
@@ -53,11 +88,15 @@ export function SendScreen() {
   const [note, setNote] = useState('')
   const [problem, setProblem] = useState<SendProblem | null>(null)
   const [creating, setCreating] = useState(false)
-  const [pending, setPending] = useState<{ intent: Intent; prepared: PreparedTx } | null>(null)
+  const [pending, setPending] = useState<Transfer | null>(null)
+  const [sheet, setSheet] = useState(false)
   const [limit, setLimit] = useState<ApiErrorDetails | null>(null)
   const [followed, setFollowed] = useState<Intent | null>(null)
+  /** A payment whose answer was lost: followed in place of the keypad until it settles. */
+  const [unsure, setUnsure] = useState<string | null>(null)
   const autoPick = useRef<string | null>(null)
   const attempted = useRef(false)
+  const unsureOf = useRef<{ intent: Intent; message: string } | null>(null)
 
   const balance = useResource(() => api.call('balance'), [api])
   const contacts = useResource(() => api.call('contacts'), [api])
@@ -156,6 +195,7 @@ export function SendScreen() {
       attempted.current = false
       setFollowed(null)
       setPending(res)
+      setSheet(true)
     } catch (e) {
       if (!takeOver(e)) setProblem({ kind: 'message', message: e instanceof Error && e.message ? e.message : 'Something went wrong. Try again.' })
     } finally {
@@ -165,22 +205,40 @@ export function SendScreen() {
 
   async function approve(): Promise<ApproveOutcome> {
     if (!pending || !recipient || !amountMinor) throw new Error('Start again.')
-    let current = pending
-    // "Try again" after a failed submit: the old transfer is closed, so make a new one.
-    if (attempted.current) {
-      current = await create(recipient, amountMinor)
-      setPending(current)
-    }
+    const retry = attempted.current
     attempted.current = true
-    const signer = await getSigner()
-    const res = await signAndSubmit(api, signer, current.prepared)
-    setFollowed(res.intent ?? current.intent)
+    unsureOf.current = null
+    const intent = await approveTransfer(pending, retry, {
+      getIntent: (id) => api.call('transferGet', { params: { id } }),
+      create: () => create(recipient, amountMinor),
+      submit: async (prepared: PreparedTx) => (await signAndSubmit(api, await getSigner(), prepared)).intent,
+      onTransfer: setPending,
+      onUnsure: (i, message) => (unsureOf.current = { intent: i, message }),
+    })
+    setFollowed(intent)
     balance.refresh()
     return {
       title: sentTitle(amountMinor, recipient),
       line: <FollowLine />,
       announce: `Sent, ${spokenUsd(amountMinor)} to ${recipientShortName(recipient)}`,
     }
+  }
+
+  /** The sheet's errors: a payment that may still land is followed here, not offered again. */
+  const onApproveError = (e: ZeccaApiError): boolean => {
+    const u = unsureOf.current
+    unsureOf.current = null
+    if (!u) return takeOver(e)
+    setFollowed(u.intent)
+    setUnsure(u.message)
+    balance.refresh()
+    return true
+  }
+
+  const startOver = () => {
+    setUnsure(null)
+    setFollowed(null)
+    setPending(null)
   }
 
   // ---- render ----
@@ -203,35 +261,47 @@ export function SendScreen() {
             Change
           </Button>
         </div>
-        <Panel className="flex flex-col items-center gap-2">
-          <AmountKeypad
-            value={amountText}
-            onChange={(text, minor) => {
-              setAmountText(text)
-              setAmountMinor(minor)
-              setProblem(null)
-            }}
-            error={shown && shown.kind !== 'empty' && shown.kind !== 'limit' ? shown.message : undefined}
-            hint={balance.data ? `Available ${formatUsd(balance.data.availableMinor)}` : undefined}
-          />
-          {shown?.kind === 'short' && (config?.features.ramp || config?.demoMode) && (
-            <Link href="/app/topup" className="inline-flex min-h-11 items-center rounded-[14px] border border-line bg-surface px-4 text-[14px] font-[650]">
-              Top up
-            </Link>
-          )}
-          <label htmlFor="send-note" className="sr-only">
-            Note (optional)
-          </label>
-          <input id="send-note" className={cn(inputCls, 'mt-1')} value={note} maxLength={140} onChange={(e) => setNote(e.target.value)} placeholder="Add a note (optional)" autoComplete="off" />
-          <Button className="mt-1 w-full" onClick={onContinue} disabled={!amountMinor || creating} aria-busy={creating || undefined}>
-            Continue
-          </Button>
-        </Panel>
+        <ConfigProblem />
+        {unsure && amountMinor ? (
+          <FollowCtx.Provider value={{ intent: followed, to: recipient }}>
+            <StillSending
+              amountMinor={amountMinor}
+              message={unsure}
+              onAgain={startOver}
+              onDetails={() => followed && router.push(`/app/activity/${encodeURIComponent(followed.id)}`)}
+            />
+          </FollowCtx.Provider>
+        ) : (
+          <Panel className="flex flex-col items-center gap-2">
+            <AmountKeypad
+              value={amountText}
+              onChange={(text, minor) => {
+                setAmountText(text)
+                setAmountMinor(minor)
+                setProblem(null)
+              }}
+              error={shown && shown.kind !== 'empty' && shown.kind !== 'limit' ? shown.message : undefined}
+              hint={balance.data ? `Available ${formatUsd(balance.data.availableMinor)}` : undefined}
+            />
+            {shown?.kind === 'short' && (config?.features.ramp || config?.demoMode) && (
+              <Link href="/app/topup" className="inline-flex min-h-11 items-center rounded-[14px] border border-line bg-surface px-4 text-[14px] font-[650]">
+                Top up
+              </Link>
+            )}
+            <label htmlFor="send-note" className="sr-only">
+              Note (optional)
+            </label>
+            <input id="send-note" className={cn(inputCls, 'mt-1')} value={note} maxLength={140} onChange={(e) => setNote(e.target.value)} placeholder="Add a note (optional)" autoComplete="off" />
+            <Button className="mt-1 w-full" onClick={onContinue} disabled={!amountMinor || !config || creating} aria-busy={creating || undefined}>
+              Continue
+            </Button>
+          </Panel>
+        )}
 
         <FollowCtx.Provider value={{ intent: followed, to: recipient }}>
           <ApproveSheet
-            open={!!pending}
-            onClose={() => setPending(null)}
+            open={sheet && !!pending}
+            onClose={() => setSheet(false)}
             title={`Send ${formatUsd(amountMinor ?? 0)} to ${recipient.displayName}`}
             subline={`@${recipient.handle}`}
             feeMinor={pending?.intent.feeMinor ?? 0}
@@ -239,7 +309,7 @@ export function SendScreen() {
             run={approve}
             onDone={() => router.push('/app')}
             onViewDetails={() => pending && router.push(`/app/activity/${encodeURIComponent(pending.intent.id)}`)}
-            onError={takeOver}
+            onError={onApproveError}
           />
         </FollowCtx.Provider>
         {config && (

@@ -1,7 +1,7 @@
 // What stops a send, in the order the API checks it (limits first, then the balance), and the copy around it.
 // A tier 0 limit opens the limit sheet (UI.md §5.12); a missing amount is "You need $x more." with "Top up".
 // The top-up screen works with the ramp on, or with demo credit in demo mode; "Top up" shows in either case.
-import { formatUsd, type ApiError, type Limits, type PublicProfile, type Tier } from '@zecca/contracts'
+import { formatUsd, type ApiError, type Intent, type Limits, type PublicProfile, type Tier } from '@zecca/contracts'
 
 type Details = NonNullable<ApiError['error']['details']>
 
@@ -38,6 +38,14 @@ export const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? ''
 export const recipientShortName = (p: Pick<PublicProfile, 'displayName' | 'isMerchant'>) => (p.isMerchant ? p.displayName.trim() : firstName(p.displayName))
 
 export const sentTitle = (minor: number, to: Pick<PublicProfile, 'displayName' | 'isMerchant'>) => `Sent. ${formatUsd(minor)} to ${recipientShortName(to)}.`
+
+/** Where the money is now, from intent.updated (D4: "received" is done for both sides). */
+export function followText(i: Pick<Intent, 'status' | 'failure'>, to: Pick<PublicProfile, 'displayName' | 'isMerchant'>): { tone: 'muted' | 'alert'; text: string } {
+  if (i.status === 'failed' || i.status === 'expired') return { tone: 'alert', text: i.failure?.message ?? "This payment didn't go through. Nothing was taken." }
+  const name = recipientShortName(to)
+  if (i.status === 'received' || i.status === 'paid_out') return { tone: 'muted', text: `${name} has it.` }
+  return { tone: 'muted', text: `On its way to ${name}.` }
+}
 
 const fold = (s: string) =>
   s
