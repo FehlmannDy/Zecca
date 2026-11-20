@@ -27,6 +27,8 @@ export type CardCtx = {
   secretP?: Promise<string>
   creating: Map<string, Promise<unknown>>
   charging: Set<string>
+  /** Purchases whose clearing call is in flight (shop, test purchase or poller). */
+  clearing: Set<string>
   syncing: boolean
   timer?: NodeJS.Timeout
 }
@@ -54,6 +56,7 @@ export function cardCtx(core: Core, opts: CardOptions = {}): CardCtx {
     decisionTimeoutMs: opts.decisionTimeoutMs ?? 5000,
     creating: new Map(),
     charging: new Set(),
+    clearing: new Set(),
     syncing: false,
   }
   contexts.set(core, ctx)

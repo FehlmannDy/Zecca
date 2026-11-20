@@ -138,6 +138,35 @@ describe('card sub-ledger', () => {
     expect(again.balance('u_ana')).toBe(700)
   })
 
+  it("a shop charge counts while its purchase stands; once voided, the order's next charge replaces it", () => {
+    const { store } = fresh()
+    store.creditDeposit({ intentId: 'int_1', userId: 'u_ana', amountMinor: 3000 })
+    const receipt = (reference: string) => ({ orderNumber: 'SA-1', shopName: 'Sette Archi', items: [], amountMinor: 1450, method: 'card' as const, status: 'authorised' as const, at: '2026-11-21T09:00:00.000Z', reference })
+    store.authorize({ ...auth('a1', 1450), orderId: 'ord_1' })
+    expect(store.saveCharge('ord_1', 'a1', receipt('a1'))).toBe(true)
+    store.authorize({ ...auth('a2', 1450), orderId: 'ord_1' })
+    expect(store.saveCharge('ord_1', 'a2', receipt('a2'))).toBe(false) // a1 still stands
+    expect(store.charge('ord_1')?.authToken).toBe('a1')
+    store.voidHold('a1')
+    expect(store.charge('ord_1')).toBeUndefined()
+    expect(store.saveCharge('ord_1', 'a2', receipt('a2'))).toBe(true)
+    expect(store.charge('ord_1')?.authToken).toBe('a2')
+  })
+
+  it('counts clearing tries, also on a database made before the column existed', () => {
+    const db = openDb(':memory:')
+    db.exec(`CREATE TABLE card_holds (auth_token TEXT PRIMARY KEY, seq INTEGER NOT NULL UNIQUE, user_id TEXT NOT NULL, card_token TEXT NOT NULL,
+      amount_minor INTEGER NOT NULL, merchant TEXT NOT NULL, status TEXT NOT NULL, decline_reason TEXT, order_id TEXT, settle_tx TEXT, settle_error TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+    const store = cardStore({ db, iso: () => new Date().toISOString() })
+    store.creditDeposit({ intentId: 'int_1', userId: 'u_ana', amountMinor: 1000 })
+    store.authorize(auth('a1', 600))
+    expect(store.hold('a1')?.clearTries).toBeUndefined()
+    expect(store.clearTry('a1')).toBe(1)
+    expect(store.clearTry('a1')).toBe(2)
+    expect(store.hold('a1')?.clearTries).toBe(2)
+  })
+
   it('rejects non-integer or negative amounts', () => {
     const { store } = fresh()
     expect(() => store.creditDeposit({ intentId: 'i', userId: 'u_ana', amountMinor: 1.5 })).toThrow()

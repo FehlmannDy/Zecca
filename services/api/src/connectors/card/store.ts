@@ -37,6 +37,8 @@ export type HoldRow = {
   orderId?: string
   settleTx?: string
   settleError?: string
+  /** Our POST /v1/simulate/clearing attempts (set only on purchases Zecca itself clears: shop, test purchases). */
+  clearTries?: number
   createdAt: string
   updatedAt: string
 }
@@ -84,6 +86,7 @@ export function ensureCardTables(db: Db): void {
       order_id TEXT,
       settle_tx TEXT,
       settle_error TEXT,
+      clear_tries INTEGER,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -101,6 +104,9 @@ export function ensureCardTables(db: Db): void {
       updated_at TEXT NOT NULL
     );
   `)
+  // Added after the first version of the table: older databases get the column here.
+  if (!(db.prepare('PRAGMA table_info(card_holds)').all() as Array<{ name: string }>).some((c) => c.name === 'clear_tries'))
+    db.exec('ALTER TABLE card_holds ADD COLUMN clear_tries INTEGER')
 }
 
 function assertAmount(n: number): void {
@@ -142,6 +148,7 @@ type HoldRaw = {
   order_id: string | null
   settle_tx: string | null
   settle_error: string | null
+  clear_tries: number | null
   created_at: string
   updated_at: string
 }
@@ -157,6 +164,7 @@ const holdFrom = (r: HoldRaw | undefined): HoldRow | undefined =>
     ...(r.order_id ? { orderId: r.order_id } : {}),
     ...(r.settle_tx ? { settleTx: r.settle_tx } : {}),
     ...(r.settle_error ? { settleError: r.settle_error } : {}),
+    ...(r.clear_tries !== null ? { clearTries: r.clear_tries } : {}),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -309,6 +317,12 @@ export function cardStore(ctx: Ctx) {
       ).run(d.settleTx ?? null, d.settleError ?? null, d.orderId ?? null, ctx.iso(), authToken)
     },
 
+    /** One more clearing attempt by Zecca on this purchase; returns the count. */
+    clearTry(authToken: string): number {
+      db.prepare('UPDATE card_holds SET clear_tries = COALESCE(clear_tries, 0) + 1, updated_at = ? WHERE auth_token = ?').run(ctx.iso(), authToken)
+      return hold(authToken)?.clearTries ?? 0
+    },
+
     holdsOf: (userId: string, limit: number) =>
       (db.prepare('SELECT * FROM card_holds WHERE user_id = ? ORDER BY seq DESC LIMIT ?').all(userId, limit) as HoldRaw[]).map((r) => holdFrom(r)!),
     /** The purchase of a demo shop order that still stands (approved, not voided), if any. */
@@ -317,18 +331,31 @@ export function cardStore(ctx: Ctx) {
     /** Approved purchases not yet cleared or voided (the poller follows them on Lithic). */
     openHolds: () => (db.prepare("SELECT * FROM card_holds WHERE status = 'authorised' ORDER BY seq").all() as HoldRaw[]).map((r) => holdFrom(r)!),
 
-    /** The demo shop's card payment of one order (approved only). */
+    /** The demo shop's card payment of one order, while its purchase stands (approved or cleared, not voided). */
     charge(orderId: string): { authToken: string; receipt: Receipt } | undefined {
-      const r = db.prepare('SELECT auth_token, receipt_json FROM card_shop_charges WHERE order_id = ?').get(orderId) as { auth_token: string; receipt_json: string } | undefined
+      const r = db
+        .prepare(
+          `SELECT c.auth_token, c.receipt_json FROM card_shop_charges c JOIN card_holds h ON h.auth_token = c.auth_token
+           WHERE c.order_id = ? AND h.status IN ('authorised', 'completed')`,
+        )
+        .get(orderId) as { auth_token: string; receipt_json: string } | undefined
       return r && { authToken: r.auth_token, receipt: JSON.parse(r.receipt_json) as Receipt }
     },
     chargeByAuth(authToken: string): { orderId: string; receipt: Receipt } | undefined {
       const r = db.prepare('SELECT order_id, receipt_json FROM card_shop_charges WHERE auth_token = ?').get(authToken) as { order_id: string; receipt_json: string } | undefined
       return r && { orderId: r.order_id, receipt: JSON.parse(r.receipt_json) as Receipt }
     },
-    /** False when the order already has a card payment. */
+    /** False when the order already has a card payment that stands; one whose purchase was voided is replaced. */
     saveCharge(orderId: string, authToken: string, receipt: Receipt): boolean {
-      return db.prepare('INSERT OR IGNORE INTO card_shop_charges (order_id, auth_token, receipt_json, created_at) VALUES (?, ?, ?, ?)').run(orderId, authToken, JSON.stringify(receipt), ctx.iso()).changes === 1
+      return (
+        db
+          .prepare(
+            `INSERT INTO card_shop_charges (order_id, auth_token, receipt_json, created_at) VALUES (?, ?, ?, ?)
+             ON CONFLICT (order_id) DO UPDATE SET auth_token = excluded.auth_token, receipt_json = excluded.receipt_json, created_at = excluded.created_at
+             WHERE COALESCE((SELECT status FROM card_holds WHERE auth_token = card_shop_charges.auth_token), 'gone') NOT IN ('authorised', 'completed')`,
+          )
+          .run(orderId, authToken, JSON.stringify(receipt), ctx.iso()).changes === 1
+      )
     },
     setChargeStatus(orderId: string, status: Receipt['status']): void {
       const c = db.prepare('SELECT receipt_json FROM card_shop_charges WHERE order_id = ?').get(orderId) as { receipt_json: string } | undefined

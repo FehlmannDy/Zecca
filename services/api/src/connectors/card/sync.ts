@@ -10,6 +10,9 @@ import type { HoldRow } from './store'
 
 const evTypes = (tx: LithicTx) => (tx.events ?? []).map((e) => e.type)
 
+/** The sandbox never clears a purchase by itself: the poller retries our clearing, up to this many calls in all. */
+export const MAX_CLEAR_TRIES = 5
+
 /** Lithic's final answer was not an approval, whatever our webhook answered. */
 const declinedByLithic = (tx: LithicTx) => tx.status === 'DECLINED' || (!!tx.result && tx.result !== 'APPROVED')
 
@@ -76,12 +79,20 @@ export function confirmDecision(core: Core, ctx: CardCtx, lithic: LithicApi, tok
 
 /** Settles a sandbox purchase we made at Lithic (POST /v1/simulate/clearing) and marks it "Completed". */
 export async function clear(core: Core, ctx: CardCtx, lithic: LithicApi, token: string): Promise<void> {
+  if (ctx.clearing.has(token)) return
+  ctx.clearing.add(token)
   try {
-    await ctx.gate.run(() => lithic.simulateClearing({ token }))
-  } catch (e) {
-    return core.log.warn(`[card] clearing ${token} failed: ${(e as Error).message} (the poller picks it up if Lithic settles it)`)
+    const tries = ctx.store.clearTry(token)
+    try {
+      await ctx.gate.run(() => lithic.simulateClearing({ token }))
+    } catch (e) {
+      const next = tries < MAX_CLEAR_TRIES ? 'the poller tries again' : 'not tried again'
+      return core.log.warn(`[card] clearing ${token} failed (try ${tries}): ${(e as Error).message} (${next})`)
+    }
+    if (ctx.store.complete(token)) completed(core, ctx, token)
+  } finally {
+    ctx.clearing.delete(token)
   }
-  if (ctx.store.complete(token)) completed(core, ctx, token)
 }
 
 const returnAmount = (tx: LithicTx): number | undefined => {
@@ -100,7 +111,9 @@ export async function cardSync(core: Core): Promise<void> {
     for (const h of ctx.store.openHolds()) {
       try {
         const tx = await lithic.getTransaction(h.authToken)
-        if (tx) applyTransaction(core, ctx, h, tx)
+        if (!tx || applyTransaction(core, ctx, h, tx)) continue
+        // Still open at Lithic after our clearing failed: try again.
+        if (tx.status === 'PENDING' && tx.result === 'APPROVED' && h.clearTries && h.clearTries < MAX_CLEAR_TRIES) await clear(core, ctx, lithic, h.authToken)
       } catch (e) {
         core.log.warn(`[card] sync ${h.authToken}: ${(e as Error).message}`)
       }

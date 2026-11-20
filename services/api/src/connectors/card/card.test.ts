@@ -483,6 +483,64 @@ describe('our webhook approved, Lithic still declined (the answer arrived late o
   })
 })
 
+describe('after a shop purchase: the clearing is retried, the receipt follows the purchase', () => {
+  it('a failed clearing is tried again by the poller; then the receipt says completed and the purchase settles', async () => {
+    const { h, lithic, ana, settlement } = await world()
+    await cardWith(h, ana, 2000)
+    const o = await order(h)
+    const s = await secretOf(h, ana)
+    lithic.failNext('simulateClearing', 429)
+    const r = await payByCard(h, o.orderId, s)
+    expect(r.body.approved).toBe(true)
+    const token = r.body.receipt.reference
+    await h.settle()
+    expect(holdRow(h, token)?.status).toBe('authorised')
+    await cardSync(h.app.core)
+    await h.settle()
+    expect(lithic.calls.filter((c) => c === 'simulateClearing')).toHaveLength(2)
+    expect(holdRow(h, token)?.status).toBe('completed')
+    expect(cardChargeForOrder(h.app.core, o.orderId)?.receipt.status).toBe('completed')
+    expect(h.pool.payouts).toEqual([{ intentId: `cset_${token}`, to: settlement, amountMinor: 1450 }])
+  })
+
+  it('stops trying after 5 clearings', async () => {
+    const { h, lithic, ana } = await world()
+    await cardWith(h, ana, 2000)
+    const o = await order(h)
+    lithic.simulateClearing = async () => {
+      lithic.calls.push('simulateClearing')
+      throw new Error('Lithic POST /v1/simulate/clearing -> HTTP 400: not clearable')
+    }
+    expect((await payByCard(h, o.orderId, await secretOf(h, ana))).body.approved).toBe(true)
+    for (let i = 0; i < 7; i++) {
+      await h.settle()
+      await cardSync(h.app.core)
+    }
+    expect(lithic.calls.filter((c) => c === 'simulateClearing')).toHaveLength(5)
+  })
+
+  it('a shop purchase voided at Lithic no longer pays the order, and the order can be paid again', async () => {
+    const { h, lithic, ana } = await world()
+    await cardWith(h, ana, 2000)
+    const o = await order(h)
+    const s = await secretOf(h, ana)
+    lithic.failNext('simulateClearing', 429) // still open at Lithic, so it can be voided
+    const r = await payByCard(h, o.orderId, s)
+    await h.settle()
+    await lithic.simulateVoid({ token: r.body.receipt.reference })
+    await cardSync(h.app.core)
+    expect(holdRow(h, r.body.receipt.reference)?.status).toBe('voided')
+    expect(cardChargeForOrder(h.app.core, o.orderId)).toBeUndefined()
+    expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(2000)
+    const again = await payByCard(h, o.orderId, s)
+    expect(again.body.approved).toBe(true)
+    expect(again.body.receipt.reference).not.toBe(r.body.receipt.reference)
+    await h.settle()
+    expect(cardChargeForOrder(h.app.core, o.orderId)).toMatchObject({ authToken: again.body.receipt.reference, receipt: { status: 'completed' } })
+    expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(550)
+  })
+})
+
 describe('after the purchase: clearing, voids and returns from Lithic (poller)', () => {
   it('a void gives the money back to the card; a clearing completes; a return is credited once', async () => {
     const { h, lithic, ana } = await world()
