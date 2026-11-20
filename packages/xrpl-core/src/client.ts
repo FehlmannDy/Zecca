@@ -35,6 +35,8 @@ export interface XrplClient {
   ledgerIndex(): Promise<number>
   /** account_data at the validated ledger, or null when the account does not exist. */
   accountInfo(address: string): Promise<Record<string, any> | null>
+  /** Next Sequence of an account, from the current (open) ledger so pending txs count. */
+  nextSequence(address: string): Promise<number>
   /** Current base fee in drops (base fee x load factor). */
   baseFeeDrops(): Promise<number>
   autofill<T extends Record<string, unknown>>(tx: T, signersCount?: number): Promise<T>
@@ -90,6 +92,9 @@ export function createClient(network: Network, opts: CreateClientOptions = {}): 
         if (errCode(e) === 'actNotFound') return null
         throw e
       }
+    },
+    async nextSequence(address) {
+      return Number((await request({ command: 'account_info', account: address, ledger_index: 'current' })).result.account_data.Sequence)
     },
     async baseFeeDrops() {
       const info = (await request({ command: 'server_info' })).result.info

@@ -74,6 +74,11 @@ describe('createClient', () => {
     expect(await c.accountInfo('rNope')).toBeNull()
   })
 
+  it('nextSequence reads the current (open) ledger so pending txs count', async () => {
+    const raw = fakeRaw({ account_info: (r) => ({ account_data: { Sequence: r.ledger_index === 'current' ? 12 : 11 } }) })
+    expect(await createClient('devnet', { raw }).nextSequence('rA')).toBe(12)
+  })
+
   it('baseFeeDrops reads server_info (base fee x load factor, rounded up)', async () => {
     let info = { validated_ledger: { base_fee_xrp: 0.000001 }, load_factor: 1 }
     const c = createClient('devnet', { raw: fakeRaw({ server_info: () => ({ info }) }) })
