@@ -11,7 +11,7 @@ import { buildBatch, createLiveLedger, decryptBounded, fetchIssuance, fetchMPTok
 import { mockRawSigner, type MockRawSigner } from '@zecca/xrpl-core/signer'
 import { createDevnetSystem, type DevnetSystem } from '../../../../../packages/xrpl-core/src/test-devnet'
 import { createFixtureFeed } from './feed'
-import { ensureMetalIssuances, metalIssuanceId } from './metals'
+import { deliveryInvoiceId, ensureMetalIssuances, metalDelivery, metalIssuanceId } from './metals'
 import { ORACLE_DOCUMENT_ID, createOracleFeed, readOracleSet } from './oracle'
 
 let sys: DevnetSystem
@@ -77,9 +77,15 @@ describe('market on Devnet', () => {
     const auth = await ledger.prepareSponsored({ TransactionType: 'MPTokenAuthorize', Account: u.address, MPTokenIssuanceID: xau }, { reserve: true, publicKey: u.publicKey })
     expect(record('authorize (reserve sponsored)', await ledger.submitUserSigned((await u.sign(auth)).tx_blob)).split(' ')[0]).toBe('tesSUCCESS')
     const issuer = sys.keystore.getWallet('marketIssuer').address
-    const d = await ledger.submitAs('marketIssuer', { TransactionType: 'Payment', Account: issuer, Destination: u.address, Amount: mpt(xau, 1500) })
+    // The connector's delivery shape: InvoiceID per attempt and our own LastLedgerSequence, so a lost answer can be looked up.
+    const invoiceId = deliveryInvoiceId('ord_ledger_test', 1)
+    const lls = (await ledger.ledgerIndex()) + 20
+    const d = await ledger.submitAs('marketIssuer', metalDelivery({ issuer, to: u.address, issuanceId: xau, mg: 1500, invoiceId, lastLedgerSequence: lls }))
     expect(record('delivery', d).split(' ')[0]).toBe('tesSUCCESS')
     expect(await ledger.mptBalance(u.address, xau)).toBe(1500)
+    expect((await ledger.txByHash(d.hash))?.tx).toMatchObject({ InvoiceID: invoiceId, LastLedgerSequence: lls })
+    const found = (await ledger.accountTx(issuer, 200)).find((e) => String(e.tx.InvoiceID ?? '').toUpperCase() === invoiceId)
+    expect(found).toMatchObject({ hash: d.hash, validated: true, engineResult: 'tesSUCCESS' })
     const sell = await ledger.prepareSponsored({ TransactionType: 'Payment', Account: u.address, Destination: issuer, Amount: mpt(xau, 500) }, { publicKey: u.publicKey })
     expect(record('sell (fee sponsored)', await ledger.submitUserSigned((await u.sign(sell)).tx_blob)).split(' ')[0]).toBe('tesSUCCESS')
     expect(await ledger.mptBalance(u.address, xau)).toBe(1000)

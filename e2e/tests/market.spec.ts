@@ -1,6 +1,9 @@
 // E2E-2, market (SPEC §9): a verified user buys gold, then sells it back. Mock signer, DEMO_MODE=1, FEATURE_MARKET=1.
 // The tier is lifted through the market's DEMO_MODE-only hook (POST /v1/dev/market/tier) so this test does not
 // depend on the identity screen; the identity E2E covers that path. Skipped when the API has the market off.
+// Needs a ledger that can pay metals: E2E_LEDGER=devnet, or @zecca/ledger-mock once it issues MPTs (market contract
+// request). Until then the mock-ledger API refuses purchases ("Metals aren't available right now.") and this spec fails
+// at the first purchase: E2E-2 market is not green on the mock ledger.
 import { expect, test, type Browser, type Page } from '@playwright/test'
 
 const API = process.env.E2E_API_ORIGIN ?? 'http://localhost:8800'
