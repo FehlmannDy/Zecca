@@ -271,8 +271,33 @@ export function keyStorePath(env: Record<string, string | undefined>): string {
 }
 
 /** Opens (or creates) the file key store named by KEYSTORE_PATH, with KEYSTORE_PASSPHRASE. */
+function fileExists(f: string): boolean {
+  try {
+    statSync(f)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function openKeyStoreFromEnv(env: Record<string, string | undefined> = process.env): KeyStore & { snapshot(): KeyStoreState } {
   const passphrase = env.KEYSTORE_PASSPHRASE
   if (!passphrase) throw new Error('key store: KEYSTORE_PASSPHRASE is not set (run scripts/setup-env.ts)')
-  return createFileKeyStore({ path: keyStorePath(env), passphrase })
+  const file = keyStorePath(env)
+  // Deploy: a fresh volume starts empty; KEYSTORE_B64 carries the ENCRYPTED file (useless without the passphrase).
+  // It is written once, only when no store exists yet, and never overwrites one.
+  if (env.KEYSTORE_B64 && !fileExists(file)) {
+    const text = Buffer.from(env.KEYSTORE_B64, 'base64').toString('utf8')
+    let envelope: { v?: unknown; kdf?: unknown } | null = null
+    try {
+      envelope = JSON.parse(text)
+    } catch {
+      envelope = null
+    }
+    if (!envelope || envelope.v !== 1 || envelope.kdf !== 'scrypt') throw new Error('key store: KEYSTORE_B64 is not an encrypted key store file')
+    mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
+    writeFileAtomic(file, text)
+    chmodSync(file, 0o600)
+  }
+  return createFileKeyStore({ path: file, passphrase })
 }

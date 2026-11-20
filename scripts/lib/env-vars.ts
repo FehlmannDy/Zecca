@@ -39,6 +39,7 @@ export const ENV_GROUPS: EnvGroup[] = [
     vars: [
       { name: 'KEYSTORE_PATH', comment: 'Key store file; a relative path is taken from the repository root', default: './.data/keystore.enc' },
       { name: 'KEYSTORE_PASSPHRASE', comment: 'At least 16 characters; scripts/setup-env.ts generates one', secret: true },
+      { name: 'KEYSTORE_B64', comment: 'Deploy only: the ENCRYPTED key store file, base64; written to KEYSTORE_PATH on first start when no store exists (never overwrites)', optional: true },
     ],
   },
   {
