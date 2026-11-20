@@ -76,4 +76,12 @@ test('E2E-2 earn: a deposit shows a position', async ({ browser, request }) => {
   await expect(page.getByText(/\d+\.\d\d XRP|^XRP$/).first()).toBeVisible()
   if (!live) await expect(page.getByText('Test position').first()).toBeVisible()
   await expect(page.getByText('What the ledger shows')).toBeVisible()
+
+  // Withdraw: requested now, available after the vault's waiting period (4 to 8 hours).
+  await withdraw.click()
+  await expect(page.getByText('Withdrawals take a few hours. The dollars then come back to your balance.')).toBeVisible()
+  await page.getByRole('button', { name: 'Withdraw' }).last().click()
+  await expect(page.getByText('Requested, available in a few hours').first()).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: 'Done' }).click()
+  await expect(page.getByText(/Available after/).first()).toBeVisible({ timeout: live ? 6 * 60_000 : 30_000 })
 })
