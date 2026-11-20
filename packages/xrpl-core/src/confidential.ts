@@ -60,6 +60,20 @@ export async function fetchMPToken(client: ConfidentialClient, account: string, 
   }
 }
 
+/**
+ * buildOnboarding: the account already holds the token with this encryption key, so it is onboarded (e.g. a sign-up Batch
+ * whose answer was lost). Preparing again would fail on MPTokenAuthorize; activate the user instead. Check `code`.
+ */
+export class AlreadyOnboardedError extends Error {
+  readonly code = 'ALREADY_ONBOARDED'
+  readonly address: string
+  constructor(address: string) {
+    super(`${address} is already signed up on the ledger (its token holds this encryption key)`)
+    this.name = 'AlreadyOnboardedError'
+    this.address = address
+  }
+}
+
 function assertAmount(v: number, allowZero: boolean) {
   if (!Number.isSafeInteger(v) || v < (allowZero ? 0 : 1)) throw new Error(`amount must be a ${allowZero ? 'non-negative' : 'positive'} integer in minor units`)
 }
@@ -78,13 +92,19 @@ export async function buildOnboarding(ctx: ConfidentialContext, p: OnboardingPar
   const credit = p.welcomeCreditMinor
   const acct = await client.accountInfo(p.address)
   if (!acct) throw new Error(`account ${p.address} does not exist: create it first (ensureAccount)`)
-  const [seq, ledger, base, issuance, issuerSeq] = await Promise.all([
+  const [seq, ledger, base, issuance, issuerSeq, existing] = await Promise.all([
     client.nextSequence(p.address),
     client.ledgerIndex(),
     client.baseFeeDrops(),
     fetchIssuance(client, issuanceId),
     credit > 0 ? client.nextSequence(issuer.classicAddress) : Promise.resolve(0),
+    fetchMPToken(client, p.address, issuanceId),
   ])
+  if (existing) {
+    const key = existing.HolderEncryptionKey ? String(existing.HolderEncryptionKey).toUpperCase() : undefined
+    if (key === p.holderKey.publicKey.toUpperCase()) throw new AlreadyOnboardedError(p.address)
+    throw new Error(`${p.address} already holds the token ${key ? 'with another encryption key' : 'without an encryption key'}`)
+  }
   if (!issuance.IssuerEncryptionKey) throw new Error(`issuance ${issuanceId} has no IssuerEncryptionKey`)
   const convertSeq = seq + 2
   const bf = await mc.generateBlindingFactor()

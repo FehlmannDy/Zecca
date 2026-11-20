@@ -4,7 +4,7 @@ import * as rk from 'ripple-keypairs'
 import * as mc from '@xrplf/mpt-crypto'
 import { createMemoryKeyStore } from '@zecca/keystore'
 import type { ElGamalKeyPair } from '@zecca/contracts'
-import { buildConvert, buildMergeInbox, buildOnboarding, buildSend, confidentialBalance, DECRYPT_BOUNDS, decryptBounded } from './confidential'
+import { AlreadyOnboardedError, buildConvert, buildMergeInbox, buildOnboarding, buildSend, confidentialBalance, DECRYPT_BOUNDS, decryptBounded } from './confidential'
 import { batchSigningPayload, byAccountId, tfInnerBatchTxn } from './batch'
 import { mockRawSigner } from './signer'
 import { generateWalletSecret } from './wallet'
@@ -137,6 +137,23 @@ describe('buildOnboarding', () => {
       Sponsor: addr('sponsor'), SponsorFlags: 2, SponsorSignature: { SigningPubKey: '' },
     })
     expect(() => xrpl.encode(b as never)).not.toThrow()
+  })
+
+  it('refuses an account that already holds the token: ALREADY_ONBOARDED when the key is this one (a retry Batch would fail on MPTokenAuthorize)', async () => {
+    const { ctx, keystore, seqs, tokens } = setup()
+    const user = mockRawSigner()
+    seqs[user.address] = 100
+    keystore.createUserElGamal(user.address)
+    const holderKey = keystore.getElGamal({ user: user.address })
+    const p = { address: user.address, publicKey: user.publicKey, holderKey, welcomeCreditMinor: 5000 }
+    tokens[user.address] = { HolderEncryptionKey: holderKey.publicKey.toUpperCase() }
+    const err = await buildOnboarding(ctx, p).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(AlreadyOnboardedError)
+    expect(err).toMatchObject({ code: 'ALREADY_ONBOARDED', address: user.address })
+    tokens[user.address] = { HolderEncryptionKey: xrpl.deriveConfidentialKeypair().publicKey }
+    await expect(buildOnboarding(ctx, p)).rejects.toThrow(/another encryption key/)
+    tokens[user.address] = {}
+    await expect(buildOnboarding(ctx, p)).rejects.toThrow(/without an encryption key/)
   })
 
   it('refuses an account that does not exist yet', async () => {
