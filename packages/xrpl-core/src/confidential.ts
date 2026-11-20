@@ -14,18 +14,33 @@ export type ConfidentialContext = { client: ConfidentialClient; keystore: KeySto
 
 type Tx = Record<string, any>
 
-/** Decryption cost grows with the bound (10k: ~0.2 s, 200k: ~4 s), so escalate (card-issuer xrpl-pool.js). */
+/** Decryption cost grows with the bound, not the amount (10k: ~0.2 s, 200k: ~4 s, 1M: ~20 s), so escalate (card-issuer xrpl-pool.js). */
 export const DECRYPT_BOUNDS = [10_000n, 200_000n, 10_000_000n] as const
 
-export async function decryptBounded(ciphertextHex: string, privateKeyHex: string, bounds: readonly bigint[] = DECRYPT_BOUNDS): Promise<number> {
-  for (const hi of bounds) {
+/** The search cap for an issuance: no balance or amount can exceed its confidential supply (xrpl.js decryptBound). */
+export const supplyBound = (issuance: Tx) => BigInt(issuance.ConfidentialOutstandingAmount ?? 0) + 1n
+
+/**
+ * Bounded decrypt, escalating through `bounds`, each capped at `max` (pass supplyBound(issuance)). Only "not in range"
+ * escalates; malformed input throws at once. A wrong key looks like an amount out of range, so callers that know the
+ * MPToken check its HolderEncryptionKey first. mpt-crypto is synchronous WASM: it blocks the event loop for the whole
+ * search, so large balances are decrypted off the request path (the pool worker's thread), not on the API main thread.
+ */
+export async function decryptBounded(ciphertextHex: string, privateKeyHex: string, bounds: readonly bigint[] = DECRYPT_BOUNDS, max?: bigint): Promise<number> {
+  const capped = [...new Set(bounds.map((b) => (max != null && max < b ? max : b)))]
+  for (const hi of capped) {
     try {
       return Number(await mc.decryptAmount(ciphertextHex, privateKeyHex, hi))
-    } catch {
-      /* above this bound */
+    } catch (e) {
+      if (!/mpt_decrypt_amount failed/.test(String((e as Error)?.message))) throw e
     }
   }
-  throw new Error(`could not decrypt amount below ${String(bounds[bounds.length - 1])}`)
+  throw new Error(`could not decrypt amount below ${String(capped[capped.length - 1])}`)
+}
+
+function assertKeyMatches(token: Tx | null, publicKey: string, account: string) {
+  const onLedger = token?.HolderEncryptionKey
+  if (onLedger && String(onLedger).toUpperCase() !== publicKey.toUpperCase()) throw new Error(`the encryption key for ${account} does not match the one on the ledger`)
 }
 
 const accountIdHex = (a: string) => Buffer.from(decodeAccountID(a)).toString('hex').toUpperCase()
@@ -126,7 +141,8 @@ export async function buildSend(ctx: ConfidentialContext, p: SendParams): Promis
     client.nextSequence(p.from),
   ])
   if (!destToken?.HolderEncryptionKey) throw new Error(`recipient ${p.to} has no registered HolderEncryptionKey`)
-  const balance = token?.ConfidentialBalanceSpending ? await decryptBounded(token.ConfidentialBalanceSpending, p.senderKey.privateKey) : 0
+  assertKeyMatches(token, p.senderKey.publicKey, p.from)
+  const balance = token?.ConfidentialBalanceSpending ? await decryptBounded(token.ConfidentialBalanceSpending, p.senderKey.privateKey, DECRYPT_BOUNDS, supplyBound(issuance)) : 0
   if (p.amountMinor > balance) throw new Error('insufficient confidential balance')
   const outstanding = BigInt(issuance.ConfidentialOutstandingAmount ?? 0)
   const tx = await xrpl.prepareConfidentialSend(client.raw as xrpl.Client, {
@@ -168,11 +184,15 @@ export async function buildConvert(ctx: ConfidentialContext, p: { account: strin
   return fillTx(client, tx as unknown as Tx, {})
 }
 
+/** Spending and inbox, each search capped by the confidential supply read at the same ledger as the token. */
 export async function confidentialBalance(ctx: ConfidentialContext, address: string, key: ElGamalKeyPair): Promise<ConfidentialBalance> {
-  const token = await fetchMPToken(ctx.client, address, ctx.issuanceId)
+  const ledger = await ctx.client.ledgerIndex()
+  const [token, issuance] = await Promise.all([fetchMPToken(ctx.client, address, ctx.issuanceId, ledger), fetchIssuance(ctx.client, ctx.issuanceId, ledger)])
+  assertKeyMatches(token, key.publicKey, address)
+  const max = supplyBound(issuance)
   const [spendableMinor, inboxMinor] = await Promise.all([
-    token?.ConfidentialBalanceSpending ? decryptBounded(token.ConfidentialBalanceSpending, key.privateKey) : 0,
-    token?.ConfidentialBalanceInbox ? decryptBounded(token.ConfidentialBalanceInbox, key.privateKey) : 0,
+    token?.ConfidentialBalanceSpending ? decryptBounded(token.ConfidentialBalanceSpending, key.privateKey, DECRYPT_BOUNDS, max) : 0,
+    token?.ConfidentialBalanceInbox ? decryptBounded(token.ConfidentialBalanceInbox, key.privateKey, DECRYPT_BOUNDS, max) : 0,
   ])
   return { spendableMinor, inboxMinor }
 }

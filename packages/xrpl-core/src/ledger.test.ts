@@ -9,6 +9,7 @@ import { createLiveLedger } from './ledger'
 import { mockRawSigner } from './signer'
 import { generateWalletSecret, walletFrom } from './wallet'
 import { tfSponsorCreatedAccount } from './batch'
+import * as mc from '@xrplf/mpt-crypto'
 
 const ID = '006C6AA175853178147D8F0D592D9DE3658C836F69985AB9'
 type Tx = Record<string, any>
@@ -21,6 +22,7 @@ function fakeRippled() {
   const submitted: Tx[] = []
   const txs: Record<string, Tx> = {}
   const requests: Tx[] = []
+  const issuance: Tx = { ConfidentialOutstandingAmount: '900000' }
   let connected = false
   const raw: RawClient & { emit(e: string, ...a: any[]): void } = {
     async request(req: Tx) {
@@ -50,6 +52,9 @@ function fakeRippled() {
           return { result: txs[req.transaction] }
         case 'account_tx':
           return { result: { transactions: Object.values(txs).filter((t) => JSON.stringify(t).includes(req.account)).reverse() } }
+        case 'ledger_entry':
+          if (req.mpt_issuance) return { result: { node: issuance } }
+          throw Object.assign(new Error('entryNotFound'), { data: { error: 'entryNotFound' } })
         case 'subscribe':
         case 'unsubscribe':
           return { result: {} }
@@ -70,7 +75,7 @@ function fakeRippled() {
     emit: (e: string, ...a: any[]) => ee.emit(e, ...a),
     autofill: async (tx: any) => tx,
   }
-  return { raw, seqs, submitted, txs, requests }
+  return { raw, seqs, submitted, txs, requests, issuance }
 }
 
 function setup() {
@@ -181,6 +186,15 @@ describe('reading the ledger', () => {
     expect(ev?.tx.TransactionType).toBe('AccountSet')
     expect(await ledger.txByHash('00'.repeat(32))).toBeNull()
     expect((await ledger.accountTx(addr('pool'), 5)).map((e) => e.hash)).toEqual([r.hash])
+  })
+
+  it('decryptAmount caps the search at the confidential supply on the ledger (+1)', async () => {
+    const { ledger, rip } = setup()
+    const k = xrpl.deriveConfidentialKeypair()
+    const ct = await mc.encryptAmount(5000n, k.publicKey, await mc.generateBlindingFactor())
+    expect(await ledger.decryptAmount(ct, k.privateKey)).toBe(5000)
+    rip.issuance.ConfidentialOutstandingAmount = '4000'
+    await expect(ledger.decryptAmount(ct, k.privateKey)).rejects.toThrow(/could not decrypt amount below 4001/)
   })
 
   it('watchAccount delivers validated txs of that account once, re-subscribes on reconnect, and unsubscribes', async () => {

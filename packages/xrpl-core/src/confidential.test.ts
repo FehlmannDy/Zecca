@@ -4,7 +4,7 @@ import * as rk from 'ripple-keypairs'
 import * as mc from '@xrplf/mpt-crypto'
 import { createMemoryKeyStore } from '@zecca/keystore'
 import type { ElGamalKeyPair } from '@zecca/contracts'
-import { buildConvert, buildMergeInbox, buildOnboarding, buildSend, confidentialBalance, decryptBounded } from './confidential'
+import { buildConvert, buildMergeInbox, buildOnboarding, buildSend, confidentialBalance, DECRYPT_BOUNDS, decryptBounded } from './confidential'
 import { batchSigningPayload, byAccountId, tfInnerBatchTxn } from './batch'
 import { mockRawSigner } from './signer'
 import { generateWalletSecret } from './wallet'
@@ -62,6 +62,24 @@ describe('decryptBounded', () => {
     const k = xrpl.deriveConfidentialKeypair()
     expect(await decryptBounded(await enc(500, k.publicKey), k.privateKey, [100n, 1000n])).toBe(500)
     await expect(decryptBounded(await enc(5000, k.publicKey), k.privateKey, [100n, 1000n])).rejects.toThrow(/could not decrypt/)
+  })
+  it('caps every bound at max (the confidential supply + 1: no amount can exceed it)', async () => {
+    const k = xrpl.deriveConfidentialKeypair()
+    const ct = await enc(5000, k.publicKey)
+    await expect(decryptBounded(ct, k.privateKey, [10_000n], 4000n)).rejects.toThrow(/could not decrypt/)
+    expect(await decryptBounded(ct, k.privateKey, DECRYPT_BOUNDS, 5001n)).toBe(5000)
+  })
+  it('a wrong key costs one search up to the cap, not the whole escalation', async () => {
+    const k = xrpl.deriveConfidentialKeypair()
+    const other = xrpl.deriveConfidentialKeypair()
+    const t = Date.now()
+    await expect(decryptBounded(await enc(5000, k.publicKey), other.privateKey, [10_000n, 400_000n], 5001n)).rejects.toThrow(/could not decrypt/)
+    expect(Date.now() - t).toBeLessThan(2000)
+  }, 30_000)
+  it('does not escalate on malformed input (bad hex, wrong key length)', async () => {
+    const k = xrpl.deriveConfidentialKeypair()
+    await expect(decryptBounded('ZZ', k.privateKey)).rejects.toThrow(/hex/)
+    await expect(decryptBounded(await enc(1, k.publicKey), 'AB')).rejects.toThrow(/privateKey/)
   })
 })
 
@@ -172,6 +190,17 @@ describe('buildSend', () => {
     await expect(buildSend(ctx, { ...p, amountMinor: 0 })).rejects.toThrow(/positive integer/)
     await expect(buildSend(ctx, { ...p, to: 'rNoKey', amountMinor: 1 })).rejects.toThrow(/HolderEncryptionKey/)
   })
+
+  it('refuses a sender key that is not the one registered on the ledger', async () => {
+    const { ctx, keystore, seqs, tokens, addr } = setup()
+    const user = mockRawSigner()
+    seqs[user.address] = 9
+    keystore.createUserElGamal(user.address)
+    const k = keystore.getElGamal({ user: user.address })
+    tokens[user.address] = { HolderEncryptionKey: xrpl.deriveConfidentialKeypair().publicKey, ConfidentialBalanceSpending: await enc(100, k.publicKey) }
+    tokens[addr('pool')] = { HolderEncryptionKey: xrpl.deriveConfidentialKeypair().publicKey }
+    await expect(buildSend(ctx, { from: user.address, to: addr('pool'), senderKey: k, sponsored: true, amountMinor: 10 })).rejects.toThrow(/does not match/)
+  }, 20_000)
 })
 
 describe('buildMergeInbox and buildConvert', () => {
@@ -206,5 +235,19 @@ describe('confidentialBalance', () => {
     tokens.rA = { ConfidentialBalanceSpending: await enc(700, k.publicKey), ConfidentialBalanceInbox: await enc(45, k.publicKey) }
     expect(await confidentialBalance(ctx, 'rA', k)).toEqual({ spendableMinor: 700, inboxMinor: 45 })
     expect(await confidentialBalance(ctx, 'rNone', k)).toEqual({ spendableMinor: 0, inboxMinor: 0 })
+  })
+  it('bounds the search by the issuance confidential supply (read at the same ledger as the token)', async () => {
+    const { ctx, tokens, issuance } = setup()
+    const k = xrpl.deriveConfidentialKeypair() as ElGamalKeyPair
+    // Impossible on a real ledger (a balance above the supply): shows the supply caps the search.
+    issuance.ConfidentialOutstandingAmount = '1000'
+    tokens.rA = { HolderEncryptionKey: k.publicKey, ConfidentialBalanceSpending: await enc(5000, k.publicKey) }
+    await expect(confidentialBalance(ctx, 'rA', k)).rejects.toThrow(/could not decrypt/)
+  })
+  it('refuses a key that is not the one registered on the ledger, before any decrypt', async () => {
+    const { ctx, tokens } = setup()
+    const k = xrpl.deriveConfidentialKeypair() as ElGamalKeyPair
+    tokens.rA = { HolderEncryptionKey: xrpl.deriveConfidentialKeypair().publicKey, ConfidentialBalanceSpending: await enc(5, k.publicKey) }
+    await expect(confidentialBalance(ctx, 'rA', k)).rejects.toThrow(/does not match/)
   })
 })

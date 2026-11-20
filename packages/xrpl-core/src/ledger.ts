@@ -113,7 +113,9 @@ export function createLiveLedger(opts: LiveLedgerOptions): LiveLedger {
     submitAs,
 
     confidentialBalance: (address, key) => conf.confidentialBalance(ctx, address, key),
-    decryptAmount: (ct, pk) => conf.decryptBounded(ct, pk),
+    // Capped by today's confidential supply: Zecca never converts back or claws back, so the supply only grows and any
+    // amount ever sent (e.g. a deposit's DestinationEncryptedAmount) is below it.
+    decryptAmount: async (ct, pk) => conf.decryptBounded(ct, pk, conf.DECRYPT_BOUNDS, conf.supplyBound(await conf.fetchIssuance(client, issuanceId))),
     async mptBalance(address, id) {
       const token = await conf.fetchMPToken(client, address, id)
       return Number(token?.MPTAmount ?? 0)
