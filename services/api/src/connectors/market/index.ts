@@ -3,15 +3,18 @@
 //   handler debits, checks the limits and tells the pool worker). The first purchase of a metal needs the user's
 //   MPTokenAuthorize first (reserve sponsored, prepared kind 'market_authorize'): a send's proof binds the account
 //   sequence, so the send is built once the authorize has validated (DECISIONS: two approvals, two calls).
-//   On 'received' the market issuer pays the metal (public MPT Payment). Idempotent per intent.
+//   On 'received' the market issuer pays the metal (public MPT Payment, marked with an InvoiceID per attempt). At most one
+//   payment lands per order: a lost answer is looked up on the ledger (by hash, else by InvoiceID) before anything is sent
+//   again, and a new attempt goes out only after a final failure or once the last one's LastLedgerSequence has passed.
 // - Sell: the user pays the metal back to the market issuer (public MPT Payment, fee sponsored, kind 'market_sell');
 //   on validation the pool pays out the dollars like any payout (pending -> payout -> merge -> available). The sale
 //   is an intent of kind 'market_buy' (the metals kind, from Zecca to the user) until IntentKind has 'market_sell';
-//   kinds with a received handler settle their own payouts, so the sale's payout and merge are run here.
+//   kinds with a received handler settle their own payouts, so the sale's payout and merge are run here, and asked again
+//   by the market's tick until settled (an unconfirmed payout is never a failure).
 // - Prices: PriceFeed (feed.ts), published on the ledger with OracleSet when the ledger is live (oracle.ts).
 // Mounted by the orchestrator: mountMarket(app, core) and registerMarket(core). Everything is behind FEATURE_MARKET.
 import type { Hono } from 'hono'
-import { DEFAULTS, formatGrams, type MetalSymbol, type PreparedTx, type PriceFeed } from '@zecca/contracts'
+import { DEFAULTS, formatGrams, type MetalSymbol, type PreparedTx, type PriceFeed, type SubmitResult } from '@zecca/contracts'
 import type { Core } from '../../core'
 import { ApiErr, Err } from '../../errors'
 import { mount } from '../../http'
@@ -24,14 +27,28 @@ import { ciphertextPreviewOf, emitIntent } from '../../intents/flow'
 import { storePrepared } from '../../prepared/store'
 import { change24hPct, createFixtureFeed, createHttpFeed } from './feed'
 import { createOracleFeed } from './oracle'
-import { ensureMetalIssuances, METALS, metalIssuanceId, metalOf } from './metals'
+import { deliveryInvoiceId, ensureMetalIssuances, metalDelivery, METALS, metalIssuanceId, metalOf } from './metals'
 import { QuoteError, quoteBuy, quoteSell, sidePrices, valueOfMg, type Quote } from './quote'
 import { holders, initMarketTables, orders, type OrderRow } from './repo'
 
 export const LOCKED = 'Verify your identity to trade metals.'
 const HISTORY_POINTS = 30
 
-type MarketCtx = { feed: PriceFeed; spreadBps: number; retryMs: number; ready: Promise<void>; registered: boolean }
+type MarketCtx = {
+  feed: PriceFeed
+  spreadBps: number
+  retryMs: number
+  tickMs: number
+  ready: Promise<void>
+  registered: boolean
+  /** False on a mock ledger that cannot pay metals: purchases are refused before any money moves. */
+  canPayMetals: boolean
+  /** Work running in this process ('deliver:<order>', 'sale:<intent>'), never run twice at once. */
+  running: Set<string>
+  /** Sales to ask again: tries so far and not before `at` (5 s, 10 s, 20 s ... up to 60 s). */
+  retry: Map<string, { tries: number; at: number }>
+  ticking: boolean
+}
 const contexts = new WeakMap<Core, MarketCtx>()
 
 export type MarketOptions = {
@@ -39,6 +56,8 @@ export type MarketOptions = {
   feed?: PriceFeed
   /** Base delay between metal delivery attempts (default 2 s). */
   retryMs?: number
+  /** Interval of the market's background job (default 5 s). 0: off (tests call marketTick). */
+  tickMs?: number
 }
 
 const on = (core: Core) => !!core.settings.features.market
@@ -60,18 +79,32 @@ function ctx(core: Core, o: MarketOptions = {}): MarketCtx {
   let c = contexts.get(core)
   if (!c) {
     initMarketTables(core)
-    c = { feed: o.feed ?? defaultFeed(core), spreadBps: spreadOf(core), retryMs: o.retryMs ?? 2000, ready: Promise.resolve(), registered: false }
+    c = {
+      feed: o.feed ?? defaultFeed(core),
+      spreadBps: spreadOf(core),
+      retryMs: o.retryMs ?? 2000,
+      tickMs: o.tickMs ?? 5000,
+      ready: Promise.resolve(),
+      registered: false,
+      canPayMetals: true,
+      running: new Set(),
+      retry: new Map(),
+      ticking: false,
+    }
     contexts.set(core, c)
   } else {
     if (o.feed) c.feed = o.feed
     if (o.retryMs !== undefined) c.retryMs = o.retryMs
+    if (o.tickMs !== undefined) c.tickMs = o.tickMs
   }
   return c
 }
 
+const UNAVAILABLE = "Metals aren't available right now. Try again later."
+
 function issuanceOf(core: Core, symbol: MetalSymbol): string {
   const id = metalIssuanceId(core.keystore, symbol)
-  if (!id || !core.keystore.hasWallet('marketIssuer')) throw new ApiErr(503, 'upstream_error', "Metals aren't available right now. Try again later.")
+  if (!id || !core.keystore.hasWallet('marketIssuer')) throw new ApiErr(503, 'upstream_error', UNAVAILABLE)
   return id
 }
 
@@ -124,6 +157,8 @@ export function mountMarket(app: Hono, core: Core): void {
     const u = user!
     if (u.tier !== 1) throw Err.forbidden(LOCKED)
     const m = ctx(core)
+    await m.ready
+    if (!m.canPayMetals) throw new ApiErr(503, 'upstream_error', UNAVAILABLE)
     const issuanceId = issuanceOf(core, body.symbol)
     const p = await m.feed.price(body.symbol)
     let q: Quote
@@ -292,24 +327,75 @@ export function registerMarket(core: Core, o: MarketOptions = {}): void {
   // The mock ledger starts empty on every run: create the metal issuances there. Devnet: scripts/bootstrap-market.ts.
   if (core.ledger.mode === 'mock' && METALS.some((x) => !metalIssuanceId(core.keystore, x.symbol))) {
     m.ready = ensureMetalIssuances(core.ledger, core.keystore, (l) => core.log.info(l))
-      .then(() => undefined)
+      .then(() => canPayMetals(core))
+      .then((ok) => {
+        m.canPayMetals = ok
+        if (!ok) core.log.warn('[market] this mock ledger cannot pay metals yet (no MPT issuance support): purchases are refused')
+      })
       .catch((e) => core.log.warn(`[market] metal issuances not created: ${(e as Error).message}`))
     core.track(m.ready, 'market issuances')
   }
-  // Purchases received but not delivered, sales paid but not settled (e.g. the process stopped in between).
-  core.track(
-    m.ready.then(async () => {
-      for (const order of orders.withStatus(core, 'open')) {
-        if (order.side === 'buy' && order.intentId && intents.byId(core, order.intentId)?.status === 'received') await deliver(core, order.intentId)
-      }
-      for (const order of orders.withStatus(core, 'done')) {
-        const i = order.side === 'sell' && order.intentId ? intents.byId(core, order.intentId) : undefined
-        if (i?.status === 'submitted') creditSale(core, i.id)
-        else if (i?.status === 'received' || (i?.status === 'paid_out' && !effectDone(core, `${i.id}:settled`))) await paySale(core, i.id)
-      }
-    }),
-    'market sweep',
-  )
+  // At start-up (what the last run left behind), then every tickMs.
+  core.track(marketTick(core), 'market sweep')
+  if (m.tickMs > 0) setInterval(() => core.track(marketTick(core), 'market tick'), m.tickMs).unref?.()
+}
+
+/**
+ * Mock ledger only: can the market issuer pay a metal? @zecca/ledger-mock without MPT issuance support cannot, and a purchase
+ * would then take the dollars and fail at delivery. A 1 mg round trip with the oracle wallet (in memory).
+ */
+async function canPayMetals(core: Core): Promise<boolean> {
+  const iss = metalIssuanceId(core.keystore, 'XAU')
+  if (!iss || !core.keystore.hasWallet('oracle')) return true
+  const issuer = core.keystore.getWallet('marketIssuer').address
+  const holder = core.keystore.getWallet('oracle').address
+  const mg = { mpt_issuance_id: iss, value: '1' }
+  await core.ledger.submitAs('oracle', { TransactionType: 'MPTokenAuthorize', Account: holder, MPTokenIssuanceID: iss })
+  const paid = await core.ledger.submitAs('marketIssuer', { TransactionType: 'Payment', Account: issuer, Destination: holder, Amount: mg })
+  if (paid.engineResult !== 'tesSUCCESS') return false
+  await core.ledger.submitAs('oracle', { TransactionType: 'Payment', Account: holder, Destination: issuer, Amount: mg })
+  return true
+}
+
+/** The market's background job: purchases to deliver or to look up, sales to pay out or settle. */
+export async function marketTick(core: Core): Promise<void> {
+  const m = ctx(core)
+  if (!on(core) || m.ticking) return
+  m.ticking = true
+  try {
+    await m.ready
+    const work: Promise<unknown>[] = []
+    for (const o of orders.withStatus(core, 'open')) {
+      if (o.side === 'buy' && o.intentId && intents.byId(core, o.intentId)?.status === 'received') work.push(deliver(core, o.intentId))
+    }
+    for (const o of orders.withStatus(core, 'delivering')) {
+      work.push(exclusive(core, `deliver:${o.id}`, () => deliveryLoop(core, o.id, () => lookUpDelivery(core, o.id))))
+    }
+    for (const o of orders.withStatus(core, 'done')) {
+      const i = o.side === 'sell' && o.intentId ? intents.byId(core, o.intentId) : undefined
+      if (i?.status === 'submitted') creditSale(core, i.id)
+      else if (i && (i.status === 'received' || (i.status === 'paid_out' && !effectDone(core, `${i.id}:settled`))) && (m.retry.get(i.id)?.at ?? 0) <= core.now())
+        work.push(runSale(core, i.id))
+    }
+    await Promise.all(work)
+  } finally {
+    m.ticking = false
+  }
+}
+
+/** Runs job unless the same key is already running in this process (undefined then, or when it threw: logged, looked at again). */
+async function exclusive<T>(core: Core, key: string, job: () => Promise<T>): Promise<T | undefined> {
+  const { running } = ctx(core)
+  if (running.has(key)) return undefined
+  running.add(key)
+  try {
+    return await job()
+  } catch (e) {
+    core.log.warn(`[market] ${key}: ${(e as Error).message}`)
+    return undefined
+  } finally {
+    running.delete(key)
+  }
 }
 
 const effectDone = (core: Core, key: string) => core.db.prepare('SELECT 1 FROM effects WHERE key = ?').get(key) !== undefined
@@ -331,11 +417,22 @@ function creditSale(core: Core, id: string): void {
   emitIntent(core, id)
   emitActivity(core, actId)
   emitBalance(core, i.toUserId!)
-  core.track(paySale(core, id), 'market sale payout')
+  core.track(runSale(core, id), 'market sale payout')
 }
 
-/** The pool pays the proceeds (received -> paid_out), then the relayer merges the inbox and pending becomes available. */
-async function paySale(core: Core, id: string, attempt = 1): Promise<void> {
+/** paySale, one run at a time per sale; when it is not finished, the tick asks again after 5 s, 10 s, 20 s ... up to 60 s. */
+async function runSale(core: Core, id: string): Promise<void> {
+  const m = ctx(core)
+  if (await exclusive(core, `sale:${id}`, () => paySale(core, id))) return void m.retry.delete(id)
+  const tries = (m.retry.get(id)?.tries ?? 0) + 1
+  m.retry.set(id, { tries, at: core.now() + Math.min(60_000, 5_000 * 2 ** (tries - 1)) })
+}
+
+/**
+ * The pool pays the proceeds (received -> paid_out), then the relayer merges the inbox and pending becomes available.
+ * True when finished (settled, or failed for good); false when it must be asked again.
+ */
+async function paySale(core: Core, id: string): Promise<boolean> {
   const i = intents.byId(core, id)!
   const to = users.byId(core, i.toUserId!)!
   const net = i.amountMinor - i.feeMinor
@@ -344,10 +441,10 @@ async function paySale(core: Core, id: string, attempt = 1): Promise<void> {
       const { hash } = await core.pool.payout({ intentId: id, to: to.address, amountMinor: net })
       if (intents.transition(core, id, 'received', 'paid_out', { payoutTxHash: hash })) emitIntent(core, id)
     } catch (e) {
-      // payout_unknown: the pool worker could not tell whether it landed; asking again is safe (it looks it up first).
-      if ((e as { code?: string }).code === 'payout_unknown' && attempt < 6) {
-        await sleep(ctx(core).retryMs * 2 ** attempt)
-        return paySale(core, id, attempt + 1)
+      // payout_unknown: the payout may have landed. Not a failure: asked again (the pool worker looks it up before sending).
+      if ((e as { code?: string }).code === 'payout_unknown') {
+        core.log.warn(`[market] sale ${id}: payout not confirmed yet: ${(e as Error).message}; asked again later`)
+        return false
       }
       core.log.error(`[market] sale ${id}: payout failed: ${(e as Error).message} (money stays in the pool; retry is manual)`)
       let touched = false
@@ -359,19 +456,15 @@ async function paySale(core: Core, id: string, attempt = 1): Promise<void> {
       })()
       emitIntent(core, id)
       if (touched) emitBalance(core, to.id)
-      return
+      return true
     }
   }
-  if (intents.byId(core, id)!.status !== 'paid_out') return
-  for (let k = 1; ; k++) {
-    try {
-      await core.pool.mergeInboxFor(to.address)
-      break
-    } catch (e) {
-      core.log.warn(`[market] merge for @${to.handle} after sale ${id} (attempt ${k}): ${(e as Error).message}`)
-      if (k >= 4) return core.log.error(`[market] sale ${id}: @${to.handle}'s money stays pending until a merge succeeds`)
-      await sleep(ctx(core).retryMs * 2 ** k)
-    }
+  if (intents.byId(core, id)!.status !== 'paid_out' || effectDone(core, `${id}:settled`)) return true
+  try {
+    await core.pool.mergeInboxFor(to.address)
+  } catch (e) {
+    core.log.warn(`[market] merge for @${to.handle} after sale ${id}: ${(e as Error).message}; the money stays pending and is merged later`)
+    return false
   }
   const moved = core.db.transaction(() => {
     if (!claimEffect(core, `${id}:settled`)) return false
@@ -379,44 +472,98 @@ async function paySale(core: Core, id: string, attempt = 1): Promise<void> {
     return true
   })()
   if (moved) emitBalance(core, to.id)
+  return true
 }
 
 const DELIVERY_FAILED = "We received your payment but couldn't deliver the metal yet. Our team has been told and will sort it out."
 const MAX_ATTEMPTS = 3
+/** A delivery's LastLedgerSequence window (xrpl-core's window for our own txs): not on the ledger after it, it never will be. */
+const DELIVERY_LLS_WINDOW = 20
+/** The payment did not move the metal and never will (a validated tec, or never applied). Anything else may still land. */
+const isFinal = (code: string) => /^(tec|tem|tef|tel)/.test(code) && code !== 'tefMAX_LEDGER' && code !== 'tefALREADY'
 
-/** received -> the market issuer pays the metal -> paid_out (payoutTxHash = the metal payment). Once per intent. */
+/** received -> the market issuer pays the metal -> paid_out (payoutTxHash = the metal payment). At most one payment lands. */
 async function deliver(core: Core, intentId: string): Promise<void> {
   const order = orders.byIntent(core, intentId)
   if (!order || order.side !== 'buy') return core.log.warn(`[market] received ${intentId}: no purchase order`)
-  if (!orders.move(core, order.id, 'open', 'delivering', { attempt: true })) return
-  const user = users.byId(core, order.userId)!
-  let result: { ok: boolean; hash?: string; why: string }
-  try {
-    const r = await core.ledger.submitAs('marketIssuer', {
-      TransactionType: 'Payment',
-      Account: core.keystore.getWallet('marketIssuer').address,
-      Destination: user.address,
-      Amount: { mpt_issuance_id: issuanceOf(core, order.symbol), value: String(order.quantityMg) },
-    })
-    result = { ok: r.validated && r.engineResult === 'tesSUCCESS', hash: r.hash, why: r.engineResult }
-  } catch (e) {
-    result = { ok: false, why: (e as Error).message }
-  }
-  if (result.ok) {
-    orders.move(core, order.id, 'delivering', 'done', { ledgerTxHash: result.hash })
-    if (intents.transition(core, intentId, 'received', 'paid_out', { payoutTxHash: result.hash })) emitIntent(core, intentId)
-    return
-  }
-  const attempt = order.attempts + 1
-  core.log.warn(`[market] delivery of ${order.quantityMg} mg ${order.symbol} to @${user.handle} (${intentId}) attempt ${attempt}: ${result.why}`)
-  if (attempt < MAX_ATTEMPTS) {
-    orders.move(core, order.id, 'delivering', 'open')
-    const wait = ctx(core).retryMs * attempt
-    await new Promise((r) => setTimeout(r, wait))
-    return deliver(core, intentId)
-  }
-  core.log.error(`[market] ${intentId}: metal not delivered after ${attempt} attempts; the dollars stay in the pool (manual retry)`)
-  orders.move(core, order.id, 'delivering', 'failed')
-  if (intents.transition(core, intentId, 'received', 'failed', { failure: { code: 'delivery_failed', message: DELIVERY_FAILED } })) emitIntent(core, intentId)
+  if (order.status !== 'open') return
+  await exclusive(core, `deliver:${order.id}`, () => deliveryLoop(core, order.id, () => sendDelivery(core, order.id, 'open')))
 }
 
+/** One step (a send, or a look-up of the last send); after a final failure, the next attempt, up to MAX_ATTEMPTS. */
+async function deliveryLoop(core: Core, id: string, first: () => Promise<boolean>): Promise<void> {
+  let again = await first()
+  while (again) {
+    await sleep(ctx(core).retryMs * orders.byId(core, id)!.attempts)
+    again = await sendDelivery(core, id, 'delivering')
+  }
+}
+
+/** Sends one attempt. True when it failed for good and another may be sent; false when done, or when its outcome is unknown. */
+async function sendDelivery(core: Core, id: string, from: 'open' | 'delivering'): Promise<boolean> {
+  const order = orders.byId(core, id)!
+  const user = users.byId(core, order.userId)!
+  const attempt = order.attempts + 1
+  let tx: ReturnType<typeof metalDelivery>
+  try {
+    tx = metalDelivery({
+      issuer: core.keystore.getWallet('marketIssuer').address,
+      to: user.address,
+      issuanceId: issuanceOf(core, order.symbol),
+      mg: order.quantityMg,
+      invoiceId: deliveryInvoiceId(id, attempt),
+      lastLedgerSequence: (await core.ledger.ledgerIndex()) + DELIVERY_LLS_WINDOW,
+    })
+  } catch (e) {
+    // Nothing was sent: the tick tries again.
+    core.log.warn(`[market] delivery for ${order.intentId} not started: ${(e as Error).message}`)
+    return false
+  }
+  if (!orders.claimDelivery(core, id, from, tx.LastLedgerSequence)) return false
+  let r: SubmitResult
+  try {
+    r = await core.ledger.submitAs('marketIssuer', tx)
+  } catch (e) {
+    core.log.warn(`[market] delivery for ${order.intentId}: ${(e as Error).message}; it may have been sent, so it is looked up before sending again`)
+    return false
+  }
+  if (r.validated && r.engineResult === 'tesSUCCESS') return delivered(core, order, r.hash)
+  if (isFinal(r.engineResult)) return failedAttempt(core, id, r.engineResult)
+  orders.setDeliveryHash(core, id, r.hash)
+  core.log.warn(`[market] delivery for ${order.intentId}: outcome unknown (${r.engineResult} tx=${r.hash}); looked up before sending again`)
+  return false
+}
+
+/** A send whose answer was lost: found on the ledger (by hash, else by InvoiceID), or not there once its LastLedgerSequence passed. */
+async function lookUpDelivery(core: Core, id: string): Promise<boolean> {
+  const order = orders.byId(core, id)!
+  if (order.status !== 'delivering' || order.deliveryLls === undefined) return false
+  // Read before the look-up: not found while a later ledger than LastLedgerSequence is validated means never applied.
+  const index = await core.ledger.ledgerIndex()
+  const invoiceId = deliveryInvoiceId(id, order.attempts)
+  const tx = order.deliveryHash
+    ? await core.ledger.txByHash(order.deliveryHash)
+    : ((await core.ledger.accountTx(core.keystore.getWallet('marketIssuer').address, 200)).find((e) => String(e.tx.InvoiceID ?? '').toUpperCase() === invoiceId) ?? null)
+  if (tx?.validated && tx.engineResult === 'tesSUCCESS') return delivered(core, order, tx.hash)
+  if (tx?.validated) return failedAttempt(core, id, tx.engineResult)
+  if (index <= order.deliveryLls) return false
+  return failedAttempt(core, id, `not on the ledger by ledger ${order.deliveryLls}`)
+}
+
+function delivered(core: Core, order: OrderRow, hash: string): false {
+  orders.move(core, order.id, 'delivering', 'done', { ledgerTxHash: hash })
+  if (intents.transition(core, order.intentId!, 'received', 'paid_out', { payoutTxHash: hash })) emitIntent(core, order.intentId!)
+  return false
+}
+
+/** True when another attempt may be sent; after MAX_ATTEMPTS the purchase fails with a sentence the user can read. */
+function failedAttempt(core: Core, id: string, why: string): boolean {
+  const order = orders.byId(core, id)!
+  const user = users.byId(core, order.userId)!
+  core.log.warn(`[market] delivery of ${order.quantityMg} mg ${order.symbol} to @${user.handle} (${order.intentId}) attempt ${order.attempts}: ${why}`)
+  if (order.attempts < MAX_ATTEMPTS) return true
+  core.log.error(`[market] ${order.intentId}: metal not delivered after ${order.attempts} attempts; the dollars stay in the pool (manual retry)`)
+  orders.move(core, id, 'delivering', 'failed')
+  if (intents.transition(core, order.intentId!, 'received', 'failed', { failure: { code: 'delivery_failed', message: DELIVERY_FAILED } })) emitIntent(core, order.intentId!)
+  return false
+}

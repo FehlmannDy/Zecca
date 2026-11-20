@@ -1,6 +1,7 @@
 // The three metals (SPEC §4.9): ordinary MPTs issued by the market issuer, 1 unit = 1 milligram (AssetScale 0).
 // Their issuance ids live in key store meta ('metal:XAU', 'metal:XAG', 'metal:XPD'), written by
 // scripts/bootstrap-market.ts on Devnet, or by ensureMetalIssuances on the mock ledger at start-up.
+import { createHash } from 'node:crypto'
 import xrpl from 'xrpl'
 import type { KeyStore, Ledger, MetalSymbol } from '@zecca/contracts'
 
@@ -37,6 +38,21 @@ export function tickerOfMetadata(hex: unknown): string | undefined {
 
 export function metalIssuanceCreate(account: string, symbol: MetalSymbol): Record<string, unknown> & { TransactionType: string; Account: string } {
   return { TransactionType: 'MPTokenIssuanceCreate', Account: account, AssetScale: 0, Flags: 0, MPTokenMetadata: metalMetadataHex(symbol) }
+}
+
+/** One delivery attempt's mark on the ledger (Payment InvoiceID), so it can be found even when its hash was never learnt. */
+export const deliveryInvoiceId = (orderId: string, attempt: number) => createHash('sha256').update(`zecca:market:${orderId}:${attempt}`).digest('hex').toUpperCase()
+
+/** The market issuer pays `mg` of a metal (public MPT Payment). LastLedgerSequence is ours, so a lost answer can be settled. */
+export function metalDelivery(p: { issuer: string; to: string; issuanceId: string; mg: number; invoiceId: string; lastLedgerSequence: number }) {
+  return {
+    TransactionType: 'Payment',
+    Account: p.issuer,
+    Destination: p.to,
+    Amount: { mpt_issuance_id: p.issuanceId, value: String(p.mg) },
+    InvoiceID: p.invoiceId,
+    LastLedgerSequence: p.lastLedgerSequence,
+  }
 }
 
 /** MPTokenIssuanceID = the creating transaction's Sequence (4 bytes, big-endian) + the issuer's AccountID. */

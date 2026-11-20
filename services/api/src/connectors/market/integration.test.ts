@@ -104,4 +104,17 @@ describe('market integration: mock ledger + pool worker', async () => {
     await h.app.core.idle()
     for (const s of ['XAU', 'XAG', 'XPD'] as const) expect(metalIssuanceId(h.keystore, s)).toMatch(/^[0-9A-F]{48}$/)
   })
+
+  it.runIf(!supported)('a mock ledger that cannot pay metals refuses purchases before any money moves', async () => {
+    const { h } = realWorld()
+    await h.app.core.idle()
+    const ana = await h.signUp('ana')
+    await h.json('POST', '/v1/dev/market/tier', { token: ana.token })
+    const before = (await h.json('GET', '/v1/balance', { token: ana.token })).body
+    const o = await h.json('POST', '/v1/market/orders', { token: ana.token, body: { symbol: 'XAU', side: 'buy', amountMinor: 1000 } })
+    expect(o.status).toBe(503)
+    expect(o.body.error.message).toBe("Metals aren't available right now. Try again later.")
+    expect((await h.json('GET', '/v1/balance', { token: ana.token })).body).toEqual(before)
+    expect((await h.json('GET', '/v1/market/assets', { token: ana.token })).status).toBe(200) // prices still show
+  })
 })

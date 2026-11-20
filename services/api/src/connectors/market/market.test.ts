@@ -8,7 +8,7 @@ import { fakeKeyStore, type FakeLedger, type FakePool } from '../../testing/fake
 import { eventually, makeHarness, type Harness, type TestUser } from '../../testing/harness'
 import { createFixtureFeed } from './feed'
 import { issuanceIdFrom, metaKey } from './metals'
-import { mountMarket, registerMarket } from './index'
+import { marketTick, mountMarket, registerMarket } from './index'
 
 type H = Harness<FakeLedger, FakePool>
 
@@ -33,6 +33,7 @@ function withMetals(h: H, issuer: string) {
     return 'tesSUCCESS'
   }
   let failDeliveries = 0
+  let lose: { applied: boolean; throws?: boolean } | undefined
   const submitAs = h.ledger.submitAs.bind(h.ledger)
   h.ledger.submitAs = async (role, tx) => {
     const r = await submitAs(role, tx)
@@ -40,7 +41,14 @@ function withMetals(h: H, issuer: string) {
       failDeliveries--
       return { ...r, validated: true, engineResult: 'tecNO_AUTH' }
     }
-    const res = apply(tx)
+    const lost = tx.TransactionType === 'Payment' ? lose : undefined
+    if (lost) lose = undefined
+    const res = lost && !lost.applied ? null : apply(tx)
+    // What txByHash and accountTx read: the payments that reached the ledger.
+    if (res === 'tesSUCCESS') h.ledger.applied.push({ hash: r.hash, ledgerIndex: h.ledger.index, validated: true, engineResult: res, tx })
+    // A lost answer, like the live client: SUBMIT_ERROR (the tx may have validated), or a throw.
+    if (lost?.throws) throw new Error('socket hang up')
+    if (lost) return { validated: false, engineResult: 'SUBMIT_ERROR', hash: r.hash }
     return res && res !== 'tesSUCCESS' ? { ...r, validated: true, engineResult: res } : r
   }
   const submitUserSigned = h.ledger.submitUserSigned.bind(h.ledger)
@@ -55,6 +63,10 @@ function withMetals(h: H, issuer: string) {
     payments,
     failNextDeliveries(n: number) {
       failDeliveries = n
+    },
+    /** The next metal payment loses its answer; it is on the ledger afterwards only when `applied`. */
+    loseNextDelivery(o: { applied: boolean; throws?: boolean }) {
+      lose = o
     },
   }
 }
@@ -72,7 +84,7 @@ function setup(o: { env?: Env; mount?: boolean } = {}) {
   const metals = withMetals(h, issuer)
   if (o.mount !== false) {
     mountMarket(h.app, h.app.core)
-    registerMarket(h.app.core, { feed: createFixtureFeed(), retryMs: 1 })
+    registerMarket(h.app.core, { feed: createFixtureFeed(), retryMs: 1, tickMs: 0 })
   }
   return { h, metals, ids, issuer }
 }
@@ -223,6 +235,107 @@ describe('market connector (SPEC §4.9, §6.3)', () => {
       expect(i.failure.message).toMatch(/couldn't deliver/)
     })
     expect(metals.payments).toHaveLength(1)
+  })
+
+  it('a delivery whose answer is lost but which landed is looked up, never sent again', async () => {
+    const { h, metals, ids } = setup()
+    const ana = await verifiedUser(h, 'ana')
+    metals.loseNextDelivery({ applied: true })
+    const o = await buy(h, ana, { symbol: 'XAU', amountMinor: 1000 })
+    const status = async () => (await h.json('GET', `/v1/transfers/${o.intent.id}`, { token: ana.token })).body
+    expect((await status()).status).toBe('received') // not known yet: neither sent again nor failed
+    expect(metals.payments).toHaveLength(1)
+    await marketTick(h.app.core)
+    await h.settle()
+    const landed = h.ledger.applied.find((e) => (e.tx.Amount as { mpt_issuance_id?: string })?.mpt_issuance_id === ids.XAU)!
+    expect(await status()).toMatchObject({ status: 'paid_out', payoutTxHash: landed.hash })
+    expect(metals.payments).toEqual([expect.objectContaining({ mg: 87 })])
+    await marketTick(h.app.core)
+    expect(metals.payments).toHaveLength(1)
+  })
+
+  it('a delivery that threw after it was sent is found by its invoice id', async () => {
+    const { h, metals } = setup()
+    const ana = await verifiedUser(h, 'ana')
+    metals.loseNextDelivery({ applied: true, throws: true })
+    const o = await buy(h, ana, { symbol: 'XAG', amountMinor: 500 })
+    await marketTick(h.app.core)
+    await h.settle()
+    expect((await h.json('GET', `/v1/transfers/${o.intent.id}`, { token: ana.token })).body.status).toBe('paid_out')
+    expect(metals.payments).toHaveLength(1)
+  })
+
+  it('a delivery whose answer is lost and which never landed is sent again only once its LastLedgerSequence has passed', async () => {
+    const { h, metals } = setup()
+    const ana = await verifiedUser(h, 'ana')
+    metals.loseNextDelivery({ applied: false })
+    const o = await buy(h, ana, { symbol: 'XPD', amountMinor: 500 })
+    const status = async () => (await h.json('GET', `/v1/transfers/${o.intent.id}`, { token: ana.token })).body.status
+    await marketTick(h.app.core)
+    await h.settle()
+    expect(await status()).toBe('received') // it may still validate
+    expect(metals.payments).toHaveLength(0)
+    h.ledger.advance(25)
+    await marketTick(h.app.core)
+    await h.settle()
+    expect(await status()).toBe('paid_out')
+    expect(metals.payments).toHaveLength(1)
+  })
+
+  it('a sale whose payout is not confirmed stays received and is asked again until it lands (never failed)', async () => {
+    const { h } = setup()
+    const ana = await verifiedUser(h, 'ana')
+    await buy(h, ana, { symbol: 'XAU', amountMinor: 1000 }) // 87 mg
+    const before = await balanceOf(h, ana)
+    const payout = h.pool.payout.bind(h.pool)
+    let unknown = 2
+    let calls = 0
+    h.pool.payout = async (i) => {
+      calls++
+      if (unknown-- > 0) throw Object.assign(new Error('payout not confirmed'), { code: 'payout_unknown' })
+      return payout(i)
+    }
+    const o = await h.json('POST', '/v1/market/orders', { token: ana.token, body: { symbol: 'XAU', side: 'sell', quantityMg: 50 } })
+    expect((await h.submit(ana, o.body.prepared)).body.status).toBe('validated')
+    await h.settle()
+    const intent = async () => (await h.json('GET', `/v1/transfers/${o.body.intent.id}`, { token: ana.token })).body
+    expect(await intent()).toMatchObject({ status: 'received' })
+    expect((await intent()).failure).toBeUndefined()
+    expect((await h.json('GET', '/v1/balance', { token: ana.token })).body.pendingMinor).toBe(566)
+    for (let k = 0; k < 4; k++) {
+      h.clock.advance(60_000)
+      await marketTick(h.app.core)
+      await h.settle()
+    }
+    expect(calls).toBe(3)
+    expect((await intent()).status).toBe('paid_out')
+    expect(await balanceOf(h, ana)).toBe(before + 566)
+  })
+
+  it("a sale whose inbox merge keeps failing is settled by a later tick (the money doesn't stay pending)", async () => {
+    const { h } = setup()
+    const ana = await verifiedUser(h, 'ana')
+    await buy(h, ana, { symbol: 'XAU', amountMinor: 1000 })
+    const before = await balanceOf(h, ana)
+    const merge = h.pool.mergeInboxFor.bind(h.pool)
+    let refuse = 5
+    h.pool.mergeInboxFor = async (a) => {
+      if (refuse-- > 0) throw new Error('merge refused')
+      return merge(a)
+    }
+    const o = await h.json('POST', '/v1/market/orders', { token: ana.token, body: { symbol: 'XAU', side: 'sell', quantityMg: 50 } })
+    expect((await h.submit(ana, o.body.prepared)).body.status).toBe('validated')
+    await h.settle()
+    expect((await h.json('GET', `/v1/transfers/${o.body.intent.id}`, { token: ana.token })).body.status).toBe('paid_out')
+    expect((await h.json('GET', '/v1/balance', { token: ana.token })).body).toMatchObject({ availableMinor: before, pendingMinor: 566 })
+    for (let k = 0; k < 6; k++) {
+      h.clock.advance(60_000)
+      await marketTick(h.app.core)
+      await h.settle()
+    }
+    expect(refuse).toBeLessThan(0)
+    expect((await h.json('GET', '/v1/balance', { token: ana.token })).body).toMatchObject({ availableMinor: before + 566, pendingMinor: 0 })
+    expect(h.pool.payouts.filter((p) => p.intentId === o.body.intent.id)).toHaveLength(1)
   })
 
   it('refuses a purchase above the balance before anything is signed, and one too small to buy a milligram', async () => {

@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS market_orders (
   status TEXT NOT NULL CHECK (status IN ('authorize', 'authorized', 'open', 'delivering', 'done', 'failed')),
   ledger_tx_hash TEXT,
   attempts INTEGER NOT NULL DEFAULT 0,
+  delivery_hash TEXT,
+  delivery_lls INTEGER,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -34,6 +36,11 @@ CREATE TABLE IF NOT EXISTS market_holders (
 
 export function initMarketTables(core: Core): void {
   core.db.exec(SCHEMA)
+  // Tables made before the delivery look-up columns existed.
+  const cols = new Set((core.db.prepare('PRAGMA table_info(market_orders)').all() as { name: string }[]).map((c) => c.name))
+  for (const [name, type] of [['delivery_hash', 'TEXT'], ['delivery_lls', 'INTEGER']]) {
+    if (!cols.has(name)) core.db.exec(`ALTER TABLE market_orders ADD COLUMN ${name} ${type}`)
+  }
 }
 
 export type OrderStatus = 'authorize' | 'authorized' | 'open' | 'delivering' | 'done' | 'failed'
@@ -54,6 +61,9 @@ export type OrderRow = {
   status: OrderStatus
   ledgerTxHash?: string
   attempts: number
+  /** The delivery in flight (buy): its hash when the ledger answered, and its LastLedgerSequence (set before the submit). */
+  deliveryHash?: string
+  deliveryLls?: number
   createdAt: string
 }
 
@@ -74,6 +84,8 @@ type Raw = {
   status: OrderStatus
   ledger_tx_hash: string | null
   attempts: number
+  delivery_hash: string | null
+  delivery_lls: number | null
   created_at: string
 }
 
@@ -95,11 +107,13 @@ const fromRaw = (r: Raw | undefined): OrderRow | undefined =>
     status: r.status,
     ledgerTxHash: r.ledger_tx_hash ?? undefined,
     attempts: r.attempts,
+    deliveryHash: r.delivery_hash ?? undefined,
+    deliveryLls: r.delivery_lls ?? undefined,
     createdAt: r.created_at,
   }
 
 export const orders = {
-  insert(core: Core, o: Omit<OrderRow, 'createdAt' | 'attempts'>): void {
+  insert(core: Core, o: Omit<OrderRow, 'createdAt' | 'attempts' | 'deliveryHash' | 'deliveryLls'>): void {
     const at = core.iso()
     core.db
       .prepare(
@@ -117,15 +131,29 @@ export const orders = {
   setPrepare(core: Core, id: string, prepareId: string): void {
     core.db.prepare('UPDATE market_orders SET prepare_id = ?, updated_at = ? WHERE id = ?').run(prepareId, core.iso(), id)
   },
-  /** Compare-and-set on the status. False when the order was not in `from` (someone else moved it). */
-  move(core: Core, id: string, from: OrderStatus, to: OrderStatus, p: { ledgerTxHash?: string; attempt?: boolean } = {}): boolean {
+  /**
+   * A delivery attempt starts, before anything is sent: status -> delivering, attempts + 1, the attempt's LastLedgerSequence,
+   * no hash yet. One statement, so a restart always knows what to look for. Compare-and-set on `from`.
+   */
+  claimDelivery(core: Core, id: string, from: OrderStatus, lastLedgerSequence: number): boolean {
     return (
       core.db
         .prepare(
-          `UPDATE market_orders SET status = ?, ledger_tx_hash = COALESCE(?, ledger_tx_hash), attempts = attempts + ?, updated_at = ?
+          `UPDATE market_orders SET status = 'delivering', attempts = attempts + 1, delivery_lls = ?, delivery_hash = NULL, updated_at = ?
            WHERE id = ? AND status = ?`,
         )
-        .run(to, p.ledgerTxHash ?? null, p.attempt ? 1 : 0, core.iso(), id, from).changes === 1
+        .run(lastLedgerSequence, core.iso(), id, from).changes === 1
+    )
+  },
+  setDeliveryHash(core: Core, id: string, hash: string): void {
+    core.db.prepare('UPDATE market_orders SET delivery_hash = ?, updated_at = ? WHERE id = ?').run(hash, core.iso(), id)
+  },
+  /** Compare-and-set on the status. False when the order was not in `from` (someone else moved it). */
+  move(core: Core, id: string, from: OrderStatus, to: OrderStatus, p: { ledgerTxHash?: string } = {}): boolean {
+    return (
+      core.db
+        .prepare('UPDATE market_orders SET status = ?, ledger_tx_hash = COALESCE(?, ledger_tx_hash), updated_at = ? WHERE id = ? AND status = ?')
+        .run(to, p.ledgerTxHash ?? null, core.iso(), id, from).changes === 1
     )
   },
 }
