@@ -21,7 +21,7 @@ function setup(o: { ledger?: FakeLedger; store?: PoolStore; opts?: Partial<PoolW
   const keystore = fakeKeyStore()
   const logs: string[] = []
   const events: PoolEvent[] = []
-  const worker = createPoolWorker({ ledger, keystore, store, log: (m) => logs.push(m), pollMs: 1e9, ledgerWaitMs: 5, lagMonitor: false, ...o.opts })
+  const worker = createPoolWorker({ ledger, keystore, store, log: (m) => logs.push(m), pollMs: 1e9, ledgerWaitMs: 5, ledgerStallMs: 200, lagMonitor: false, ...o.opts })
   for (const t of ['received', 'paidOut', 'failed'] as const) worker.on(t, (e) => events.push(e))
   const of = (type: PoolEvent['type']) => events.filter((e) => e.type === type)
   return { ledger, store, keystore, worker, logs, events, of }
@@ -363,6 +363,77 @@ describe('payouts', () => {
     expect(retry.hash).not.toBe(other.hash)
     expect(ledger.t.bal(MERCHANT).inboxMinor).toBe(400)
     await s3.worker.stop()
+  })
+
+  it('a submit that reports SUBMIT_ERROR after the tx landed is confirmed from the ledger, never reported as failed', async () => {
+    const s = setup()
+    s.ledger.t.setBal(ADDR.pool, { spendableMinor: 1000 })
+    const orig = s.ledger.submitAs
+    s.ledger.submitAs = async (role, tx) => ({ validated: false, engineResult: 'SUBMIT_ERROR', hash: (await orig(role, tx)).hash })
+    const { hash } = await s.worker.payout({ intentId: 'k1', to: MERCHANT, amountMinor: 300 })
+    expect(hash).toBe(s.ledger.t.events.find((e) => e.tx.Destination === MERCHANT)!.hash)
+    expect(s.of('failed')).toEqual([])
+    expect(s.of('paidOut')).toEqual([{ type: 'paidOut', intentId: 'k1', txHash: hash, to: MERCHANT, amountMinor: 300 }])
+    expect(s.store.getPayout('k1')).toMatchObject({ status: 'sent', txHash: hash })
+  })
+
+  it('a submit that throws after the tx landed is confirmed from the ledger', async () => {
+    const s = setup()
+    s.ledger.t.setBal(ADDR.pool, { spendableMinor: 1000 })
+    const orig = s.ledger.submitAs
+    s.ledger.submitAs = async (role, tx) => {
+      await orig(role, tx)
+      throw new Error('websocket closed')
+    }
+    const { hash } = await s.worker.payout({ intentId: 'k2', to: MERCHANT, amountMinor: 300 })
+    expect(s.of('failed')).toEqual([])
+    expect(s.of('paidOut')).toEqual([expect.objectContaining({ intentId: 'k2', txHash: hash })])
+  })
+
+  it('an unknown outcome that never landed fails only once the LastLedgerSequence has passed, and frees the sequence', async () => {
+    const s = setup()
+    s.ledger.t.setBal(ADDR.pool, { spendableMinor: 1000 })
+    const orig = s.ledger.submitAs
+    let first = true
+    s.ledger.submitAs = async (role, tx) => {
+      if (!first) return orig(role, tx)
+      first = false
+      return { validated: false, engineResult: 'SUBMIT_ERROR', hash: 'E'.repeat(64) }
+    }
+    const p = s.worker.payout({ intentId: 'k3', to: MERCHANT, amountMinor: 300 }).catch((e: unknown) => e)
+    await sleep(30)
+    expect(s.of('failed')).toEqual([]) // still looking: the tx could validate until its LastLedgerSequence
+    s.ledger.t.advance(30)
+    expect(await p).toMatchObject({ code: 'SUBMIT_ERROR' })
+    expect(s.of('failed')).toEqual([expect.objectContaining({ intentId: 'k3', stage: 'payout', code: 'SUBMIT_ERROR' })])
+    expect(s.store.getPayout('k3')).toMatchObject({ status: 'failed', reservedSequence: null })
+    expect(s.ledger.t.bal(ADDR.pool).spendableMinor).toBe(1000)
+    await s.worker.payout({ intentId: 'k3', to: MERCHANT, amountMinor: 300 }) // manual retry
+    expect(s.ledger.t.bal(MERCHANT).inboxMinor).toBe(300)
+  })
+
+  it('stops waiting when the ledger does not advance: payout_unknown, the reservation kept, and the queue moves on', async () => {
+    const s = setup({ opts: { ledgerStallMs: 50 } })
+    s.ledger.t.setBal(ADDR.pool, { spendableMinor: 1000 })
+    s.ledger.t.throwNextSubmit('socket hang up')
+    const t0 = Date.now()
+    const a = s.worker.payout({ intentId: 'k4', to: MERCHANT, amountMinor: 100 }).catch((e: unknown) => e)
+    const b = s.worker.payout({ intentId: 'k5', to: USER, amountMinor: 100 }) // queued behind k4
+    expect(await a).toMatchObject({ code: 'payout_unknown' })
+    await b
+    expect(Date.now() - t0).toBeLessThan(2000)
+    expect(s.of('failed')).toEqual([expect.objectContaining({ intentId: 'k4', stage: 'payout', code: 'payout_unknown' })])
+    expect(s.store.getPayout('k4')?.reservedSequence).not.toBeNull()
+  })
+
+  it('a retry whose reserved tx may still validate gives up when the ledger stalls instead of blocking the pool', async () => {
+    const store = createMemoryPoolStore()
+    store.putPayout({ intentId: 'k6', to: MERCHANT, amountMinor: 100, status: 'failed', reservedSequence: 1, lastLedgerSequence: 10_000, fingerprint: 'x' })
+    const s = setup({ store, opts: { ledgerStallMs: 50 } })
+    s.ledger.t.setBal(ADDR.pool, { spendableMinor: 1000 })
+    await expect(s.worker.payout({ intentId: 'k6', to: MERCHANT, amountMinor: 100 })).rejects.toMatchObject({ code: 'payout_unknown' })
+    await s.worker.payout({ intentId: 'k7', to: MERCHANT, amountMinor: 100 })
+    expect(s.of('paidOut').map((e) => e.intentId)).toEqual(['k7'])
   })
 
   it('a reserved payout without a LastLedgerSequence and not on the ledger is left for a human, never resent', async () => {

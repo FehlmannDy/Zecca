@@ -91,6 +91,20 @@ describe('pool worker on the mock ledger', () => {
     await worker.stop()
   })
 
+  it('a payout the mock refuses (failNext) can be retried at once, without waiting on a ledger that only moves when a tx lands', async () => {
+    const env = createMockEnvironment()
+    const merchant = await signUp(env, 0)
+    const worker = createPoolWorker({ ledger: env.ledger, keystore: env.keystore, store: createMemoryPoolStore(), log: () => {}, lagMonitor: false })
+    await worker.mintIn(1000, 'ref-retry')
+    env.ledger.mock.failNext('tecBAD_PROOF')
+    await expect(worker.payout({ intentId: 'i1', to: merchant.address, amountMinor: 300 })).rejects.toThrow(/tecBAD_PROOF/)
+    const t0 = Date.now()
+    await worker.payout({ intentId: 'i1', to: merchant.address, amountMinor: 300 })
+    await worker.payout({ intentId: 'i2', to: merchant.address, amountMinor: 200 })
+    expect(Date.now() - t0).toBeLessThan(2000)
+    expect(env.ledger.mock.balances(merchant.address)).toMatchObject({ inboxMinor: 500 })
+  })
+
   it('mints a top-up into the pool once per reference', async () => {
     const env = createMockEnvironment()
     const pool = env.keystore.getWallet('pool').address

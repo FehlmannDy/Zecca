@@ -6,7 +6,7 @@
 //  - mints top-ups into the pool (issuer Payment + pool Convert), once per reference;
 //  - merges users' inboxes through the relayer's delegated permission.
 // Every ledger write goes through the Ledger interface. Never logs a secret.
-import type { ConfidentialBalance, KeyStore, Ledger, LedgerTxEvent, PoolEvent, PoolWorker, UnsignedTx } from '@zecca/contracts'
+import type { ConfidentialBalance, KeyStore, Ledger, LedgerTxEvent, PoolEvent, PoolWorker, SubmitResult, UnsignedTx } from '@zecca/contracts'
 import { startLagMonitor } from './lag'
 import { createKeyedQueues, createSerialQueue } from './queue'
 import type { ExpectedDeposit, MintRecord, PayoutRecord, PoolStore } from './store'
@@ -22,6 +22,8 @@ export type PoolWorkerOptions = {
   pollMs?: number
   /** While a reserved pool tx might still validate, how often to re-check the ledger. Default 4 s. */
   ledgerWaitMs?: number
+  /** Stop waiting (outcome unknown, manual) when the ledger index has not advanced for this long. Default 30 s. The mock ledger only advances when a tx lands. */
+  ledgerStallMs?: number
   /** [lag] monitor, on by default. */
   lagMonitor?: boolean
 }
@@ -70,6 +72,7 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
   const clock = o.clock ?? Date.now
   const pollMs = o.pollMs ?? 15_000
   const ledgerWaitMs = o.ledgerWaitMs ?? 4_000
+  const ledgerStallMs = o.ledgerStallMs ?? 30_000
   const pool = keystore.getWallet('pool').address
   const poolKey = () => keystore.getElGamal('pool')
   const issuance = ledger.issuanceId.toUpperCase()
@@ -192,8 +195,14 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
    * unknown: cannot tell (manual). Waits while the reserved tx could still validate (ledger index not past its LastLedgerSequence).
    */
   async function reconcile(seq: number, lls: number | null, fingerprint: string | undefined, wait = true): Promise<Reconciled> {
+    let seen = -1
+    let since = Date.now()
     for (;;) {
       const idx = await ledger.ledgerIndex()
+      if (idx !== seen) {
+        seen = idx
+        since = Date.now()
+      }
       const own = (await ledger.accountTx(pool, RECOVERY_LIMIT)).filter((e) => e.validated && e.tx.Account === pool)
       const hit = own.find((e) => Number(e.tx.Sequence) === seq)
       if (hit) {
@@ -205,6 +214,7 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
       if (lls === null) return { kind: 'unknown', why: `no LastLedgerSequence was recorded for sequence ${seq}` }
       if (idx > lls + 1) return { kind: 'free' }
       if (!wait) return { kind: 'unknown', why: `sequence ${seq} may still validate until ledger ${lls}` }
+      if (Date.now() - since >= ledgerStallMs) return { kind: 'unknown', why: `the ledger has not advanced past ${idx} in ${ledgerStallMs} ms while sequence ${seq} may still validate until ledger ${lls}` }
       await sleep(ledgerWaitMs)
     }
   }
@@ -267,13 +277,33 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
         fingerprint: fingerprintOf(tx),
       }
       store.putPayout(rec) // before the submit: a restart looks this sequence up before ever sending again
-      const res = await ledger.submitAs('pool', tx)
-      if (res.engineResult !== 'tesSUCCESS') {
-        if (isFinalFailure(res.engineResult)) releasePayout(rec)
+      let res: SubmitResult | undefined
+      let thrown: unknown
+      try {
+        res = await ledger.submitAs('pool', tx)
+      } catch (err) {
+        thrown = err
+      }
+      let hash = res?.engineResult === 'tesSUCCESS' ? res.hash : undefined
+      if (res && !hash && isFinalFailure(res.engineResult)) {
+        releasePayout(rec)
         throw new PoolError(res.engineResult, `pool send for intent ${i.intentId}: ${res.engineResult} tx=${res.hash}`)
       }
+      if (!hash) {
+        // Outcome unknown (SUBMIT_ERROR, a ter, tefMAX_LEDGER, a throw): the tx may have reached the ledger. Look before calling it a failure.
+        const code = res?.engineResult ?? 'payout_error'
+        const why = res ? `${res.engineResult} tx=${res.hash}` : `submit failed: ${msg(thrown)}`
+        log(`[pool] payout for intent ${i.intentId}: ${why}; looking for sequence ${rec.reservedSequence} on the ledger`)
+        const r = await reconcile(rec.reservedSequence!, rec.lastLedgerSequence, rec.fingerprint)
+        if (r.kind === 'unknown') throw new PoolError('payout_unknown', `intent ${i.intentId}: ${why}; ${r.why}; check the pool's transactions by hand before paying again`)
+        if (r.kind === 'free') {
+          releasePayout(rec)
+          throw new PoolError(code, `pool send for intent ${i.intentId}: ${why}; it did not reach the ledger`)
+        }
+        hash = r.hash
+      }
       balance = { ...balance, spendableMinor: Math.max(0, balance.spendableMinor - i.amountMinor) }
-      const hash = confirmPayout(rec, res.hash)
+      confirmPayout(rec, hash)
       log(`[pool] paid out ${i.amountMinor} for intent ${i.intentId} in ${clock() - t0} ms tx=${hash}`)
       return { hash }
     } catch (err) {
