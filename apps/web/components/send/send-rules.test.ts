@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULTS, type Limits } from '@zecca/contracts'
-import { checkSendAmount, firstName, sendProblemOf, sentTitle } from './send-rules'
+import { checkSendAmount, firstName, matchContacts, sendProblemOf, sentTitle } from './send-rules'
 
 const limits: Limits = {
   txCapMinor: DEFAULTS.TX_CAP_MINOR,
@@ -78,5 +78,26 @@ describe('copy', () => {
   it('writes the success line', () => {
     expect(sentTitle(1200, { displayName: 'Carla Rossi', isMerchant: false })).toBe('Sent. $12.00 to Carla.')
     expect(sentTitle(450, { displayName: 'Caffè Bruno', isMerchant: true })).toBe('Sent. $4.50 to Caffè Bruno.')
+  })
+})
+
+describe('matchContacts', () => {
+  const people = [
+    { id: 'u1', handle: 'carla', displayName: 'Carla Rossi', isMerchant: false },
+    { id: 'u2', handle: 'bruno', displayName: 'Caffè Bruno', isMerchant: true },
+    { id: 'u3', handle: 'marco_r', displayName: 'Marco Ricci', isMerchant: false },
+  ]
+  it('lists everyone while nothing is typed', () => {
+    expect(matchContacts(people, '  ')).toEqual(people)
+  })
+  it('matches the start of the handle or of any word of the name, ignoring case and accents', () => {
+    expect(matchContacts(people, '@car').map((p) => p.id)).toEqual(['u1'])
+    expect(matchContacts(people, 'ca').map((p) => p.id)).toEqual(['u1', 'u2'])
+    expect(matchContacts(people, 'caffe').map((p) => p.id)).toEqual(['u2'])
+    expect(matchContacts(people, 'ricci').map((p) => p.id)).toEqual(['u3'])
+    expect(matchContacts(people, 'ossi')).toEqual([])
+  })
+  it('leaves out someone already shown', () => {
+    expect(matchContacts(people, 'ca', 'u1').map((p) => p.id)).toEqual(['u2'])
   })
 })

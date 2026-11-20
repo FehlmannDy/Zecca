@@ -37,3 +37,15 @@ export const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? ''
 export const recipientShortName = (p: Pick<PublicProfile, 'displayName' | 'isMerchant'>) => (p.isMerchant ? p.displayName.trim() : firstName(p.displayName))
 
 export const sentTitle = (minor: number, to: Pick<PublicProfile, 'displayName' | 'isMerchant'>) => `Sent. ${formatUsd(minor)} to ${recipientShortName(to)}.`
+
+const fold = (s: string) =>
+  s
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+
+/** Recent contacts that fit what is typed: the start of the handle, or of any word of the name. */
+export function matchContacts<P extends Pick<PublicProfile, 'id' | 'handle' | 'displayName'>>(contacts: readonly P[], typed: string, excludeId?: string): P[] {
+  const q = fold(typed.trim().replace(/^@/, ''))
+  return contacts.filter((c) => c.id !== excludeId && (!q || c.handle.startsWith(q) || fold(c.displayName).split(/\s+/).some((w) => w.startsWith(q))))
+}
