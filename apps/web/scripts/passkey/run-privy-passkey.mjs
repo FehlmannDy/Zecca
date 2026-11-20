@@ -194,10 +194,25 @@ try {
     await shot(`${tag}-done`)
     return hit
   }
+  // Cancel path first: the authenticator refuses user verification (what dismissing Face ID does). The signature
+  // must fail at once with our words, and the next one must still work.
+  let cancel = null
+  if (process.env.CANCEL_CHECK !== '0') {
+    await cdp.send('WebAuthn.setUserVerified', { authenticatorId, isUserVerified: false })
+    cancel = await signOnce('sign-0-cancelled')
+    await cdp.send('WebAuthn.setUserVerified', { authenticatorId, isUserVerified: true })
+  }
   const first = await signOnce('sign-1')
   const second = await signOnce('sign-2')
   const ok = first?.event === 'sign:ok' && first.detail?.verified === true && first.detail?.prompts >= 1
-  note('verdict', { endToEnd: ok, firstPrompts: first?.detail?.prompts, secondPrompts: second?.detail?.prompts, secondOk: second?.event === 'sign:ok' })
+  note('verdict', {
+    endToEnd: ok,
+    cancel: cancel ? { event: cancel.event, ms: cancel.detail?.ms, friendly: cancel.detail?.friendly } : 'skipped',
+    firstPrompts: first?.detail?.prompts,
+    firstMs: first?.detail?.ms,
+    secondPrompts: second?.detail?.prompts,
+    secondOk: second?.event === 'sign:ok',
+  })
   exitCode = ok ? 0 : 2
 } catch (e) {
   note('failed', { message: e.message })
