@@ -20,7 +20,8 @@ curl http://localhost:8800/v1/health   # {"ok":true,"ledger":"mock","version":"0
 
 What the image is:
 
-- `node:22-slim`, the workspace packages and services as TypeScript source run with `tsx` (no build step), the pool worker on its own thread. Runs as the non-root user `node`.
+- `node:22-slim`, the workspace packages and services as TypeScript source run with `tsx` (no build step), the pool worker on its own thread. Runs as the non-root user `node`: hosted volumes are mounted owned by root, so the container starts as root only to hand `/data` to `node`, then runs the command (the API, or a one-off such as the bootstrap) as `node`.
+- No `VOLUME` line (Railway refuses one): the host attaches the volume at `/data`.
 - Listens on `0.0.0.0:$PORT` (default 8800; Render and Railway set `PORT` themselves). A `HEALTHCHECK` calls `GET /v1/health`.
 - State lives in the volume at `/data`: `DATABASE_PATH=/data/zecca.sqlite`, `POOL_DB_PATH=/data/pool.sqlite`, `KEYSTORE_PATH=/data/keystore.enc`.
 - It never contains `.env`, a key store, a database, the web app, tests, or the laptop-only DNS workaround (`scripts/dev/`). See `.dockerignore`.
@@ -47,10 +48,13 @@ Set secrets in the host's secret store (typed into its dashboard or CLI), never 
 
 ### The key store
 
-In Devnet mode the API refuses to start without a key store holding the sponsor, issuer, pool and the confidential token's id. Two ways to get one into `/data`:
+In Devnet mode the API exits at startup unless the key store in `/data` holds the sponsor, issuer, pool and the confidential token's id. A new volume is empty, and with `LEDGER_MODE=devnet` there is never a running container to open a shell on. So a Devnet deployment goes in three steps, in this order:
 
-1. **Reuse the local one.** Copy `.data/keystore.enc` to `/data/keystore.enc` on the volume and use the same `KEYSTORE_PASSPHRASE`. The file is encrypted (AES-256-GCM); it is still a secret.
-2. **Create a fresh one** inside the running container: `node --import tsx scripts/bootstrap-ledger.ts`. It creates every account from the Devnet and Testnet faucets and the confidential token, and does nothing on a second run. The accounts are new, so existing users are not carried over.
+1. **Deploy once in mock mode**, to get a running container with the volume: leave `LEDGER_MODE` unset (mock is the default) and set `DATABASE_PATH=:memory:`, so no mock data is written to the volume. Set `KEYSTORE_PASSPHRASE` and the other variables now.
+2. **Put the key store on the volume**, in one of two ways:
+   - **Reuse the local one.** Copy `.data/keystore.enc` to `/data/keystore.enc` and use the same `KEYSTORE_PASSPHRASE`. The file is encrypted (AES-256-GCM); it is still a secret.
+   - **Create a fresh one** from a shell on the running container: `cd /app && node --import tsx scripts/bootstrap-ledger.ts`. It reads `KEYSTORE_PATH` and `KEYSTORE_PASSPHRASE` from the environment (if the shell does not have the service's variables, put them before the command), creates every account from the Devnet and Testnet faucets and the confidential token, and does nothing on a second run. The accounts are new, so existing users are not carried over.
+3. **Switch to Devnet**: set `LEDGER_MODE=devnet`, remove the `DATABASE_PATH` override (the image default is `/data/zecca.sqlite`), and redeploy. Files that a root shell wrote to `/data` are handed to `node` when the container starts again.
 
 ### Fly.io
 
@@ -58,19 +62,21 @@ In Devnet mode the API refuses to start without a key store holding the sponsor,
 fly launch --no-deploy --name zecca-api            # uses the Dockerfile
 fly volumes create zecca_data --size 1
 fly secrets set KEYSTORE_PASSPHRASE=… PRIVY_APP_SECRET=…
-fly deploy
-fly ssh sftp shell                                  # put .data/keystore.enc /data/keystore.enc (option 1)
+fly deploy                                          # step 1, with DATABASE_PATH = ":memory:" in fly.toml [env]
+fly ssh sftp shell                                  # step 2: put .data/keystore.enc /data/keystore.enc
+                                                    #   (or fly ssh console, then the bootstrap command)
+fly deploy                                          # step 3, after editing fly.toml [env]
 ```
 
-In `fly.toml`: mount `zecca_data` at `/data`, `internal_port = 8800`, and keep the machine running (`auto_stop_machines = "off"`, `min_machines_running = 1`): a stopped machine stops paying out.
+In `fly.toml`: mount `zecca_data` at `/data`, `internal_port = 8800`, and keep the machine running (`auto_stop_machines = "off"`, `min_machines_running = 1`): a stopped machine stops paying out. Put the non-secret variables in `[env]`: `DATABASE_PATH = ":memory:"` and no `LEDGER_MODE` for step 1; `LEDGER_MODE = "devnet"` and no `DATABASE_PATH` for step 3.
 
 ### Render
 
-New Web Service, runtime Docker, root of the repository. Add a disk mounted at `/data` (1 GB; disks need a paid instance). Health check path `/v1/health`. One instance. Set the variables above. For the key store use option 2 from the service's Shell tab.
+New Web Service, runtime Docker, root of the repository. Add a disk mounted at `/data` (1 GB; disks need a paid instance). Health check path `/v1/health`. One instance. Set the variables above. For the key store follow the three steps above; step 2 runs in the service's Shell tab, and each variable change redeploys.
 
 ### Railway
 
-New service from the repository (the Dockerfile is picked up). Add a volume mounted at `/data`, set the variables, health check path `/v1/health`, one replica. For the key store use option 2 from a shell on the service.
+New service from the repository; Railway builds the Dockerfile at the root. Add a volume mounted at `/data`, set the variables, health check path `/v1/health`, one replica. `RAILWAY_RUN_UID` is not needed: the image hands the volume to `node` itself. For the key store follow the three steps above; step 2 runs in a shell on the service (`railway ssh`).
 
 ## 2. The web app on Vercel
 

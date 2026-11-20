@@ -28,8 +28,10 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=build --chown=node:node /app /app
 RUN mkdir -p /data && chown node:node /data
-VOLUME /data
-USER node
+# No VOLUME line: Railway refuses one, and every host attaches its own volume at /data. Hosted volumes are mounted
+# owned by root, so the container starts as root, hands /data to the user node, and runs the command (the server or a
+# one-off such as the bootstrap) as node. Started as a non-root user (docker run --user), it runs the command as is.
+ENTRYPOINT ["/bin/sh", "-c", "if [ \"$(id -u)\" = 0 ]; then mkdir -p /data; chown -R node:node /data; exec setpriv --reuid=node --regid=node --init-groups \"$@\"; fi; exec \"$@\"", "entrypoint"]
 EXPOSE 8800
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.API_PORT||process.env.PORT||8800)+'/v1/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
