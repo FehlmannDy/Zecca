@@ -54,6 +54,8 @@ export interface XrplClient {
 export type CreateClientOptions = { url?: string; raw?: RawClient; pollMs?: number; log?: Log }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+/** ter codes that will not resolve by waiting in our flows (seen on Devnet: a relayer merge without the DelegateSet). */
+const FAIL_FAST = ['terNO_DELEGATE_PERMISSION']
 const errCode = (e: unknown) => (e as { data?: { error?: string } })?.data?.error
 
 export function createClient(network: Network, opts: CreateClientOptions = {}): XrplClient {
@@ -116,7 +118,7 @@ export function createClient(network: Network, opts: CreateClientOptions = {}): 
         return { validated: false, engineResult: errCode(e) ?? 'SUBMIT_ERROR', hash }
       }
       // Never applied: no point waiting for the LastLedgerSequence.
-      if (/^(tem|tef|tel)/.test(prelim)) return { validated: false, engineResult: prelim, hash }
+      if (/^(tem|tef|tel)/.test(prelim) || FAIL_FAST.includes(prelim)) return { validated: false, engineResult: prelim, hash }
       const started = Date.now()
       const check = async (): Promise<SubmitResult | null> => {
         try {
@@ -135,7 +137,7 @@ export function createClient(network: Network, opts: CreateClientOptions = {}): 
         const done = await check()
         if (done) return done
         const expired = lls != null ? (await ledgerIndex()) > lls : Date.now() - started > 120_000
-        if (expired) return (await check()) ?? { validated: false, engineResult: 'tefMAX_LEDGER', hash }
+        if (expired) return (await check()) ?? { validated: false, engineResult: /^ter/.test(prelim) && prelim !== 'terQUEUED' ? prelim : 'tefMAX_LEDGER', hash }
       }
     },
     serial(account, fn) {

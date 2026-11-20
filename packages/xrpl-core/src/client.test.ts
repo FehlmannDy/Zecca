@@ -132,6 +132,20 @@ describe('submitAndWait', () => {
     expect(r).toMatchObject({ validated: false, engineResult: 'tefMAX_LEDGER' })
   })
 
+  it('fails fast on terNO_DELEGATE_PERMISSION (Devnet: a delegated tx without the DelegateSet)', async () => {
+    const raw = fakeRaw({ submit: () => ({ engine_result: 'terNO_DELEGATE_PERMISSION' }) })
+    const r = await createClient('devnet', { raw, pollMs: 0 }).submitAndWait(blob())
+    expect(r).toMatchObject({ validated: false, engineResult: 'terNO_DELEGATE_PERMISSION' })
+    expect(raw.requests.map((q) => q.command)).toEqual(['submit'])
+  })
+
+  it('on expiry reports a preliminary ter code rather than tefMAX_LEDGER', async () => {
+    let ledger = 99
+    const raw = fakeRaw({ submit: () => ({ engine_result: 'terPRE_SEQ' }), tx: () => rippledError('txnNotFound'), ledger: () => ({ ledger_index: ledger++ }) })
+    const r = await createClient('devnet', { raw, pollMs: 0 }).submitAndWait(blob(100))
+    expect(r).toMatchObject({ validated: false, engineResult: 'terPRE_SEQ' })
+  })
+
   it('reports a submit that the server rejects outright', async () => {
     const raw = fakeRaw({ submit: () => rippledError('invalidTransaction') })
     const r = await createClient('devnet', { raw, pollMs: 0 }).submitAndWait(blob())
