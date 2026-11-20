@@ -15,17 +15,18 @@ import { type ApiClient } from '@/lib/api'
 import { useApp } from '@/lib/app'
 import { cn } from '@/lib/cn'
 import { useLiveEvents } from '@/lib/hooks'
+import { useSession } from '@/lib/session'
 import { cachedActivity, rememberActivities } from './activity-cache'
 import { applyIntent, findActivity, ledgerCaption, ledgerRows, statusWord, type LedgerMode, type LedgerRow } from './ledger-view'
 
 const MAX_PAGES = 10
 
 /** There is no GET /v1/activity/:id: walk the pages (newest first) until the row turns up. */
-async function fetchActivity(api: ApiClient, id: string): Promise<Activity | null> {
+async function fetchActivity(api: ApiClient, userId: string | undefined, id: string): Promise<Activity | null> {
   let cursor: string | undefined
   for (let n = 0; n < MAX_PAGES; n++) {
     const p = await api.call('activity', { query: { limit: 100, ...(cursor ? { cursor } : {}) } })
-    rememberActivities(p.items)
+    if (userId) rememberActivities(userId, p.items)
     const hit = findActivity(p.items, id)
     if (hit) return hit
     if (!p.nextCursor) return null
@@ -41,7 +42,8 @@ const POOL_PAYOUT = new Set(['p2p', 'merchant', 'topup'])
 
 export function ActivityDetail({ id }: { id: string }) {
   const { api, config } = useApp()
-  const [a, setA] = useState<Activity | null>(() => cachedActivity(id) ?? null)
+  const userId = useSession()?.user?.id
+  const [a, setA] = useState<Activity | null>(() => cachedActivity(userId, id) ?? null)
   const [state, setState] = useState<'loading' | 'ready' | 'missing' | 'error'>(a ? 'ready' : 'loading')
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
@@ -49,18 +51,22 @@ export function ActivityDetail({ id }: { id: string }) {
   const load = useCallback(
     async (quiet: boolean) => {
       try {
-        const hit = await fetchActivity(api, id)
+        const hit = await fetchActivity(api, userId, id)
         if (hit) {
           setA(hit)
           setState('ready')
-        } else if (!quiet) setState((s) => (s === 'ready' ? s : 'missing'))
+        } else if (!quiet) {
+          // Not this user's (or gone): never keep a row drawn from the cache.
+          setA(null)
+          setState('missing')
+        }
       } catch (e) {
         if (quiet) return
         setError(e instanceof Error ? e.message : 'Something went wrong. Try again.')
         setState((s) => (s === 'ready' ? s : 'error'))
       }
     },
-    [api, id],
+    [api, userId, id],
   )
 
   useEffect(() => {

@@ -11,6 +11,7 @@ import { Button, EmptyState } from '@/components/zecca/bits'
 import { Panel } from '@/components/zecca/glass'
 import { useApp } from '@/lib/app'
 import { useLiveEvents } from '@/lib/hooks'
+import { useSession } from '@/lib/session'
 import { rememberActivities } from './activity-cache'
 import { applyIntent, mergeActivity } from './ledger-view'
 
@@ -18,6 +19,7 @@ const PAGE = 20
 
 export function ActivityList() {
   const { api, config } = useApp()
+  const userId = useSession()?.user?.id
   const router = useRouter()
   const [items, setItems] = useState<Activity[] | null>(null)
   const [cursor, setCursor] = useState<string | undefined>()
@@ -43,8 +45,8 @@ export function ActivityList() {
   }, [api, attempt])
 
   useEffect(() => {
-    if (items) rememberActivities(items)
-  }, [items])
+    if (items && userId) rememberActivities(userId, items)
+  }, [items, userId])
 
   const onEvent = useCallback((e: ZeccaEvent) => {
     if (e.type === 'activity.created') setItems((l) => (l ? mergeActivity(l, e.data) : l))
