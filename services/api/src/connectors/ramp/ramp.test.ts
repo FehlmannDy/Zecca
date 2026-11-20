@@ -27,12 +27,14 @@ function fakeMoonPay() {
   const extCalls: string[] = []
   let currencies: MoonPayCurrency[] = [{ code: 'xrp' }, { code: 'rlusd_xrp', isSuspended: false, notAllowedCountries: ['IT', 'FR'] }]
   let country = 'CH'
-  const api: MoonPayApi & { byExt: typeof byExt; ipCalls: typeof ipCalls; extCalls: typeof extCalls; setCurrencies(c: MoonPayCurrency[]): void; setCountry(c: string): void } = {
+  let currencyDown = false
+  const api: MoonPayApi & { byExt: typeof byExt; ipCalls: typeof ipCalls; extCalls: typeof extCalls; setCurrencies(c: MoonPayCurrency[]): void; setCountry(c: string): void; setCurrencyDown(d: boolean): void } = {
     byExt,
     ipCalls,
     extCalls,
     setCurrencies: (c) => (currencies = c),
     setCountry: (c) => (country = c),
+    setCurrencyDown: (d) => (currencyDown = d),
     async ipCountry(ip) {
       ipCalls.push(ip)
       return { status: 200, body: { alpha2: country, ipAddress: ip ?? BROWSER_IP, isBuyAllowed: true } }
@@ -47,6 +49,7 @@ function fakeMoonPay() {
       return l ? { status: 200, body: l } : { status: 404, body: { message: 'Transaction not found' } }
     },
     async currency(code) {
+      if (currencyDown) throw new Error('GET /v3/currencies: 503')
       return currencies.find((c) => c.code === code)
     },
   }
@@ -168,6 +171,16 @@ describe('POST /v1/ramp/session', () => {
     expect(await code()).toBe('xrp')
     w.moonpay.setCurrencies([{ code: 'xrp' }])
     expect(await code()).toBe('xrp')
+  })
+
+  it("offers XRP when MoonPay's currency list cannot be read (RLUSD is restricted in some countries; XRP works everywhere)", async () => {
+    const w = world()
+    const ana = await w.h.signUp('ana')
+    w.moonpay.setCurrencyDown(true)
+    for (const c of ['IT', 'CH']) {
+      w.moonpay.setCountry(c)
+      expect(new URL((await w.session(ana.token)).body.widgetUrl).searchParams.get('currencyCode'), c).toBe('xrp')
+    }
   })
 
   it('503 "Top-up is not available right now." without a Testnet treasury or MoonPay keys; sell is not built (feature_off)', async () => {

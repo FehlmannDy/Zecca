@@ -14,7 +14,7 @@ import { applyReceived, emitIntent } from '../../intents/flow'
 import { intents, ZECCA } from '../../intents/repo'
 import { checkIncoming } from '../../limits'
 import { users, type UserRow } from '../../users'
-import { createMoonPayApi, ipHash, redactUrl, signQuery, signedWidgetUrl, verifyWebhookSignature, type MoonPayApi, type MoonPayCurrency } from './moonpay'
+import { createMoonPayApi, ipHash, redactUrl, signQuery, signedWidgetUrl, verifyWebhookSignature, type MoonPayApi } from './moonpay'
 import { checkDelivery, creditMinor, type DeliveredCurrency, type DeliveryCheck } from './delivery'
 import { ensureRampTables, rampCredits, rampSessions, type RampSession } from './store'
 import { createLiveTestnetReader, type TestnetReader } from './testnet'
@@ -87,11 +87,12 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
   // ---------- session ----------
   async function pickCurrency(country: string | undefined): Promise<string> {
     // RLUSD is in MoonPay's notAllowedCountries for the EU/EEA (and absent from the list there): use XRP on Testnet instead.
+    // An unreadable list counts as not listed: XRP works everywhere, RLUSD does not.
     const rl = await mp()
       .currency(PRIMARY)
       .catch((e) => {
-        core.log.warn(`[ramp] currency list: ${(e as Error).message}`)
-        return { code: PRIMARY } as MoonPayCurrency
+        core.log.warn(`[ramp] currency list: ${(e as Error).message} (offering ${FALLBACK})`)
+        return undefined
       })
     const blocked = !rl || rl.isSuspended === true || (!!country && (rl.notAllowedCountries ?? []).includes(country))
     return blocked ? FALLBACK : PRIMARY
