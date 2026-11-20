@@ -27,7 +27,8 @@ export type MfaHandlerOptions = {
   origin?: string
   /**
    * Give up on the prompt after this long: abort it and fail the signature now rather than leave Privy waiting.
-   * Keep it under the adapter's timeoutMs (default 15 s in xrpl-connect-privy 1.1.0-rc.0).
+   * Keep it under the adapter's timeoutMs (15 s by default in xrpl-connect-privy 1.1.0-rc.0; the app sets 45 s).
+   * Default 40 s.
    */
   deadlineMs?: number
   /** 'Face ID' (default) or 'fingerprint': only the wording of the errors. */
@@ -60,7 +61,7 @@ function raceAbort<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
 export function installMfaHandler(client: PasskeyPrivyClient, opts: MfaHandlerOptions = {}): MfaHandler {
   const credentials = opts.credentials ?? (typeof navigator !== 'undefined' ? navigator.credentials : undefined)
   const origin = opts.origin ?? (typeof window !== 'undefined' ? window.location.origin : '')
-  const deadlineMs = opts.deadlineMs ?? 45_000
+  const deadlineMs = opts.deadlineMs ?? 40_000
   const word = opts.word ?? 'Face ID'
   const subject = word === 'Face ID' ? 'Face ID' : 'The fingerprint check'
   const log = opts.log ?? (() => {})

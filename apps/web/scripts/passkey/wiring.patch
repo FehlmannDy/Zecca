@@ -1,0 +1,125 @@
+--- a/apps/web/lib/wallet/privy.ts
++++ b/apps/web/lib/wallet/privy.ts
+@@ -3,6 +3,8 @@
+ import type { WalletManager } from 'xrpl-connect'
+ import type { PrivyAdapter } from '@xrpl-commons/xrpl-connect-privy'
+ import type { WalletSigner } from './types'
++import { passkeyErrorMessage } from '../passkey/errors'
++import { patchPrivyIframeReady } from '../passkey/iframe-ready'
+ 
+ export type PrivyHandle = { manager: WalletManager; adapter: PrivyAdapter }
+ 
+@@ -13,7 +15,10 @@
+   if (typeof window === 'undefined') return Promise.reject(new Error('Privy runs in the browser only'))
+   handle ??= (async () => {
+     const [{ WalletManager }, { PrivyAdapter }] = await Promise.all([import('xrpl-connect'), import('@xrpl-commons/xrpl-connect-privy')])
+-    const adapter = new PrivyAdapter({ appId, redirectUri: `${window.location.origin}/wallet/privy` })
++    // timeoutMs: room for a Face ID check inside a signature (adapter default 15 s; the MFA handler gives up at 40 s).
++    const adapter = new PrivyAdapter({ appId, redirectUri: `${window.location.origin}/wallet/privy`, timeoutMs: 45_000 })
++    // Cold-cache sign-in race: the adapter pings Privy's iframe once, before it listens (lib/passkey/iframe-ready.ts).
++    patchPrivyIframeReady(adapter)
+     const manager = new WalletManager({ adapters: [adapter], network: 'devnet', autoConnect: false })
+     return { manager, adapter }
+   })()
+@@ -40,7 +45,10 @@
+     address: account.address,
+     publicKey: account.publicKey,
+     async sign(tx) {
+-      const signed = await manager.sign(tx as never)
++      const signed = await manager.sign(tx as never).catch((e: unknown) => {
++        const passkey = passkeyErrorMessage(e)
++        throw passkey ? new Error(passkey) : e
++      })
+       const out = signed as unknown as { tx_blob?: string; hash?: string }
+       if (!out.tx_blob || !out.hash) throw new Error('The approval did not complete. Try again.')
+       return { tx_blob: out.tx_blob, hash: out.hash }
+--- a/apps/web/lib/app.tsx
++++ b/apps/web/lib/app.tsx
+@@ -8,6 +8,7 @@
+ import { browserStorage, type WalletSigner } from './wallet/types'
+ import { mockSignerForEmail, signInMock } from './wallet/mock'
+ import { getPrivy, privyAccessToken, privySigner } from './wallet/privy'
++import { installPasskeyMfa } from './passkey/install'
+ 
+ export const API_ORIGIN = process.env.NEXT_PUBLIC_API_ORIGIN || DEFAULT_API_ORIGIN
+ export const API_MOCK = process.env.NEXT_PUBLIC_API_MOCK === '1'
+@@ -128,8 +129,10 @@
+     const cfg = configRef.current
+     if (!cfg?.privyAppId) throw new Error('Sign-in is not configured.')
+     if (!connectorEl) throw new Error('Approvals are still loading. Try again in a moment.')
+-    const { manager } = await getPrivy(cfg.privyAppId)
++    const { manager, adapter } = await getPrivy(cfg.privyAppId)
+     if (!manager.account) await manager.reconnect()
++    // Answers Privy's passkey check (Face ID) when the user enrolled one; does nothing otherwise.
++    installPasskeyMfa(adapter)
+     const signer = privySigner(manager)
+     if (signer.address !== s.address) throw new Error('Sign in again to approve.')
+     return signer
+--- a/apps/web/components/zecca/approve-sheet.tsx
++++ b/apps/web/components/zecca/approve-sheet.tsx
+@@ -5,6 +5,7 @@
+ import { formatUsd } from '@zecca/contracts'
+ import { approveStatus, archesFill } from '@/lib/arches'
+ import { isApiError, type ZeccaApiError } from '@/lib/api'
++import { usePasskeyApproval } from '@/components/passkey/use-passkey'
+ import { ArchesProgress } from './arches'
+ import { Button } from './bits'
+ import { Sheet } from './sheet'
+@@ -26,7 +27,7 @@
+   subline,
+   feeMinor,
+   details,
+-  approveLabel = 'Approve',
++  approveLabel,
+   expectedMs = 10_000,
+   run,
+   onDone,
+@@ -54,6 +55,8 @@
+   const [outcome, setOutcome] = useState<ApproveOutcome | null>(null)
+   const [error, setError] = useState('')
+   const started = useRef(0)
++  // "Approve with Face ID" only with FEATURE_PASSKEY on, a phone that has it and a passkey enrolled (UI.md §5.4).
++  const passkey = usePasskeyApproval()
+ 
+   useEffect(() => {
+     if (open) {
+@@ -111,7 +114,7 @@
+               </div>
+             )}
+             <Button className="mt-6 w-full" onClick={approve} data-autofocus>
+-              {approveLabel}
++              {approveLabel ?? passkey.label}
+             </Button>
+           </>
+         )}
+--- a/apps/web/components/zecca/signup-flow.tsx
++++ b/apps/web/components/zecca/signup-flow.tsx
+@@ -9,6 +9,7 @@
+ import { sessionStore } from '@/lib/session'
+ import { signedUpUser } from '@/lib/signup'
+ import { signAndSubmit } from '@/lib/wallet/sign-and-submit'
++import { usePasskeyApproval } from '@/components/passkey/use-passkey'
+ import { cn } from '@/lib/cn'
+ import { Amount } from './amount'
+ import { ArchesProgress } from './arches'
+@@ -48,6 +49,7 @@
+ export function SignupFlow({ business = false, homeHref = '/app', onFinished }: { business?: boolean; homeHref?: string; /** Replaces the navigation at the end (e.g. /merchant switches to the till in place). */ onFinished?: (user: User) => void }) {
+   const { api, config, configError, reloadConfig, signIn, getSigner, signOut } = useApp()
+   const router = useRouter()
++  const passkey = usePasskeyApproval()
+   const [step, setStep] = useState<Step>('welcome')
+   const [email, setEmail] = useState('')
+   const [busy, setBusy] = useState(false)
+@@ -102,7 +104,11 @@
+ 
+   function finish(u: User) {
+     if (onFinished) onFinished(u)
+-    else router.replace(u.role.includes('merchant') && business ? '/merchant' : homeHref)
++    else {
++      const dest = u.role.includes('merchant') && business ? '/merchant' : homeHref
++      // FEATURE_PASSKEY: offer "Add Face ID" once, then continue to where the person was going.
++      router.replace(passkey.on && passkey.available && !passkey.enrolled ? `/app/security?next=${encodeURIComponent(dest)}` : dest)
++    }
+   }
+ 
+   /** Sign-up already finished on the server: keep the user in the session and go in. */
