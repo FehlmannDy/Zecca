@@ -122,6 +122,23 @@ describe('createResolver', () => {
     expect(resolve).toHaveBeenCalledTimes(1)
   })
 
+  it('looks the same text up again after an error', async () => {
+    let down = true
+    const { r, resolve, last } = setup(async () => {
+      if (down) throw new Error("Can't reach Zecca right now.")
+      return { kind: 'zecca', profile: carla }
+    })
+    r.input('carla')
+    await vi.advanceTimersByTimeAsync(300)
+    expect(last().kind).toBe('error')
+    down = false
+    r.input('carla')
+    expect(last()).toEqual({ kind: 'waiting', q: 'carla' })
+    await vi.advanceTimersByTimeAsync(300)
+    expect(resolve).toHaveBeenCalledTimes(2)
+    expect(last()).toEqual({ kind: 'found', q: 'carla', profile: carla })
+  })
+
   it('stops after dispose', async () => {
     const { r, resolve } = setup(async () => ({ kind: 'zecca', profile: carla }))
     r.input('carla')

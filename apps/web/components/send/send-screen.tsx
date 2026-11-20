@@ -343,7 +343,7 @@ export function SendScreen() {
           }}
         />
         <div id="send-to-status" className="mt-2" aria-live="polite">
-          <LookupResult state={rs} onPick={pick} />
+          <LookupResult state={rs} onPick={pick} onRetry={() => resolver.current?.input(query)} />
         </div>
       </Panel>
 
@@ -378,7 +378,7 @@ export function SendScreen() {
   )
 }
 
-function LookupResult({ state, onPick }: { state: ResolverState; onPick: (p: PublicProfile) => void }) {
+function LookupResult({ state, onPick, onRetry }: { state: ResolverState; onPick: (p: PublicProfile) => void; onRetry: () => void }) {
   switch (state.kind) {
     case 'idle':
       return null
@@ -402,9 +402,14 @@ function LookupResult({ state, onPick }: { state: ResolverState; onPick: (p: Pub
       return <Line>No one on Zecca matches that. Check it, or ask them for their @handle.</Line>
     case 'error':
       return (
-        <Line tone="alert">
-          <span role="alert">{state.message}</span>
-        </Line>
+        <div className="flex flex-wrap items-center justify-between gap-x-3">
+          <Line tone="alert">
+            <span role="alert">{state.message}</span>
+          </Line>
+          <Button variant="secondary" className="min-h-11" onClick={onRetry}>
+            <RotateCw className="size-4" aria-hidden="true" /> Retry
+          </Button>
+        </div>
       )
   }
 }

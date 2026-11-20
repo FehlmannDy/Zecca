@@ -65,7 +65,8 @@ export function createResolver(opts: {
     input(raw: string) {
       if (disposed) return
       const q = lookupQuery(raw)
-      if (q === current) return
+      // The same text again is a no-op, except after an error: then it is a retry.
+      if (q === current && state.kind !== 'error') return
       cancel()
       current = q
       if (q === null) return set({ kind: 'idle' })
