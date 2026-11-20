@@ -21,6 +21,9 @@ const apiEnv = [
   'FEATURE_RAMP=1',
   'FEATURE_DEMO_SHOP=1',
   ...(process.env.E2E_FEATURES ?? '').split(',').filter(Boolean).map((f) => `FEATURE_${f.toUpperCase()}=1`),
+  // Phase-2 connectors run in their test modes unless E2E_API_ENV overrides them (e.g. "EARN_MODE=live").
+  ...(devnet ? [] : ['IDENTITY_MODE=mock', 'EARN_MODE=mock', 'MARKET_PRICE_SOURCE=fixture']),
+  ...(process.env.E2E_API_ENV ?? '').split(' ').filter(Boolean),
 ].join(' ')
 
 export default defineConfig({
