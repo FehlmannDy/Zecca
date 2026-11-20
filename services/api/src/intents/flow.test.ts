@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { ActivityPage, Balance, Intent, IntentWithPrepared } from '@zecca/contracts'
-import { createFakePool } from '../testing/fakes'
+import { createFakePool, type FakeLedger, type FakePool } from '../testing/fakes'
 import { eventually, makeHarness } from '../testing/harness'
 
-async function two(o: Parameters<typeof makeHarness>[0] = {}) {
-  const h = makeHarness(o)
+async function two(o: { env?: Record<string, string>; pool?: FakePool } = {}) {
+  const h = makeHarness<FakeLedger, FakePool>(o)
   const ana = await h.signUp('ana')
   const carla = await h.signUp('carla')
   return { h, ana, carla }

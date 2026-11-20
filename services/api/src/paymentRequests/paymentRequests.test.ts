@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { PaymentRequest, SalesResponse, feeMinor } from '@zecca/contracts'
-import { createFakePool } from '../testing/fakes'
+import { createFakePool, type FakeLedger, type FakePool } from '../testing/fakes'
 import { eventually, makeHarness } from '../testing/harness'
 import { salesCsv } from './routes'
 
-async function shop(o: Parameters<typeof makeHarness>[0] = {}) {
-  const h = makeHarness(o)
+async function shop(o: { env?: Record<string, string>; pool?: FakePool } = {}) {
+  const h = makeHarness<FakeLedger, FakePool>(o)
   const bruno = await h.signUp('caffebruno', { role: 'merchant', businessName: 'Caffè Bruno', displayName: 'Bruno Esposito' })
   const ana = await h.signUp('ana', { displayName: 'Ana Ferri' })
   const create = async (amountMinor = 450, reference?: string) => {
