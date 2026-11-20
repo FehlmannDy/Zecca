@@ -81,6 +81,7 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
   const mergeQ = createKeyedQueues()
   const listeners = { received: new Set<(e: PoolEvent) => void>(), paidOut: new Set<(e: PoolEvent) => void>(), failed: new Set<(e: PoolEvent) => void>() }
   let balance: ConfidentialBalance = { spendableMinor: 0, inboxMinor: 0 }
+  let balanceLedger = 0 // ledger index of the last balance read: a deposit validated at or before it is already in `balance`
   let started = false
   let unwatch: (() => void) | undefined
   let pollTimer: ReturnType<typeof setInterval> | undefined
@@ -155,7 +156,7 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
       if (amount !== d.amountMinor) return failDeposit(d, 'amount_mismatch', `deposit ${hash} carries ${amount}, the intent expects ${d.amountMinor}`)
       if (!store.creditDeposit(hash)) return
       buffered.delete(hash)
-      balance = { ...balance, inboxMinor: balance.inboxMinor + amount }
+      if (e.ledgerIndex > balanceLedger) balance = { ...balance, inboxMinor: balance.inboxMinor + amount }
       log(`[pool] received ${amount} for intent ${d.intentId} tx=${hash}`)
       emit({ type: 'received', intentId: d.intentId, txHash: hash, from: d.from, amountMinor: amount })
     } finally {
@@ -225,7 +226,9 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
   }
 
   async function readBalance() {
+    const at = await ledger.ledgerIndex()
     balance = await ledger.confidentialBalance(pool, poolKey())
+    balanceLedger = at
     return balance
   }
 
@@ -405,6 +408,7 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
         }
       }
       await poolQ.run(reconcileReservedPayouts).catch((err) => log(`[pool] payout recovery failed: ${msg(err)}`))
+      await poolQ.run(readBalance).catch((err) => log(`[pool] pool balance read failed: ${msg(err)} (status() shows 0 until the next payout)`))
       pollTimer = setInterval(() => void poll(POLL_LIMIT), pollMs)
       pollTimer.unref?.()
       log(`[pool] watching ${pool}`)

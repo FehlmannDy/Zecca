@@ -9,5 +9,8 @@ export async function createPoolDeps(env: Record<string, string | undefined>, { 
   const ledger = createFakeLedger()
   if (env.FAKE_POOL_SPENDABLE) ledger.t.setBal(ADDR.pool, { spendableMinor: Number(env.FAKE_POOL_SPENDABLE) })
   if (env.FAKE_DEPOSIT_MINOR) ledger.t.deposit({ from: 'rFakeUserAccount1111111111111', amountMinor: Number(env.FAKE_DEPOSIT_MINOR), hash: 'D'.repeat(64), stream: false })
+  // A deposit that lands on the stream after start (once the first status has gone out).
+  if (env.FAKE_LATE_DEPOSIT_MINOR)
+    setTimeout(() => ledger.t.deposit({ from: 'rFakeUserAccount1111111111111', amountMinor: Number(env.FAKE_LATE_DEPOSIT_MINOR), hash: 'E'.repeat(64) }), Number(env.FAKE_LATE_DEPOSIT_MS ?? 300)).unref()
   return { ledger, keystore: fakeKeyStore(), store: createMemoryPoolStore(), close: () => ledger.close() }
 }

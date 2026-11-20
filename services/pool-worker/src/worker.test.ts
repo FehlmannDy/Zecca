@@ -697,6 +697,33 @@ describe('status and lifecycle', () => {
     expect(s.worker.status()).toEqual({ spendableMinor: 800, inboxMinor: 50, queue: 0 })
   })
 
+  it('start() reads the pool balance, so status() is right before the first payout, and a deposit is counted once', async () => {
+    const s = setup()
+    s.ledger.t.setBal(ADDR.pool, { spendableMinor: 1000, inboxMinor: 50 })
+    const early = s.ledger.t.deposit({ from: USER, amountMinor: 200, stream: false }) // on the ledger before the read
+    await s.worker.start()
+    expect(s.worker.status()).toEqual({ spendableMinor: 1000, inboxMinor: 250, queue: 0 })
+    s.worker.expectDeposit({ intentId: 'b1', txHash: early.hash, from: USER, amountMinor: 200 })
+    await waitFor(() => s.of('received').length === 1)
+    expect(s.worker.status()).toEqual({ spendableMinor: 1000, inboxMinor: 250, queue: 0 })
+    const late = s.ledger.t.deposit({ from: USER, amountMinor: 100 })
+    s.worker.expectDeposit({ intentId: 'b2', txHash: late.hash, from: USER, amountMinor: 100 })
+    await waitFor(() => s.of('received').length === 2)
+    expect(s.worker.status()).toEqual({ spendableMinor: 1000, inboxMinor: 350, queue: 0 })
+    await s.worker.stop()
+  })
+
+  it('start() still starts when the pool balance cannot be read', async () => {
+    const s = setup()
+    s.ledger.confidentialBalance = async () => {
+      throw new Error('decrypt timeout')
+    }
+    await s.worker.start()
+    expect(s.logs.some((l) => l.includes('decrypt timeout'))).toBe(true)
+    expect(s.logs.some((l) => l.includes('[pool] watching'))).toBe(true)
+    await s.worker.stop()
+  })
+
   it('stop() unsubscribes from the pool account and stops polling', async () => {
     const s = setup({ opts: { pollMs: 10 } })
     await s.worker.start()

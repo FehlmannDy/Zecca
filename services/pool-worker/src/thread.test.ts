@@ -52,6 +52,17 @@ describe('pool worker in a worker thread', () => {
     expect((await w.mergeInboxFor('rFakeMerchantAccount111111111')).hash).toMatch(/^[0-9A-F]{64}$/)
   })
 
+  it('status() is already current when an event handler runs (the thread posts it with each event)', async () => {
+    w = await createPoolWorkerInThread({ env: { FAKE_POOL_SPENDABLE: '5000', FAKE_LATE_DEPOSIT_MINOR: '300', FAKE_LATE_DEPOSIT_MS: '200' }, log: () => {}, factory: FAKE })
+    await w.start()
+    expect(w.status()).toEqual({ spendableMinor: 5000, inboxMinor: 0, queue: 0 }) // read at start, not 0 until the first payout
+    const seen: ReturnType<PoolWorker['status']>[] = []
+    w.on('received', () => seen.push(w!.status()))
+    w.expectDeposit({ intentId: 'late', txHash: 'E'.repeat(64), from: 'rFakeUserAccount1111111111111', amountMinor: 300 })
+    await waitFor(() => seen.length === 1)
+    expect(seen[0]).toEqual({ spendableMinor: 5000, inboxMinor: 300, queue: 0 })
+  })
+
   it('rejects with the error from the thread and keeps serving', async () => {
     w = await createPoolWorkerInThread({ env: {}, log: () => {}, factory: FAKE })
     await expect(w.payout({ intentId: 'x', to: 'rFakeMerchantAccount111111111', amountMinor: 10 })).rejects.toThrow(/insufficient funds/)
