@@ -9,14 +9,14 @@ const fresh = () => {
   const ctx = { db, iso: () => new Date((t += 1000)).toISOString() }
   return { db, ctx, store: cardStore(ctx) }
 }
-const card = { token: 'card_tok', last4: '4417', expMonth: 11, expYear: 2029, state: 'OPEN' as const, holderName: 'Ana Ferri' }
+const card = { id: 'card_01', token: 'card_tok', last4: '4417', expMonth: 11, expYear: 2029, state: 'OPEN' as const, holderName: 'Ana Ferri' }
 const auth = (authToken: string, amountMinor: number, userId = 'u_ana') => ({ authToken, userId, cardToken: 'card_tok', amountMinor, merchant: 'Sette Archi' })
 
 describe('card sub-ledger', () => {
   it('links a card to a user and finds it by user, token and last four', () => {
     const { store } = fresh()
     store.linkCard('u_ana', card)
-    expect(store.cardOf('u_ana')).toMatchObject({ userId: 'u_ana', token: 'card_tok', last4: '4417', state: 'OPEN', holderName: 'Ana Ferri' })
+    expect(store.cardOf('u_ana')).toMatchObject({ userId: 'u_ana', id: 'card_01', token: 'card_tok', last4: '4417', state: 'OPEN', holderName: 'Ana Ferri' })
     expect(store.cardByToken('card_tok')?.userId).toBe('u_ana')
     expect(store.cardsByLast4('4417').map((c) => c.userId)).toEqual(['u_ana'])
     store.setCardState('u_ana', 'PAUSED')

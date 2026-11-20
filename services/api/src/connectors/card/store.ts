@@ -2,7 +2,7 @@
 // The card balance is what the user moved to the card (card_load deposits to the pool), minus approved purchases,
 // plus voids and refunds. A purchase is answered and spent here only; the ledger is touched after the answer.
 // better-sqlite3 is synchronous and each method runs in one transaction: no two authorizations can spend the same cents.
-import type { CardAuthorization } from '@zecca/contracts'
+import type { CardAuthorization, Receipt } from '@zecca/contracts'
 import type { Db } from '../../db'
 
 export type CardState = 'OPEN' | 'PAUSED' | 'CLOSED'
@@ -15,6 +15,8 @@ export const DECLINE_COPY = {
 
 export type CardRow = {
   userId: string
+  /** Zecca's id for the card (the Lithic token stays server side). */
+  id: string
   token: string
   last4: string
   expMonth: number
@@ -48,6 +50,7 @@ export function ensureCardTables(db: Db): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS card_cards (
       user_id TEXT PRIMARY KEY,
+      id TEXT NOT NULL UNIQUE,
       lithic_token TEXT NOT NULL UNIQUE,
       last4 TEXT NOT NULL,
       exp_month INTEGER NOT NULL,
@@ -86,6 +89,12 @@ export function ensureCardTables(db: Db): void {
     );
     CREATE INDEX IF NOT EXISTS card_holds_user ON card_holds (user_id, seq);
     CREATE INDEX IF NOT EXISTS card_holds_status ON card_holds (status);
+    CREATE TABLE IF NOT EXISTS card_shop_charges (
+      order_id TEXT PRIMARY KEY,
+      auth_token TEXT NOT NULL UNIQUE,
+      receipt_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS card_kv (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -100,6 +109,7 @@ function assertAmount(n: number): void {
 
 type CardRaw = {
   user_id: string
+  id: string
   lithic_token: string
   last4: string
   exp_month: number
@@ -111,6 +121,7 @@ type CardRaw = {
 const cardFrom = (r: CardRaw | undefined): CardRow | undefined =>
   r && {
     userId: r.user_id,
+    id: r.id,
     token: r.lithic_token,
     last4: r.last4,
     expMonth: r.exp_month,
@@ -203,12 +214,12 @@ export function cardStore(ctx: Ctx) {
     balance,
     hold,
 
-    linkCard(userId: string, c: { token: string; last4: string; expMonth: number; expYear: number; state: CardState; holderName: string }): void {
+    linkCard(userId: string, c: { id: string; token: string; last4: string; expMonth: number; expYear: number; state: CardState; holderName: string }): void {
       const at = ctx.iso()
       db.prepare(
-        `INSERT INTO card_cards (user_id, lithic_token, last4, exp_month, exp_year, state, holder_name, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(userId, c.token, c.last4, c.expMonth, c.expYear, c.state, c.holderName, at, at)
+        `INSERT INTO card_cards (user_id, id, lithic_token, last4, exp_month, exp_year, state, holder_name, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(userId, c.id, c.token, c.last4, c.expMonth, c.expYear, c.state, c.holderName, at, at)
     },
     cardOf: (userId: string) => cardFrom(db.prepare('SELECT * FROM card_cards WHERE user_id = ?').get(userId) as CardRaw | undefined),
     cardByToken: (token: string) => cardFrom(db.prepare('SELECT * FROM card_cards WHERE lithic_token = ?').get(token) as CardRaw | undefined),
@@ -302,6 +313,25 @@ export function cardStore(ctx: Ctx) {
       (db.prepare('SELECT * FROM card_holds WHERE user_id = ? ORDER BY seq DESC LIMIT ?').all(userId, limit) as HoldRaw[]).map((r) => holdFrom(r)!),
     /** Approved purchases not yet cleared or voided (the poller follows them on Lithic). */
     openHolds: () => (db.prepare("SELECT * FROM card_holds WHERE status = 'authorised' ORDER BY seq").all() as HoldRaw[]).map((r) => holdFrom(r)!),
+
+    /** The demo shop's card payment of one order (approved only). */
+    charge(orderId: string): { authToken: string; receipt: Receipt } | undefined {
+      const r = db.prepare('SELECT auth_token, receipt_json FROM card_shop_charges WHERE order_id = ?').get(orderId) as { auth_token: string; receipt_json: string } | undefined
+      return r && { authToken: r.auth_token, receipt: JSON.parse(r.receipt_json) as Receipt }
+    },
+    chargeByAuth(authToken: string): { orderId: string; receipt: Receipt } | undefined {
+      const r = db.prepare('SELECT order_id, receipt_json FROM card_shop_charges WHERE auth_token = ?').get(authToken) as { order_id: string; receipt_json: string } | undefined
+      return r && { orderId: r.order_id, receipt: JSON.parse(r.receipt_json) as Receipt }
+    },
+    /** False when the order already has a card payment. */
+    saveCharge(orderId: string, authToken: string, receipt: Receipt): boolean {
+      return db.prepare('INSERT OR IGNORE INTO card_shop_charges (order_id, auth_token, receipt_json, created_at) VALUES (?, ?, ?, ?)').run(orderId, authToken, JSON.stringify(receipt), ctx.iso()).changes === 1
+    },
+    setChargeStatus(orderId: string, status: Receipt['status']): void {
+      const c = db.prepare('SELECT receipt_json FROM card_shop_charges WHERE order_id = ?').get(orderId) as { receipt_json: string } | undefined
+      if (!c) return
+      db.prepare('UPDATE card_shop_charges SET receipt_json = ? WHERE order_id = ?').run(JSON.stringify({ ...(JSON.parse(c.receipt_json) as Receipt), status }), orderId)
+    },
 
     getKv: (key: string) => (db.prepare('SELECT value FROM card_kv WHERE key = ?').get(key) as { value: string } | undefined)?.value,
     setKv(key: string, value: string): void {
