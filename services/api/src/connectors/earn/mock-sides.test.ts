@@ -5,6 +5,7 @@ import { claimCalls, depositCalls, redeemCalls, requestCalls } from './calls'
 import { memoFF, memosField } from './memo'
 import { mintPlan } from './math'
 import { createMockEarnSides } from './mock-sides'
+import type { Signed } from './sides'
 
 const keystore = () => {
   const ks = createMemoryKeyStore({ generateElGamal: () => ({ publicKey: '02' + '1'.repeat(64), privateKey: '2'.repeat(64) }) })
@@ -29,11 +30,10 @@ describe('mock Testnet + Flare sides', () => {
     const pa = await flare.personalAccount(addr)
     const p = await flare.mintParams()
     const plan = mintPlan({ depositUBA: 10_000_000n, marginUBA: 10_000n, feeBips: p.feeBips, minFeeUBA: p.minFeeUBA, execFeeUBA: p.execFeeUBA })
-    const fund = await testnet.sign('treasury', { Destination: addr, Amount: String(plan.amountDrops + 2_000_000n) })
-    expect((await testnet.submit(fund.blob)).validated).toBe(true)
+    expect((await testnet.pay('treasury', { Destination: addr, Amount: String(plan.amountDrops + 2_000_000n) }, () => {})).validated).toBe(true)
     const memo = memoFF({ sender: pa, nonce: (await flare.nonce(pa)) + nonceOffset, calls: depositCalls({ fxrp: p.fxrp, vault: p.vault, amountUBA: 10_000_000n, personalAccount: pa }), executorFeeUBA: p.execFeeUBA, compact: true })
-    const pay = await testnet.sign({ user }, { Destination: p.coreVault, Amount: String(plan.amountDrops), Memos: memosField(memo) })
-    const r = await testnet.submit(pay.blob)
+    let pay!: Signed
+    const r = await testnet.pay({ user }, { Destination: p.coreVault, Amount: String(plan.amountDrops), Memos: memosField(memo) }, (s) => void (pay = s))
     return { ks, testnet, flare, control, user, addr, pa, p, pay, r }
   }
 
@@ -67,9 +67,9 @@ describe('mock Testnet + Flare sides', () => {
     await until(() => flare.isExecuted(pay.hash))
     const send = async (calls: ReturnType<typeof requestCalls>) => {
       const memo = memoFF({ sender: pa, nonce: await flare.nonce(pa), calls, executorFeeUBA: p.execFeeUBA, compact: true })
-      const s = await testnet.sign({ user }, { Destination: p.coreVault, Amount: '300000', Memos: memosField(memo) })
-      expect((await testnet.submit(s.blob)).validated).toBe(true)
-      await until(() => flare.isExecuted(s.hash))
+      const r = await testnet.pay({ user }, { Destination: p.coreVault, Amount: '300000', Memos: memosField(memo) }, () => {})
+      expect(r.validated).toBe(true)
+      await until(() => flare.isExecuted(r.hash))
     }
     const period = (await flare.currentPeriod()) + 1n
     await send(requestCalls({ vault: p.vault, shares: 10_000_000n, personalAccount: pa }))

@@ -22,7 +22,7 @@ import { memoFF, memosField, type Call } from './memo'
 import { dropsToUsdMinor, earnFeeDrops, fundingDrops, mintPlan, quoteDeposit, quoteWithdrawal, sharesFor } from './math'
 import type { XrpPriceFeed } from './price'
 import { deposits, points, steps, withdrawals, OPEN_WITHDRAWAL, type DepositRow, type DepositStatus, type StepRow } from './repo'
-import type { FlareSide, MintParams, Signed, TestnetSide, VaultPosition } from './sides'
+import type { FlareSide, MintParams, PaymentSpec, TestnetSide, TxOutcome, VaultPosition } from './sides'
 
 /** Smallest deposit, in drops: a position must stay above the 5 XRP redeem minimum to come back out. */
 export const MIN_DEPOSIT_DROPS = 6_000_000
@@ -44,6 +44,7 @@ export const COPY = {
   nothing: "There's nothing in Earn to withdraw yet.",
   busy: 'A withdrawal is already on its way.',
   failedRequest: "The withdrawal request didn't go through. Your money is still in Earn.",
+  unreachable: "Earn can't be reached right now. Try again in a moment.",
 } as const
 
 export type EarnDeps = {
@@ -98,10 +99,14 @@ export function createEarn(core: Core, d: EarnDeps) {
   }
 
   // ---------- Testnet payments, crash-safe ----------
-  /** Signs once (hash stored before sending), submits, and on a retry looks the stored hash up before sending again. */
-  async function submitOnce(key: string, sign: () => Promise<Signed>): Promise<StepRow> {
-    let s = steps.get(core, key)
+  /**
+   * Pays once: the signed tx is stored (hash first) from inside the account's queue before it is sent, and a retry looks
+   * the stored hash up, then resends that same blob, instead of signing a second payment.
+   */
+  async function submitOnce(key: string, from: 'treasury' | { user: string }, spec: () => Promise<PaymentSpec>): Promise<StepRow> {
+    const s = steps.get(core, key)
     if (s?.status === 'validated') return s
+    let out: TxOutcome
     if (s) {
       const r = await testnet.txResult(s.hash)
       if (r?.validated) {
@@ -112,12 +117,11 @@ export function createEarn(core: Core, d: EarnDeps) {
         steps.drop(core, key)
         throw new Error(`${key}: ${r.engineResult}`)
       }
+      out = await testnet.submit(s.blob)
+    } else {
+      const p = await spec()
+      out = await testnet.pay(from, p, (signed) => steps.insert(core, key, signed))
     }
-    if (!s) {
-      steps.insert(core, key, await sign())
-      s = steps.get(core, key)!
-    }
-    const out = await testnet.submit(s.blob)
     if (out.validated) {
       steps.validated(core, key, out.engineResult)
       return steps.get(core, key)!
@@ -136,14 +140,14 @@ export function createEarn(core: Core, d: EarnDeps) {
       const need = fundingDrops({ paymentDrops: plan.amountDrops, balanceDrops: await testnet.balanceDrops(o.wallet), reserveDrops: await testnet.reserveDrops(), feeMarginDrops: FEE_MARGIN_DROPS })
       if (need > 0n) {
         await testnet.topUpTreasury(need + TREASURY_FLOOR_DROPS)
-        await submitOnce(`${key}:fund`, () => testnet.sign('treasury', { Destination: o.wallet, Amount: need.toString() }))
+        await submitOnce(`${key}:fund`, 'treasury', async () => ({ Destination: o.wallet, Amount: need.toString() }))
       }
     } else if (steps.get(core, `${key}:fund`)?.status === 'signed') {
-      await submitOnce(`${key}:fund`, async () => {
+      await submitOnce(`${key}:fund`, 'treasury', async () => {
         throw new Error('unreachable')
       })
     }
-    return submitOnce(`${key}:pay`, async () => {
+    return submitOnce(`${key}:pay`, { user: o.user.address }, async () => {
       const calls = await o.calls()
       const nonce = await flare.nonce(o.pa)
       const memo = memoFF({ sender: o.pa, nonce, calls, executorFeeUBA: o.p.execFeeUBA, compact: true })
@@ -151,21 +155,29 @@ export function createEarn(core: Core, d: EarnDeps) {
       const sim = await flare.simulate(memoFF({ sender: o.pa, nonce, calls, executorFeeUBA: 0n, compact: true }), o.wallet)
       if (sim !== 'ok' && sim !== 'CallFailed') throw new Error(`${key}: the Flare simulation refused the memo (${sim})`)
       core.log.info(`[earn] ${key}: nonce ${nonce}, ${plan.amountDrops} drops, memo ${(memo.length - 2) / 2} B, simulation ${sim}`)
-      return testnet.sign({ user: o.user.address }, { Destination: o.p.coreVault, Amount: plan.amountDrops.toString(), Memos })
+      return { Destination: o.p.coreVault, Amount: plan.amountDrops.toString(), Memos }
     })
   }
 
-  /** Polls MAC.isTransactionIdUsed until true or the silent-failure timeout (counted from the payment's validation). */
-  async function waitExecuted(hash: string, sinceIso: string | undefined): Promise<boolean> {
+  /**
+   * Polls MAC.isTransactionIdUsed until true or the silent-failure timeout (counted from the payment's validation).
+   * 'not_executed' only when a read succeeded after the timeout and said no; 'unknown' when that last read failed, so a
+   * Coston2 outage is never taken for a silent failure (the caller keeps the step and the resume tick asks again).
+   */
+  async function waitExecuted(hash: string, sinceIso: string | undefined): Promise<'executed' | 'not_executed' | 'unknown'> {
     const started = Date.now()
     const already = sinceIso ? Math.max(0, core.now() - Date.parse(sinceIso)) : 0
-    for (;;) {
-      try {
-        if (await flare.isExecuted(hash)) return true
-      } catch (e) {
+    const read = () =>
+      flare.isExecuted(hash).catch((e) => {
         core.log.warn(`[earn] Coston2 read for ${hash}: ${(e as Error).message}`)
+        return null
+      })
+    for (;;) {
+      if ((await read()) === true) return 'executed'
+      if (already + (Date.now() - started) >= d.openTimeoutMs) {
+        const last = await read()
+        return last === null ? 'unknown' : last ? 'executed' : 'not_executed'
       }
-      if (already + (Date.now() - started) >= d.openTimeoutMs) return flare.isExecuted(hash).catch(() => false)
       await sleep(d.pollMs)
     }
   }
@@ -192,6 +204,27 @@ export function createEarn(core: Core, d: EarnDeps) {
     return m
   }
 
+  /** What the treasury must hold to fund a deposit into an empty wallet: payFlare's funding plus the treasury's floor. */
+  const treasuryNeedDrops = (xrpDrops: number, p: MintParams, reserveDrops: bigint) =>
+    fundingDrops({
+      paymentDrops: mintPlan({ depositUBA: BigInt(xrpDrops), marginUBA: MARGIN_UBA, feeBips: p.feeBips, minFeeUBA: p.minFeeUBA, execFeeUBA: p.execFeeUBA }).amountDrops,
+      balanceDrops: 0n,
+      reserveDrops,
+      feeMarginDrops: FEE_MARGIN_DROPS,
+    }) + TREASURY_FLOOR_DROPS
+
+  /** The largest whole-dollar amount up to `upperMinor` that `fits` (fits grows false with the amount). */
+  function largestMinor(fits: (minor: number) => boolean, upperMinor: number): number {
+    let lo = 0
+    let hi = Math.floor(upperMinor / 100)
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2)
+      if (fits(mid * 100)) lo = mid
+      else hi = mid - 1
+    }
+    return lo * 100
+  }
+
   async function prepareDeposit(user: UserRow, amountMinor: number) {
     if (user.tier !== 1) throw Err.forbidden(COPY.tier)
     const rate = await d.price.rate()
@@ -200,6 +233,13 @@ export function createEarn(core: Core, d: EarnDeps) {
     checkOutgoing(core, user, undefined, amountMinor, 0)
     const b = getBalance(core, user.id)
     if (b.availableMinor < amountMinor) throw Err.insufficient(amountMinor - b.availableMinor)
+    // Refuse now, not after the approval, what the Testnet treasury cannot fund even with every faucet grant.
+    const [fundable, p, reserve] = await Promise.all([testnet.fundableDrops(), flare.mintParams(), testnet.reserveDrops()]).catch((e) => {
+      core.log.warn(`[earn] treasury capacity read: ${(e as Error).message}`)
+      throw Err.upstream(COPY.unreachable)
+    })
+    const fits = (minor: number) => treasuryNeedDrops(quoteDeposit({ amountMinor: minor, microUsdPerXrp: rate.microUsdPerXrp, swapBps: d.swapBps }).xrpDrops, p, reserve) <= fundable
+    if (!fits(amountMinor)) throw Err.badRequest(`Add at most ${formatUsd(largestMinor(fits, amountMinor))} to Earn.`)
     core.rateLimit(user.address)
 
     const id = core.id('int')
@@ -260,7 +300,9 @@ export function createEarn(core: Core, d: EarnDeps) {
         emitIntent(core, id)
       }
       row = deposits.get(core, id)!
-      if (!(await waitExecuted(row.vaultHash!, row.openedAt))) {
+      const executed = await waitExecuted(row.vaultHash!, row.openedAt)
+      if (executed === 'unknown') return core.log.warn(`[earn] ${id}: Coston2 unreadable for ${row.vaultHash}; kept opening, the resume job asks again`)
+      if (executed === 'not_executed') {
         core.log.error(`[earn] ${id}: Flare did not execute ${row.vaultHash} within ${d.openTimeoutMs} ms (silent failure)`)
         return failDeposit(id, 'flare_timeout')
       }
@@ -341,7 +383,9 @@ export function createEarn(core: Core, d: EarnDeps) {
         const cur = await flare.currentPeriod()
         const shares = w.shares
         const pay = await payFlare(`wd:${id}:request`, { ...small, calls: async () => requestCalls({ vault: p.vault, shares, personalAccount: pa }) })
-        if (!(await waitExecuted(pay.hash, pay.validatedAt))) {
+        const executed = await waitExecuted(pay.hash, pay.validatedAt)
+        if (executed === 'unknown') return core.log.warn(`[earn] withdrawal ${id}: Coston2 unreadable for the request ${pay.hash}; kept requesting`)
+        if (executed === 'not_executed') {
           withdrawals.move(core, id, ['requesting'], 'failed', { failure: COPY.failedRequest })
           return core.log.error(`[earn] withdrawal ${id}: request ${pay.hash} not executed (silent failure)`)
         }
@@ -372,7 +416,9 @@ export function createEarn(core: Core, d: EarnDeps) {
       if (w.status === 'claiming') {
         const period = w.period!
         const pay = await payFlare(`wd:${id}:claim`, { ...small, calls: async () => claimCalls({ vault: p.vault, period }) })
-        if (!(await waitExecuted(pay.hash, pay.validatedAt)) || !(await flare.withdrawal(period, pa)).claimed) {
+        const executed = await waitExecuted(pay.hash, pay.validatedAt)
+        if (executed === 'unknown') return core.log.warn(`[earn] withdrawal ${id}: Coston2 unreadable for the claim ${pay.hash}; kept claiming`)
+        if (executed === 'not_executed' || !(await flare.withdrawal(period, pa)).claimed) {
           withdrawals.move(core, id, ['claiming'], 'failed', { failure: 'claim_not_executed' })
           return core.log.error(`[earn] withdrawal ${id}: claim ${pay.hash} not executed; the FXRP is still claimable (manual)`)
         }
@@ -403,7 +449,7 @@ export function createEarn(core: Core, d: EarnDeps) {
       base = (await testnet.balanceDrops(wallet)).toString()
       steps.insert(core, baseKey, { hash: base, blob: '' })
     }
-    if (!(await waitExecuted(pay.hash, pay.validatedAt))) throw new Error(`redeem ${pay.hash} not executed yet`)
+    if ((await waitExecuted(pay.hash, pay.validatedAt)) !== 'executed') throw new Error(`redeem ${pay.hash} not executed yet`)
     const started = Date.now()
     let received = 0n
     for (;;) {

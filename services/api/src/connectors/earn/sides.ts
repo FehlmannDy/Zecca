@@ -8,6 +8,10 @@ export type Signed = { hash: string; blob: string }
 
 export type PaymentSpec = { Destination: string; Amount: string; Memos?: { Memo: { MemoData: string } }[] }
 
+/** What one Testnet faucet request adds (FLARE_REPORT step 1), and how many topUpTreasury asks for at most. */
+export const FAUCET_GRANT_DROPS = 100_000_000n
+export const FAUCET_ROUNDS = 5
+
 export interface TestnetSide {
   readonly mode: 'live' | 'mock'
   treasuryAddress(): string
@@ -17,13 +21,19 @@ export interface TestnetSide {
   balanceDrops(address: string): Promise<bigint>
   /** Base reserve in drops. */
   reserveDrops(): Promise<bigint>
-  /** Signs a Payment (autofilled) from the treasury or from a user's wallet. Nothing is sent yet. */
-  sign(from: 'treasury' | { user: string }, p: PaymentSpec): Promise<Signed>
-  /** Submits a signed blob and waits for validation. Submitting the same blob twice is harmless (same sequence). */
+  /**
+   * A Payment from the treasury or a user's wallet, in that account's queue (BUILD §8 rule 7): autofill, sign, hand the
+   * signed tx to `onSigned` (store its hash before it can reach the ledger), submit and wait. The account's next payment
+   * is filled only after this one settled, so two never share a Sequence.
+   */
+  pay(from: 'treasury' | { user: string }, p: PaymentSpec, onSigned: (s: Signed) => void | Promise<void>): Promise<TxOutcome>
+  /** Resubmits a stored signed blob in its account's queue and waits. Submitting the same blob twice is harmless. */
   submit(blob: string): Promise<TxOutcome>
   /** Outcome of a tx by hash, null when the ledger does not know it. */
   txResult(hash: string): Promise<{ validated: boolean; engineResult: string } | null>
-  /** Asks the faucet for XRP when the treasury holds less than `minDrops`. */
+  /** The most the treasury can hold once topped up: its balance plus FAUCET_ROUNDS faucet grants. */
+  fundableDrops(): Promise<bigint>
+  /** Asks the faucet (up to FAUCET_ROUNDS times) until the treasury holds `minDrops`; throws when it still does not. */
   topUpTreasury(minDrops: bigint): Promise<void>
 }
 

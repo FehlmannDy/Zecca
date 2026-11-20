@@ -8,7 +8,7 @@ import type { KeyStore } from '@zecca/contracts'
 import { sha512Half } from '@zecca/xrpl-core/signer'
 import { abis, CORE_VAULT, FIRELIGHT_VAULT } from './abi'
 import { decodeMemo } from './memo'
-import type { FlareSide, MintParams, Signed, TestnetSide, TxOutcome, VaultPosition } from './sides'
+import { FAUCET_GRANT_DROPS, FAUCET_ROUNDS, type FlareSide, type MintParams, type PaymentSpec, type Signed, type TestnetSide, type TxOutcome, type VaultPosition } from './sides'
 import { testnetWalletSecret } from './wallets'
 
 export const MOCK_FXRP: Hex = '0x0b6A3645c240605887a5532109323A3E12273dc7'
@@ -40,19 +40,25 @@ export function createMockEarnSides(o: { keystore: KeyStore; executeAfterMs?: nu
   const treasury = () => (o.keystore.hasWallet('testnetTreasury') ? o.keystore.getWallet('testnetTreasury').address : 'rMockTestnetTreasuryXXXXXXXXXXXXX')
   balances.set(treasury(), 1_000_000_000n)
 
+  const sign = (from: 'treasury' | { user: string }, p: PaymentSpec): Signed => {
+    const account = from === 'treasury' ? treasury() : testnet.walletFor(from.user)
+    const seq = seqs.get(account) ?? 1
+    seqs.set(account, seq + 1)
+    const tx: Payment = { Account: account, Destination: p.Destination, Amount: p.Amount, Sequence: seq, Fee: String(FEE_DROPS), ...(p.Memos ? { Memos: p.Memos } : {}) }
+    const blob = Buffer.from(JSON.stringify(tx)).toString('hex').toUpperCase()
+    return { blob, hash: sha512Half(blob) }
+  }
+
   const testnet: MockEarnSides['testnet'] = {
     mode: 'mock',
     treasuryAddress: treasury,
     walletFor: (userAddress) => testnetWalletSecret(o.keystore, userAddress).address,
     balanceDrops: async (a) => balances.get(a) ?? 0n,
     reserveDrops: async () => RESERVE,
-    async sign(from, p) {
-      const account = from === 'treasury' ? treasury() : testnet.walletFor(from.user)
-      const seq = seqs.get(account) ?? 1
-      seqs.set(account, seq + 1)
-      const tx: Payment = { Account: account, Destination: p.Destination, Amount: p.Amount, Sequence: seq, Fee: String(FEE_DROPS), ...(p.Memos ? { Memos: p.Memos } : {}) }
-      const blob = Buffer.from(JSON.stringify(tx)).toString('hex').toUpperCase()
-      return { blob, hash: sha512Half(blob) } satisfies Signed
+    async pay(from, p, onSigned) {
+      const s = sign(from, p)
+      await onSigned(s)
+      return testnet.submit(s.blob)
     },
     async submit(blob) {
       const hash = sha512Half(blob)
@@ -76,9 +82,11 @@ export function createMockEarnSides(o: { keystore: KeyStore; executeAfterMs?: nu
       return out
     },
     txResult: async (hash) => results.get(hash) ?? null,
+    fundableDrops: async () => (balances.get(treasury()) ?? 0n) + BigInt(FAUCET_ROUNDS) * FAUCET_GRANT_DROPS,
     async topUpTreasury(minDrops) {
       const t = treasury()
-      if ((balances.get(t) ?? 0n) < minDrops) balances.set(t, (balances.get(t) ?? 0n) + 100_000_000n)
+      for (let round = 0; round < FAUCET_ROUNDS && (balances.get(t) ?? 0n) < minDrops; round++) balances.set(t, (balances.get(t) ?? 0n) + FAUCET_GRANT_DROPS)
+      if ((balances.get(t) ?? 0n) < minDrops) throw new Error(`mock treasury below ${minDrops} drops after ${FAUCET_ROUNDS} faucet grants`)
     },
     credit(address, drops) {
       balances.set(address, (balances.get(address) ?? 0n) + drops)

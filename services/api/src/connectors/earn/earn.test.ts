@@ -13,7 +13,16 @@ function setup(o: { flag?: boolean; executeAfterMs?: number; openTimeoutMs?: num
   if (o.autoPool === false) h.pool.auto = false
   h.keystore.setWallet('testnetTreasury', generateWalletSecret())
   const sides = createMockEarnSides({ keystore: h.keystore, executeAfterMs: o.executeAfterMs ?? 0, payoutAfterMs: 0 })
-  registerEarn(h.app.core, { sides, price: { rate: async () => RATE }, pollMs: 2, openTimeoutMs: o.openTimeoutMs ?? 2_000, payoutTimeoutMs: 2_000, jobs: false })
+  // coston2.down: every read of whether Flare executed a payment fails (RPC errors), while Flare itself keeps executing.
+  const coston2 = { down: false }
+  const flare = {
+    ...sides.flare,
+    isExecuted: async (hash: string) => {
+      if (coston2.down) throw new Error('Coston2 RPC timeout')
+      return sides.flare.isExecuted(hash)
+    },
+  }
+  registerEarn(h.app.core, { sides: { testnet: sides.testnet, flare }, price: { rate: async () => RATE }, pollMs: 2, openTimeoutMs: o.openTimeoutMs ?? 2_000, payoutTimeoutMs: 2_000, jobs: false })
   mountEarn(h.app, h.app.core)
   const verified = async (handle: string) => {
     const u = await h.signUp(handle)
@@ -27,7 +36,8 @@ function setup(o: { flag?: boolean; executeAfterMs?: number; openTimeoutMs?: num
     return r.body
   }
   const balance = async (u: TestUser) => (await h.json('GET', '/v1/balance', { token: u.token })).body
-  return { h, sides, verified, position, balance }
+  const withdrawalStatus = () => (h.app.core.db.prepare('SELECT status FROM earn_withdrawals ORDER BY created_at DESC LIMIT 1').get() as { status: string }).status
+  return { h, sides, coston2, verified, position, balance, withdrawalStatus }
 }
 
 describe('Earn connector', () => {
@@ -144,6 +154,83 @@ describe('Earn connector', () => {
     expect(p.lastFailure).toMatch(/didn't reach Earn/)
     expect(sides.control.executedCount()).toBe(0)
     expect(h.pool.payouts.at(-1)).toMatchObject({ to: ana.signer.address, amountMinor: 1000 })
+  })
+
+  it('a Coston2 read that keeps failing is not a silent failure: no refund, the deposit stays opening and goes active once reads work', async () => {
+    const { h, sides, coston2, verified, position, balance } = setup({ openTimeoutMs: 40 })
+    coston2.down = true
+    const ana = await verified('ana')
+    const d = await h.json('POST', '/v1/earn/deposits', { token: ana.token, body: { amountMinor: 1000 } })
+    await h.submit(ana, d.body.prepared)
+    await h.settle()
+    await eventually(async () => expect(sides.control.executedCount()).toBe(1))
+    const earn = earnOf(h.app.core)
+    await earn.runDeposit(d.body.intent.id) // past the timeout, still unreadable
+    await h.app.core.idle()
+    await h.settle()
+    const kept = await position(ana)
+    expect(kept.status).toBe('opening')
+    expect(kept.lastFailure).toBeUndefined()
+    expect((await balance(ana)).availableMinor).toBe(4000)
+    expect(h.pool.payouts.filter((p) => p.to === ana.signer.address && p.amountMinor === 1000)).toEqual([])
+
+    coston2.down = false
+    await earn.tick()
+    const p = await position(ana)
+    expect(p).toMatchObject({ status: 'active', depositedDrops: 10_924_471, valueDrops: 10_924_471 })
+    expect((await balance(ana)).availableMinor).toBe(4000)
+  })
+
+  it('a withdrawal step whose execution cannot be read is kept (requesting, then claiming) and moves on once reads work', async () => {
+    const { h, sides, coston2, verified, position, balance, withdrawalStatus } = setup({ openTimeoutMs: 40 })
+    const ana = await verified('ana')
+    const d = await h.json('POST', '/v1/earn/deposits', { token: ana.token, body: { amountMinor: 1000 } })
+    await h.submit(ana, d.body.prepared)
+    await eventually(async () => expect((await position(ana)).status).toBe('active'))
+    const earn = earnOf(h.app.core)
+
+    coston2.down = true
+    const w = await h.json('POST', '/v1/earn/withdrawals', { token: ana.token, body: { amountDrops: 10_924_471 } })
+    expect(w.status).toBe(200)
+    await h.app.core.idle()
+    expect(withdrawalStatus()).toBe('requesting')
+    expect((await position(ana)).pendingWithdrawal).toBeDefined()
+    coston2.down = false
+    await earn.tick()
+    expect(withdrawalStatus()).toBe('requested')
+
+    sides.control.advancePeriods(2)
+    coston2.down = true
+    await earn.tick({ force: true })
+    expect(withdrawalStatus()).toBe('claiming')
+    coston2.down = false
+    await earn.tick({ force: true })
+    await h.settle()
+    expect(withdrawalStatus()).toBe('credited')
+    await eventually(async () => expect((await balance(ana)).availableMinor).toBeGreaterThan(4000 + 980))
+  })
+
+  it('refuses before approval what the treasury cannot fund, and names the most it can take; that amount goes through', async () => {
+    const { h, verified, position, balance } = setup()
+    const ana = await verified('ana')
+    await h.json('POST', '/v1/dev/credit', { token: ana.token, body: { amountMinor: 200_000 } })
+    await h.settle()
+    await eventually(async () => expect((await balance(ana)).availableMinor).toBe(205_000))
+    // Mock treasury: 1000 XRP, plus at most FAUCET_ROUNDS faucet grants of 100 XRP each.
+    const big = await h.json('POST', '/v1/earn/deposits', { token: ana.token, body: { amountMinor: 150_000 } })
+    expect(big.status).toBe(400)
+    const m = /^Add at most \$([\d,]+)\.00 to Earn\.$/.exec(big.body.error.message)
+    expect(m).not.toBeNull()
+    const most = Number(m![1].replace(/,/g, '')) * 100
+    expect(most).toBeGreaterThan(130_000)
+    expect(most).toBeLessThan(150_000)
+    expect((await balance(ana)).availableMinor).toBe(205_000)
+
+    const ok = await h.json('POST', '/v1/earn/deposits', { token: ana.token, body: { amountMinor: most } })
+    expect(ok.status).toBe(200)
+    await h.submit(ana, ok.body.prepared)
+    await eventually(async () => expect((await position(ana)).status).toBe('active'), 4000)
+    expect((await position(ana)).lastFailure).toBeUndefined()
   })
 
   it('withdraw: requested now, claimable in the next period; then claim, redeem and a dollar credit through the pool', async () => {
