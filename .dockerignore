@@ -1,0 +1,52 @@
+# The API image needs the root manifests, packages/*, services/* and scripts/ (bootstrap). Nothing else.
+
+# Secrets and local state: never in the image
+.env
+.env.*
+.data
+**/.data
+**/*.sqlite
+**/*.sqlite-*
+**/*.db
+**/keystore*.enc
+**/keystore*.json
+**/*.keystore.json
+**/.keystore
+**/*.pem
+**/*.key
+**/state.json
+.tunnel-url
+
+# Dependencies and build output (installed fresh inside the image)
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/*.tsbuildinfo
+
+# The web app is deployed separately (Vercel); only its manifest is kept so npm ci sees every workspace
+apps/**
+!apps/web/package.json
+e2e/**
+!e2e/package.json
+
+# Laptop-only DNS workaround and dev scripts (BUILD §7)
+scripts/dev
+
+# Tests, docs and tooling
+**/*.test.ts
+**/*.test.tsx
+docs
+.git
+.github
+.vitest
+**/test-results
+**/playwright-report
+**/.screenshots
+*.log
+**/*.log
+Dockerfile
+.dockerignore
+vercel.json
+README.md
+DEPLOY.md
