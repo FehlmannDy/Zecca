@@ -41,6 +41,12 @@ export interface XrplClient {
   /** Current base fee in drops (base fee x load factor). */
   baseFeeDrops(): Promise<number>
   autofill<T extends Record<string, unknown>>(tx: T, signersCount?: number): Promise<T>
+  /**
+   * Submits and waits for the outcome. `validated` is true only for tesSUCCESS in a validated ledger (a validated tec,
+   * and BATCH_INNER_FAILED, give validated: false with ledgerIndex set; the ledger-mock reports validated: true for tec).
+   * tem, FAIL_FAST and a first-answer tef/tel (not tefALREADY) return at once. A lost answer is waited for by hash;
+   * OUTCOME_UNKNOWN means the outcome could not be learnt (the tx may have validated).
+   */
   submitAndWait(txBlob: string): Promise<SubmitResult>
   /** Runs fn after every earlier task of the same account settled. */
   serial<T>(account: string, fn: () => Promise<T>): Promise<T>
@@ -52,13 +58,26 @@ export interface XrplClient {
   close(): Promise<void>
 }
 
-export type CreateClientOptions = { url?: string; raw?: RawClient; pollMs?: number; log?: Log; /** Base delay between connect retries. */ retryMs?: number }
+export type CreateClientOptions = {
+  url?: string
+  raw?: RawClient
+  pollMs?: number
+  log?: Log
+  /** Base delay between connect retries. */
+  retryMs?: number
+  /** submitAndWait gives up (outcome unknown) after this long when it cannot learn whether LastLedgerSequence passed. */
+  maxWaitMs?: number
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 /** ter codes that will not resolve by waiting in our flows (seen on Devnet: a relayer merge without the DelegateSet). */
 const FAIL_FAST = ['terNO_DELEGATE_PERMISSION']
 /** Zecca's result for an AllOrNothing Batch whose outer tx validated (fee and sequence used) but whose inner txs did not apply. */
 export const BATCH_INNER_FAILED = 'tecBATCH_INNER_FAILED'
+/** The outcome is not known: the tx may still validate, or may have validated. Callers settle it from the ledger later. */
+export const OUTCOME_UNKNOWN = 'SUBMIT_ERROR'
+/** Status reads tried once LastLedgerSequence has passed, before concluding anything. */
+const FINAL_READS = 3
 const errCode = (e: unknown) => (e as { data?: { error?: string } })?.data?.error
 /** xrpl.js errors thrown when the socket is down or dropped mid-request. */
 const isConnectionError = (e: unknown) => ['NotConnectedError', 'DisconnectedError', 'ConnectionError'].includes(String((e as Error)?.name))
@@ -70,6 +89,8 @@ export function createClient(network: Network, opts: CreateClientOptions = {}): 
   const log = opts.log ?? (() => {})
   const pollMs = opts.pollMs ?? 1000
   const retryMs = opts.retryMs ?? 1000
+  // User txs get 150 ledgers (about 10 minutes on Devnet); past this we cannot even tell whether that window passed.
+  const maxWaitMs = opts.maxWaitMs ?? 15 * 60_000
   // xrpl.Client re-emits connection errors; keep them from crashing the process.
   raw.on('error', (code: unknown, message: unknown) => log(`[xrpl ${network}] ${String(code)} ${String(message ?? '')}`))
 
@@ -155,45 +176,56 @@ export function createClient(network: Network, opts: CreateClientOptions = {}): 
         return true
       }
       const submit = async () => String((await request({ command: 'submit', tx_blob: txBlob })).result.engine_result)
-      let prelim: string
-      // When the socket dropped during the submit, the server may or may not have the tx: send it again, and read a
-      // tef reply (tefPAST_SEQ, tefALREADY) as "may have applied" and wait for it by hash.
+      // Only an answer from rippled (engine result, or an error such as invalidTransaction) tells what the server did with
+      // the tx. When the answer is lost (socket dropped, TimeoutError, anything else) the server may hold it: a dropped
+      // socket is sent once more, then whatever happens the tx is waited for by hash until LastLedgerSequence.
+      let prelim = OUTCOME_UNKNOWN
       let maybeSent = false
       try {
-        try {
-          prelim = await submit()
-        } catch (e) {
-          if (!isConnectionError(e)) throw e
-          maybeSent = true
-          prelim = await submit()
-        }
+        prelim = await submit()
       } catch (e) {
-        return { validated: false, engineResult: errCode(e) ?? 'SUBMIT_ERROR', hash }
+        const refused = errCode(e)
+        if (refused && !isConnectionError(e)) return { validated: false, engineResult: refused, hash }
+        maybeSent = true
+        if (isConnectionError(e)) prelim = await submit().catch(() => OUTCOME_UNKNOWN)
       }
-      // Never applied: no point waiting for the LastLedgerSequence.
-      const neverApplied = /^(tem|tel)/.test(prelim) || (/^tef/.test(prelim) && !maybeSent) || FAIL_FAST.includes(prelim)
+      // Never applied: no point waiting for the LastLedgerSequence. After a lost answer a tef/tel may be about our own
+      // first send (tefPAST_SEQ, tefALREADY), and tefALREADY means the server already holds this very tx.
+      const neverApplied = /^tem/.test(prelim) || FAIL_FAST.includes(prelim) || (!maybeSent && /^(tef|tel)/.test(prelim) && prelim !== 'tefALREADY')
       if (neverApplied) return { validated: false, engineResult: prelim, hash }
       const started = Date.now()
-      const check = async (): Promise<SubmitResult | null> => {
+      /** The validated result, 'pending' (not in a validated ledger yet), or 'unreadable' (the lookup failed). */
+      const check = async (): Promise<SubmitResult | 'pending' | 'unreadable'> => {
         try {
           const r = (await request({ command: 'tx', transaction: hash })).result
-          if (r.validated) {
-            let engineResult = String(r.meta?.TransactionResult ?? 'unknown')
-            if (engineResult === 'tesSUCCESS' && !(await innersApplied())) engineResult = BATCH_INNER_FAILED
-            return { validated: engineResult === 'tesSUCCESS', engineResult, hash, ledgerIndex: Number(r.ledger_index), meta: r.meta }
-          }
+          if (!r.validated) return 'pending'
+          let engineResult = String(r.meta?.TransactionResult ?? 'unknown')
+          if (engineResult === 'tesSUCCESS' && !(await innersApplied())) engineResult = BATCH_INNER_FAILED
+          return { validated: engineResult === 'tesSUCCESS', engineResult, hash, ledgerIndex: Number(r.ledger_index), meta: r.meta }
         } catch (e) {
-          if (errCode(e) !== 'txnNotFound') log(`[xrpl ${network}] tx ${hash}: ${String((e as Error).message)}`)
+          if (errCode(e) === 'txnNotFound') return 'pending'
+          log(`[xrpl ${network}] tx ${hash}: ${String((e as Error).message)}`)
+          return 'unreadable'
         }
-        return null
       }
+      const unknown: SubmitResult = { validated: false, engineResult: OUTCOME_UNKNOWN, hash }
       for (;;) {
         await sleep(pollMs)
-        const done = await check()
-        if (done) return done
-        const current = lls != null ? await ledgerIndex().catch(() => -1) : -1
-        const expired = lls != null ? current > lls : Date.now() - started > 120_000
-        if (expired) return (await check()) ?? { validated: false, engineResult: /^ter/.test(prelim) && prelim !== 'terQUEUED' ? prelim : 'tefMAX_LEDGER', hash }
+        const look = await check()
+        if (typeof look === 'object') return look
+        // The index is read after the lookup: not found once a later ledger is past LastLedgerSequence means never applied.
+        const current = lls != null ? await ledgerIndex().catch(() => null) : null
+        const passed = lls != null ? current != null && current > lls : Date.now() - started > 120_000
+        if (passed) {
+          for (let i = 0; i < FINAL_READS; i++) {
+            const last = await check()
+            if (typeof last === 'object') return last
+            if (last === 'pending') return { validated: false, engineResult: /^ter/.test(prelim) && prelim !== 'terQUEUED' ? prelim : 'tefMAX_LEDGER', hash }
+            await sleep(pollMs)
+          }
+          return unknown
+        }
+        if (Date.now() - started > maxWaitMs) return unknown
       }
     },
     serial(account, fn) {

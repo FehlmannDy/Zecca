@@ -122,6 +122,70 @@ describe('flaky network (phone hotspot)', () => {
   })
 })
 
+describe('submitAndWait: a submit whose answer was lost may still land, so it is looked up by hash', () => {
+  const connErr = (name: string) => Object.assign(new Error(name), { name })
+  const landed = () => ({ validated: true, ledger_index: 12, meta: { TransactionResult: 'tesSUCCESS' } })
+  const commands = (raw: { requests: any[] }) => raw.requests.map((q) => q.command)
+
+  it('a submit that timed out (xrpl.js TimeoutError) is waited for by hash', async () => {
+    const raw = fakeRaw({ submit: () => connErr('TimeoutError'), tx: landed, ledger: () => ({ ledger_index: 11 }) })
+    const r = await createClient('devnet', { raw, pollMs: 0, retryMs: 0 }).submitAndWait(blob())
+    expect(r).toMatchObject({ validated: true, engineResult: 'tesSUCCESS', ledgerIndex: 12 })
+    expect(commands(raw)).toContain('tx')
+  })
+
+  it('a submit lost with the socket whose resend fails too (every reconnect failed) is waited for by hash', async () => {
+    let submits = 0
+    let failingConnects = 0
+    const raw = fakeRaw({
+      submit: () => {
+        submits++
+        raw.drop()
+        failingConnects = 4
+        return connErr('DisconnectedError')
+      },
+      tx: landed,
+      ledger: () => ({ ledger_index: 11 }),
+    })
+    const connect = raw.connect.bind(raw)
+    raw.connect = async () => {
+      if (failingConnects > 0) {
+        failingConnects--
+        throw connErr('ConnectionError')
+      }
+      return connect()
+    }
+    const r = await createClient('devnet', { raw, pollMs: 0, retryMs: 0 }).submitAndWait(blob())
+    expect(submits).toBe(1)
+    expect(r).toMatchObject({ validated: true, engineResult: 'tesSUCCESS' })
+  })
+
+  it('tefALREADY on the first submit (the server already holds it) is waited for, not reported as never applied', async () => {
+    const raw = fakeRaw({ submit: () => ({ engine_result: 'tefALREADY' }), tx: landed, ledger: () => ({ ledger_index: 11 }) })
+    const r = await createClient('devnet', { raw, pollMs: 0 }).submitAndWait(blob())
+    expect(r).toMatchObject({ validated: true, engineResult: 'tesSUCCESS' })
+  })
+
+  it('at expiry a failed status read is retried before anything is concluded', async () => {
+    let reads = 0
+    const raw = fakeRaw({ submit: () => ({ engine_result: 'tesSUCCESS' }), tx: () => (reads++ < 3 ? rippledError('tooBusy') : landed()), ledger: () => ({ ledger_index: 101 }) })
+    const r = await createClient('devnet', { raw, pollMs: 0 }).submitAndWait(blob(100))
+    expect(r).toMatchObject({ validated: true, engineResult: 'tesSUCCESS' })
+  })
+
+  it('at expiry a status that cannot be read is reported as unknown (SUBMIT_ERROR), never as tefMAX_LEDGER', async () => {
+    const raw = fakeRaw({ submit: () => ({ engine_result: 'tesSUCCESS' }), tx: () => rippledError('tooBusy'), ledger: () => ({ ledger_index: 101 }) })
+    const r = await createClient('devnet', { raw, pollMs: 0 }).submitAndWait(blob(100))
+    expect(r).toMatchObject({ validated: false, engineResult: 'SUBMIT_ERROR' })
+  })
+
+  it('stops waiting after maxWaitMs when the ledger cannot be read at all, with an unknown outcome', async () => {
+    const raw = fakeRaw({ submit: () => ({ engine_result: 'tesSUCCESS' }), tx: () => rippledError('tooBusy'), ledger: () => rippledError('tooBusy') })
+    const r = await createClient('devnet', { raw, pollMs: 1, maxWaitMs: 30 }).submitAndWait(blob(100))
+    expect(r).toMatchObject({ validated: false, engineResult: 'SUBMIT_ERROR' })
+  })
+})
+
 describe('submitAndWait', () => {
   it('returns the validated result with the ledger hash', async () => {
     let polls = 0
@@ -145,7 +209,7 @@ describe('submitAndWait', () => {
     }
   })
 
-  it('a tec result is in a ledger but not a success (same as the mock ledger)', async () => {
+  it('a tec result is in a ledger but reported validated: false (the ledger-mock reports validated: true for tec)', async () => {
     const raw = fakeRaw({
       submit: () => ({ engine_result: 'tecNO_PERMISSION' }),
       tx: () => ({ validated: true, ledger_index: 9, meta: { TransactionResult: 'tecNO_PERMISSION' } }),
