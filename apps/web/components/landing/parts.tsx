@@ -46,7 +46,7 @@ export function Section({ id, label, title, intro, children, className }: { id?:
 
 /** Where something runs, as a small hairline pill. */
 export function NetworkChip({ children, className }: { children: ReactNode; className?: string }) {
-  return <span className={cn('inline-flex items-center rounded-full border border-line px-2.5 py-1 text-[12.5px] font-[600] leading-tight text-muted', className)}>{children}</span>
+  return <span className={cn('inline-flex items-center rounded-[12px] border border-line px-2.5 py-1 text-[12.5px] font-[600] leading-tight text-muted', className)}>{children}</span>
 }
 
 /** Hidden data, drawn as a sealed block in --sealed. An illustration: it never pretends to be real ciphertext. */
