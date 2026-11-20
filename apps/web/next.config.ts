@@ -3,6 +3,8 @@ import type { NextConfig } from 'next'
 const config: NextConfig = {
   transpilePackages: ['@zecca/contracts', '@zecca/xrpl-core'],
   reactStrictMode: true,
+  // A separate build folder lets the E2E run build and serve the app while a dev server uses .next.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   devIndicators: false,
   // Lets the dev server answer through a cloudflared quick tunnel (phone tests, remote preview). Dev only.
   allowedDevOrigins: ['*.trycloudflare.com'],

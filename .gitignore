@@ -64,3 +64,4 @@ docs/ui/
 .vscode/
 *.swp
 .vitest/
+apps/web/.next-e2e/
