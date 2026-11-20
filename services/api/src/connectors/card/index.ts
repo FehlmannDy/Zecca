@@ -19,9 +19,9 @@ import type { UserRow } from '../../users'
 import { handleAsa } from './asa'
 import { cardCtx, needLithic, UNAVAILABLE, viaLithic, type CardCtx, type CardOptions } from './context'
 import { waitForResult } from './lithic-api'
-import { clear, shopCharge } from './shop'
+import { shopCharge } from './shop'
 import { toAuthorization, type CardRow } from './store'
-import { cardSync } from './sync'
+import { cardSync, clear, confirmDecision } from './sync'
 
 export { cardSync } from './sync'
 export type { CardOptions } from './context'
@@ -154,13 +154,9 @@ export function mountCard(app: Hono, core: Core, opts: CardOptions = {}): void {
     const descriptor = body.merchantName.toUpperCase().slice(0, 25)
     const { token } = await viaLithic(core, 'simulate a test purchase', () => ctx.gate.run(() => lithic.simulateAuthorize({ amount: body.amountMinor, descriptor, pan: s.pan! })))
     const tx = await viaLithic(core, 'read the test purchase decision', () => waitForResult(lithic, token))
-    const hold = ctx.store.hold(token)
-    const approved = tx.result === 'APPROVED' && !!hold && hold.status !== 'declined'
-    if (tx.result === 'APPROVED' && !approved) {
-      core.log.error(`[card] test purchase ${token} approved by Lithic but not by our webhook; voiding it`)
-      core.track(ctx.gate.run(() => lithic.simulateVoid({ token })), 'card void (undecided purchase)')
-    }
+    const approved = !!confirmDecision(core, ctx, lithic, token, tx)
     if (approved) core.track(clear(core, ctx, lithic, token), 'card clearing')
+    const hold = ctx.store.hold(token)
     return { approved, ...(hold ? { authorization: toAuthorization(hold) } : {}) }
   })
 

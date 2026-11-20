@@ -5,9 +5,10 @@
 import type { Receipt } from '@zecca/contracts'
 import type { Core } from '../../core'
 import { ApiErr, Err } from '../../errors'
-import { emitAuthorization, needLithic, sameSecret, viaLithic, type CardCtx } from './context'
+import { needLithic, sameSecret, viaLithic, type CardCtx } from './context'
 import { waitForResult, type LithicApi } from './lithic-api'
 import type { CardRow } from './store'
+import { clear, confirmDecision } from './sync'
 
 export const SHOP_NAME = 'Sette Archi'
 export const SHOP_DESCRIPTOR = 'SETTE ARCHI'
@@ -68,14 +69,7 @@ export async function shopCharge(
     )
     ctx.store.annotate(token, { orderId: order.id })
     const tx = await viaLithic(core, 'read the shop purchase decision', () => waitForResult(lithic, token))
-    const hold = ctx.store.hold(token)
-    if (tx.result !== 'APPROVED') return { approved: false, message: DECLINED }
-    if (!hold || hold.status === 'declined') {
-      // Approved without our webhook deciding it (another ASA endpoint, or none): the card balance was not checked. Undo it.
-      core.log.error(`[card] shop purchase ${token} approved by Lithic but not by our webhook; voiding it`)
-      core.track(ctx.gate.run(() => lithic.simulateVoid({ token })), 'card void (undecided purchase)')
-      return { approved: false, message: DECLINED }
-    }
+    if (!confirmDecision(core, ctx, lithic, token, tx)) return { approved: false, message: DECLINED }
     const receipt: Receipt = {
       orderNumber: `SA-${order.seq}`,
       shopName: SHOP_NAME,
@@ -88,20 +82,9 @@ export async function shopCharge(
       reference: token,
     }
     ctx.store.saveCharge(order.id, token, receipt)
-    core.track(clear(core, ctx, lithic, token, order.id), 'card clearing')
+    core.track(clear(core, ctx, lithic, token), 'card clearing')
     return { approved: true, receipt }
   } finally {
     ctx.charging.delete(order.id)
   }
-}
-
-/** Settles a sandbox purchase at Lithic (POST /v1/simulate/clearing) and marks it "Completed". */
-export async function clear(core: Core, ctx: CardCtx, lithic: LithicApi, token: string, orderId?: string): Promise<void> {
-  try {
-    await ctx.gate.run(() => lithic.simulateClearing({ token }))
-  } catch (e) {
-    return core.log.warn(`[card] clearing ${token} failed: ${(e as Error).message} (the poller picks it up if Lithic settles it)`)
-  }
-  if (ctx.store.complete(token)) emitAuthorization(core, ctx.store.hold(token))
-  if (orderId) ctx.store.setChargeStatus(orderId, 'completed')
 }

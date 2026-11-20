@@ -8,16 +8,16 @@ import { makeHarness, type TestUser } from '../../testing/harness'
 import { users } from '../../users'
 import { createFakeLithic, type FakeLithic } from './fake-lithic'
 import { sampleAuthorization, signHeaders } from './lithic-sig'
-import { cardChargeForOrder, cardBalanceOf, cardSync, mountCard, registerCard } from './index'
+import { cardChargeForOrder, cardBalanceOf, cardSync, mountCard, registerCard, type CardOptions } from './index'
 
 type H = ReturnType<typeof makeHarness>
 
-async function world(o: { env?: Record<string, string>; tier?: 0 | 1 } = {}) {
+async function world(o: { env?: Record<string, string>; tier?: 0 | 1; card?: CardOptions } = {}) {
   const h = makeHarness({ env: { FEATURE_CARD: '1', ...o.env } })
   const w = xrpl.Wallet.generate('ecdsa-secp256k1' as never)
   h.keystore.setWallet('cardSettlement', { address: w.classicAddress, seed: w.seed!, algorithm: 'ecdsa-secp256k1' })
   const lithic = createFakeLithic()
-  mountCard(h.app, h.app.core, { lithic, simulateGapMs: 0, pollMs: 0 })
+  mountCard(h.app, h.app.core, { lithic, simulateGapMs: 0, pollMs: 0, ...o.card })
   registerCard(h.app.core)
   lithic.asa = async (body) => {
     const r = await asa(h, lithic, body)
@@ -57,6 +57,23 @@ async function cardWith(h: H, ana: TestUser, loadMinor: number) {
 }
 
 const secretOf = async (h: H, ana: TestUser) => (await h.json('GET', '/v1/card/secret', { token: ana.token })).body
+const order = async (h: H, items = [{ sku: 'guji-250', qty: 1 }]) => (await h.json('POST', '/v1/demo/shop/orders', { body: { items } })).body
+type Secret = { pan: string; expMonth: number; expYear: number; cvc: string }
+const payByCard = (h: H, orderId: string, s: Secret) =>
+  h.json('POST', '/v1/demo/shop/charge', { body: { orderId, pan: s.pan, expMonth: s.expMonth, expYear: s.expYear, cvc: s.cvc } })
+const holdRow = (h: H, token: string) =>
+  h.app.core.db.prepare('SELECT status, amount_minor AS amountMinor, settle_tx AS settleTx, settle_error AS settleError FROM card_holds WHERE auth_token = ?').get(token) as
+    | { status: string; amountMinor: number; settleTx: string | null; settleError: string | null }
+    | undefined
+/** Our webhook answers, but the answer reaches Lithic too late: the fake records ISSUER_TIMEOUT, i.e. DECLINED. */
+const lateAnswers = (lithic: FakeLithic) => {
+  const answer = lithic.asa!
+  lithic.asa = async (b) => {
+    await answer(b)
+    throw new Error('the answer reached Lithic too late')
+  }
+}
+const DECLINED_COPY = 'Card declined. Try another payment method.'
 
 describe('card routes behind the flag', () => {
   it('are off (404 feature_off) without FEATURE_CARD, webhook included', async () => {
@@ -190,8 +207,8 @@ describe('POST /v1/webhooks/lithic/asa', () => {
     expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(1000)
   })
 
-  it('answers from the card balance without touching the ledger, then settles to the card settlement account', async () => {
-    const { h, lithic, ana, settlement } = await world()
+  it('answers from the card balance without touching the ledger', async () => {
+    const { h, lithic, ana } = await world()
     await cardWith(h, ana, 1000)
     const submittedBefore = h.ledger.submitted.length
     const r = await asa(h, lithic, sampleAuthorization({ token: 't1', cardToken: await tokenOf(h), amount: 600, descriptor: 'SETTE ARCHI' }))
@@ -199,10 +216,27 @@ describe('POST /v1/webhooks/lithic/asa', () => {
     expect(h.ledger.submitted.length).toBe(submittedBefore)
     expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(400)
     expect(events(h, ana.user.id, 'card.authorization').at(-1)).toMatchObject({ id: 't1', amountMinor: 600, merchant: 'Sette Archi', approved: true, status: 'authorised' })
+  })
+
+  it('settles pool -> card settlement account once the purchase clears, for the cleared amount, once', async () => {
+    const { h, lithic, ana, settlement } = await world()
+    await cardWith(h, ana, 1000)
+    const pan = (await secretOf(h, ana)).pan
+    const { token } = await lithic.simulateAuthorize({ amount: 600, descriptor: 'SETTE ARCHI', pan })
     await h.settle()
-    expect(h.pool.payouts).toEqual([{ intentId: 'cset_t1', to: settlement, amountMinor: 600 }])
-    const row = h.app.core.db.prepare('SELECT settle_tx FROM card_holds WHERE auth_token = ?').get('t1') as { settle_tx: string }
-    expect(row.settle_tx).toMatch(/^[0-9A-F]{64}$/)
+    // Not at the answer: a void or a late decline before the clearing has nothing to undo on the ledger.
+    expect(h.pool.payouts).toEqual([])
+    // The shop takes less than it authorised: the difference goes back to the card, only what was taken settles.
+    await lithic.simulateClearing({ token, amount: 450 })
+    await cardSync(h.app.core)
+    await h.settle()
+    expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(550)
+    expect(h.pool.payouts).toEqual([{ intentId: `cset_${token}`, to: settlement, amountMinor: 450 }])
+    expect(holdRow(h, token)).toMatchObject({ status: 'completed', amountMinor: 450 })
+    expect(holdRow(h, token)!.settleTx).toMatch(/^[0-9A-F]{64}$/)
+    await cardSync(h.app.core)
+    await h.settle()
+    expect(h.pool.payouts).toHaveLength(1)
   })
 
   it('declines above the balance with INSUFFICIENT_FUNDS and says why to the cardholder', async () => {
@@ -223,7 +257,7 @@ describe('POST /v1/webhooks/lithic/asa', () => {
     expect((await asa(h, lithic, body)).body.result).toBe('APPROVED')
     await h.settle()
     expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(300)
-    expect(h.pool.payouts).toHaveLength(1)
+    expect(events(h, ana.user.id, 'card.authorization').filter((a) => a.id === 't3')).toHaveLength(1)
   })
 
   it('declines an unknown card and a frozen card', async () => {
@@ -244,14 +278,17 @@ describe('POST /v1/webhooks/lithic/asa', () => {
   })
 
   it('a failed settlement is written on the hold; the purchase stands and nothing retries', async () => {
-    const { h, lithic, ana } = await world()
+    const { h, ana } = await world()
     await cardWith(h, ana, 1000)
     h.pool.failPayouts = true
-    expect((await asa(h, lithic, sampleAuthorization({ token: 't7', cardToken: await tokenOf(h), amount: 100 }))).body.result).toBe('APPROVED')
+    const r = await h.json('POST', '/v1/dev/card/simulate', { token: ana.token, body: { amountMinor: 100, merchantName: 'Sette Archi' } })
+    expect(r.body.approved).toBe(true)
     await h.settle()
-    const row = h.app.core.db.prepare('SELECT status, settle_error FROM card_holds WHERE auth_token = ?').get('t7') as { status: string; settle_error: string }
-    expect(row.status).toBe('authorised')
-    expect(row.settle_error).toMatch(/payout refused/)
+    await cardSync(h.app.core)
+    await h.settle()
+    const row = holdRow(h, r.body.authorization.id)!
+    expect(row.status).toBe('completed')
+    expect(row.settleError).toMatch(/payout refused/)
     expect(h.pool.payouts).toHaveLength(1)
   })
 
@@ -293,8 +330,6 @@ describe('POST /v1/dev/card/simulate (DEMO_MODE)', () => {
 })
 
 describe('POST /v1/demo/shop/charge (the demo shop’s "Pay by card")', () => {
-  const order = async (h: H, items = [{ sku: 'guji-250', qty: 1 }]) => (await h.json('POST', '/v1/demo/shop/orders', { body: { items } })).body
-
   it('checks expiry and code against the card, simulates the purchase as SETTE ARCHI, returns the receipt, then settles', async () => {
     const { h, lithic, ana } = await world()
     const card = await cardWith(h, ana, 2000)
@@ -368,6 +403,50 @@ describe('POST /v1/demo/shop/charge (the demo shop’s "Pay by card")', () => {
     const s = await secretOf(h, ana)
     const r = await h.json('POST', '/v1/demo/shop/charge', { body: { orderId: 'ord_nope', pan: s.pan, expMonth: s.expMonth, expYear: s.expYear, cvc: s.cvc } })
     expect(r.status).toBe(404)
+  })
+})
+
+describe('our webhook approved, Lithic still declined (the answer arrived late or was lost)', () => {
+  it('the shop says declined, the money goes back to the card, the order stays unpaid and nothing settles', async () => {
+    const { h, lithic, ana } = await world()
+    await cardWith(h, ana, 2000)
+    const o = await order(h)
+    const s = await secretOf(h, ana)
+    lateAnswers(lithic)
+    const r = await payByCard(h, o.orderId, s)
+    expect(r.body).toEqual({ approved: false, message: DECLINED_COPY })
+    await h.settle()
+    expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(2000)
+    expect(events(h, ana.user.id, 'card.authorization').at(-1)).toMatchObject({ amountMinor: 1450, status: 'voided' })
+    expect(cardChargeForOrder(h.app.core, o.orderId)).toBeUndefined()
+    expect(h.pool.payouts).toHaveLength(0)
+  })
+
+  it('the test purchase says declined and gives the money back', async () => {
+    const { h, lithic, ana } = await world()
+    await cardWith(h, ana, 2000)
+    lateAnswers(lithic)
+    const r = await h.json('POST', '/v1/dev/card/simulate', { token: ana.token, body: { amountMinor: 100, merchantName: 'Sette Archi' } })
+    expect(r.body).toMatchObject({ approved: false, authorization: { status: 'voided' } })
+    await h.settle()
+    expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(2000)
+    expect(h.pool.payouts).toHaveLength(0)
+  })
+
+  it('the poller gives the money back for a purchase Lithic declined after our approval', async () => {
+    const { h, lithic, ana } = await world()
+    await cardWith(h, ana, 2000)
+    const pan = (await secretOf(h, ana)).pan
+    lateAnswers(lithic)
+    const { token } = await lithic.simulateAuthorize({ amount: 500, descriptor: 'CAFFE BRUNO', pan })
+    expect(lithic.txs.get(token)).toMatchObject({ status: 'DECLINED', result: 'DECLINED' })
+    expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(1500)
+    await cardSync(h.app.core)
+    await h.settle()
+    expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(2000)
+    expect(holdRow(h, token)?.status).toBe('voided')
+    expect(events(h, ana.user.id, 'card.authorization').at(-1)).toMatchObject({ id: token, status: 'voided' })
+    expect(h.pool.payouts).toHaveLength(0)
   })
 })
 
