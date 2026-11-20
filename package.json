@@ -18,7 +18,7 @@
     "dev": "node scripts/dev/dev.mjs",
     "test": "vitest run --project unit",
     "test:watch": "vitest --project unit",
-    "test:ledger": "node -r ./scripts/dev/dnsfix.cjs ./node_modules/vitest/vitest.mjs run --project ledger",
+    "test:ledger": "NODE_OPTIONS=--require=./scripts/dev/dnsfix.cjs node --env-file-if-exists=.env ./node_modules/vitest/vitest.mjs run --project ledger",
     "test:e2e": "npm run test -w @zecca/e2e",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "npm run typecheck",
@@ -28,8 +28,8 @@
     "env:example": "tsx scripts/gen-env-example.ts",
     "tunnel": "tsx scripts/tunnel.ts",
     "tunnel:stop": "tsx scripts/tunnel.ts --stop",
-    "bootstrap": "node -r ./scripts/dev/dnsfix.cjs node_modules/tsx/dist/cli.mjs scripts/bootstrap-ledger.ts",
-    "smoke": "node -r ./scripts/dev/dnsfix.cjs node_modules/tsx/dist/cli.mjs scripts/smoke/demo-path.ts"
+    "bootstrap": "NODE_OPTIONS=--require=./scripts/dev/dnsfix.cjs node --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs scripts/bootstrap-ledger.ts",
+    "smoke": "NODE_OPTIONS=--require=./scripts/dev/dnsfix.cjs node node_modules/tsx/dist/cli.mjs scripts/smoke/demo-path.ts"
   },
   "devDependencies": {
     "@types/node": "22.20.5",

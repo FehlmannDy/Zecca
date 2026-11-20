@@ -16,8 +16,9 @@ const procs = [
   {
     name: 'api',
     cmd: process.execPath,
-    args: [...envArgs, '-r', dnsfix, path.join(root, 'node_modules/tsx/dist/cli.mjs'), 'watch', '--clear-screen=false', path.join(root, 'services/api/src/server.ts')],
-    env: {},
+    args: [...envArgs, path.join(root, 'node_modules/tsx/dist/cli.mjs'), 'watch', '--clear-screen=false', path.join(root, 'services/api/src/server.ts')],
+    // tsx runs the file in a child process: a -r on the wrapper does not reach it, NODE_OPTIONS does (and the pool thread inherits it).
+    env: { NODE_OPTIONS: nodeOpts },
   },
   {
     name: 'web',
