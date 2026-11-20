@@ -16,10 +16,10 @@ async function signUp(page: Page, opts: { email: string; handle: string; name: s
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByText("One approval and you're in.")).toBeVisible()
   await page.getByRole('button', { name: 'Approve' }).click()
-  // Sign-up ends on a "You're set" screen or goes straight home, depending on where it started.
-  const goHome = page.getByRole('button', { name: 'Go to home' }).or(page.getByRole('link', { name: 'Go to home' }))
-  await expect(goHome.or(page.getByText('Demo credit'))).toBeVisible({ timeout: 60_000 })
-  if (await goHome.isVisible()) await goHome.click()
+  // The approval screen already lists "Adding your demo credit ($50.00)": wait for the end of sign-up itself.
+  await expect(page.getByRole('heading', { name: new RegExp(`You're set, ${opts.name.split(' ')[0]}`) })).toBeVisible({ timeout: 60_000 })
+  await page.getByRole('button', { name: 'Go to home' }).click()
+  await expect(page).toHaveURL(/\/app\/?$/)
 }
 
 test('E2E-2 proofs: export a statement and open it', async ({ browser, request }) => {
@@ -28,7 +28,8 @@ test('E2E-2 proofs: export a statement and open it', async ({ browser, request }
 
   const ana = await browser.newPage({ viewport: { width: 390, height: 844 } })
   await signUp(ana, { email: `ana-proofs-${RUN}@example.com`, handle: `anap${RUN}`, name: 'Ana Ferri' })
-  await expect(ana.getByText('$50')).toBeVisible({ timeout: 30_000 })
+  // Each amount renders an sr-only "$50.00" and an aria-hidden "$50"; home shows the balance and the welcome row.
+  await expect(ana.getByText('$50').first()).toBeVisible({ timeout: 30_000 })
 
   await ana.goto('/app/proofs')
   await expect(ana.getByRole('heading', { name: 'Statements' })).toBeVisible()
@@ -42,6 +43,8 @@ test('E2E-2 proofs: export a statement and open it', async ({ browser, request }
   await expect(ana.getByText('Zecca demo credit')).toBeVisible()
   await ana.getByRole('button', { name: 'Check signature' }).click()
   await expect(ana.getByText(/Signature valid/)).toBeVisible()
+  const [file] = await Promise.all([ana.waitForEvent('download'), ana.getByRole('button', { name: 'JSON' }).click()])
+  expect(file.suggestedFilename()).toMatch(/^zecca-statement-stm_.+\.json$/)
 
   // The link is public: a stranger with no session opens the same statement.
   const stranger = await (await browser.newContext()).newPage()
