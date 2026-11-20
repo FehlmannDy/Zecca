@@ -58,7 +58,7 @@ async function main(): Promise<number> {
 main().then(
   (code) => process.exit(code),
   (e) => {
-    console.error((e as Error).message)
+    console.error(`Could not check the statement: ${(e as Error).message}`)
     process.exit(1)
   },
 )
