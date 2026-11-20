@@ -517,6 +517,17 @@ export function createMockState(opts: { features?: Partial<Features>; delays?: P
       return { items, totals }
     },
     credit,
+    /** Dev helper: someone pays this user (runs the same received -> paid_out steps). For demos and screenshots. */
+    demoIncoming(fromHandle: string, toHandle: string, amountMinor: number, note?: string) {
+      const from = Object.values(data.users).find((u) => u.handle === fromHandle)
+      const to = Object.values(data.users).find((u) => u.handle === toHandle)
+      if (!from || !to) throw new Error('unknown handle')
+      changeBalance(from.id, amountMinor)
+      const i = createIntent('p2p', from, to, amountMinor, 0, { status: 'submitted', depositTxHash: hex(32), ...(note ? { note } : {}) })
+      afterDeposit(i)
+      save()
+      return i
+    },
     later,
     card: () => data.card,
     setCard(state: 'OPEN' | 'PAUSED' | 'CLOSED') {
