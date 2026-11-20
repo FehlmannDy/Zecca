@@ -15,6 +15,14 @@ import { mountDirectory } from './directory'
 import { mountOnboarding } from './onboarding'
 import { mountSubmit } from './prepared/submit'
 import { mountActivity } from './activity'
+import { mountTransfers } from './transfers'
+import { mountPaymentRequests } from './paymentRequests/routes'
+import { mountEvents } from './events'
+import { mountDev } from './dev'
+import { mountRamp } from './connectors/ramp'
+import { mountDemoShop } from './demoShop'
+import { registerSendHandler, wirePoolEvents } from './intents/flow'
+import { createJobs, type Jobs } from './jobs'
 
 export { publicConfig } from './config'
 export type { Env } from './config'
@@ -33,7 +41,7 @@ export type AppDeps = {
   log?: Logger
 }
 
-export type ZeccaApp = Hono & { core: Core }
+export type ZeccaApp = Hono & { core: Core; jobs: Jobs }
 
 export function createApp(deps: AppDeps): ZeccaApp {
   const settings = settingsFrom(deps.env)
@@ -82,6 +90,14 @@ export function createApp(deps: AppDeps): ZeccaApp {
   mountOnboarding(app, core)
   mountSubmit(app, core)
   mountActivity(app, core)
+  mountTransfers(app, core)
+  mountPaymentRequests(app, core)
+  mountEvents(app, core)
+  mountDev(app, core)
+  mountRamp(app, core)
+  mountDemoShop(app, core)
+  registerSendHandler(core)
+  wirePoolEvents(core)
 
-  return Object.assign(app, { core })
+  return Object.assign(app, { core, jobs: createJobs(core) })
 }

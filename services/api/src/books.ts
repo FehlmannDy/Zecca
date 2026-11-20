@@ -26,12 +26,11 @@ export function adjustBalance(core: Core, userId: string, delta: { available?: n
   const a = delta.available ?? 0
   const p = delta.pending ?? 0
   if (!Number.isSafeInteger(a) || !Number.isSafeInteger(p)) throw new TypeError('balance deltas must be integers')
-  core.db
-    .prepare(
-      `INSERT INTO balances (user_id, available_minor, pending_minor, updated_at) VALUES (@u, @a, @p, @t)
-       ON CONFLICT (user_id) DO UPDATE SET available_minor = available_minor + @a, pending_minor = pending_minor + @p, updated_at = @t`,
-    )
-    .run({ u: userId, a, p, t: core.iso() })
+  const t = core.iso()
+  const updated = core.db
+    .prepare('UPDATE balances SET available_minor = available_minor + ?, pending_minor = pending_minor + ?, updated_at = ? WHERE user_id = ?')
+    .run(a, p, t, userId).changes
+  if (updated === 0) core.db.prepare('INSERT INTO balances (user_id, available_minor, pending_minor, updated_at) VALUES (?, ?, ?, ?)').run(userId, a, p, t)
 }
 
 export function emitBalance(core: Core, userId: string): void {
