@@ -1,10 +1,13 @@
 // The ramp connector over HTTP, with MoonPay and XRPL Testnet behind fakes: session, URL signing, the signed webhook,
 // ledger confirmation before crediting, SPEC §2.7 (mint into the pool, payout), idempotency, the tier-0 cap, the watcher.
-import { createHmac } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
+import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 import xrpl from 'xrpl'
 import { Activity } from '@zecca/contracts'
-import { makeHarness } from '../../testing/harness'
+import { getBalance } from '../../books'
+import { intents } from '../../intents/repo'
+import { eventually, makeHarness } from '../../testing/harness'
 import { fakeKeyStore } from '../../testing/fakes'
 import { ipHash, signQuery, type MoonPayApi, type MoonPayCurrency } from './moonpay'
 import { RLUSD_HEX, RLUSD_TESTNET_ISSUER } from './delivery'
@@ -75,16 +78,17 @@ const rlusdDelivery = (hash: string, to: string, o: { value?: string; issuer?: s
   meta: { TransactionResult: o.result ?? 'tesSUCCESS', delivered_amount: { currency: RLUSD_HEX, issuer: o.issuer ?? RLUSD_TESTNET_ISSUER, value: o.value ?? '0.2852' } },
 })
 
-function world(o: { env?: Record<string, string>; treasury?: boolean } = {}) {
-  const keystore = fakeKeyStore()
-  const treasury = xrpl.Wallet.generate('ed25519' as never)
-  if (o.treasury !== false) keystore.setWallet('testnetTreasury', { address: treasury.classicAddress, seed: treasury.seed!, algorithm: 'ed25519' })
+function world(o: { env?: Record<string, string>; treasury?: boolean; keystore?: ReturnType<typeof fakeKeyStore>; db?: Database.Database } = {}) {
+  const keystore = o.keystore ?? fakeKeyStore()
+  const treasury = keystore.hasWallet('testnetTreasury') ? { classicAddress: keystore.getWallet('testnetTreasury').address } : xrpl.Wallet.generate('ed25519' as never)
+  if (o.treasury !== false && !keystore.hasWallet('testnetTreasury'))
+    keystore.setWallet('testnetTreasury', { address: treasury.classicAddress, seed: (treasury as xrpl.Wallet).seed!, algorithm: 'ed25519' })
   const moonpay = fakeMoonPay()
   const testnet = fakeTestnet()
   const h = makeHarness({
     keystore,
     env: { FEATURE_RAMP: '1', MOONPAY_PUBLISHABLE_KEY: PK, MOONPAY_SECRET_KEY: SK, MOONPAY_WEBHOOK_KEY: WK, RAMP_SANDBOX_SCALE: '100', ...o.env },
-    extra: { ramp: { moonpay, testnet, pollMs: 0 } },
+    extra: { ramp: { moonpay, testnet, pollMs: 0 }, ...(o.db ? { db: o.db } : {}) },
   })
   const signed = (body: unknown, t = Math.floor(h.clock.now / 1000)) => {
     const raw = JSON.stringify(body)
@@ -370,6 +374,76 @@ describe('POST /v1/webhooks/moonpay', () => {
     expect(rampCredits.byHash(w.h.app.core.db, H1)?.status).toBe('mint_failed')
     expect((await w.h.json('GET', '/v1/activity', { token: ana.token })).body.items[0]).toMatchObject({ kind: 'topup', status: 'failed' })
     expect((await w.h.json('GET', '/v1/balance', { token: ana.token })).body.availableMinor).toBe(5000)
+  })
+})
+
+/**
+ * Mints like the pool worker (SPEC §2.7): one at a time, and a reference already minted answers with its hash instead of minting
+ * again. `landed` is the pool's own store (it outlives an API restart); `hold` keeps a mint open like a Devnet mint (seconds).
+ */
+function workerMints(h: ReturnType<typeof world>['h'], landed: Map<string, { amountMinor: number; reference: string; hash: string }>, hold?: Promise<void>) {
+  let queue: Promise<unknown> = Promise.resolve()
+  h.pool.mintIn = (amountMinor, reference) => {
+    const run = queue.then(async () => {
+      const done = landed.get(reference)
+      if (done) return { hash: done.hash }
+      const hash = createHash('sha256').update(reference).digest('hex').toUpperCase()
+      landed.set(reference, { amountMinor, reference, hash })
+      if (hold) await hold
+      return { hash }
+    })
+    queue = run.catch(() => undefined)
+    return run
+  }
+}
+const pause = (ms = 20) => new Promise((r) => setTimeout(r, ms))
+
+describe('one mint per delivery, whoever runs it (the ramp, or the API jobs that recover top-ups)', () => {
+  it("the jobs tick (every 5 s) during the ramp's mint neither mints again nor replaces the Testnet delivery hash", async () => {
+    const w = world()
+    const landed = new Map<string, { amountMinor: number; reference: string; hash: string }>()
+    let release!: () => void
+    workerMints(w.h, landed, new Promise<void>((r) => (release = r)))
+    const ana = await w.h.signUp('ana')
+    const s = await w.session(ana.token)
+    w.testnet.txs.set(H1, rlusdDelivery(H1, w.treasury))
+    expect((await w.webhook({ type: 'transaction_updated', data: buy(s.body.externalId, w.treasury) })).status).toBe(200)
+    await eventually(() => expect(landed.size).toBe(1)) // the ramp's mint is on its way
+    await w.h.app.jobs.tick()
+    await pause()
+    release()
+    await w.h.settle()
+    expect([...landed.values()]).toEqual([expect.objectContaining({ amountMinor: 2852, reference: H1 })])
+    expect(w.h.pool.payouts).toHaveLength(1)
+    const i = intents.byId(w.h.app.core, rampCredits.byHash(w.h.app.core.db, H1)!.intentId!)!
+    expect(i).toMatchObject({ status: 'paid_out', network: 'testnet', depositTxHash: H1, reference: H1 })
+    expect(getBalance(w.h.app.core, ana.user.id)).toMatchObject({ availableMinor: 7852, pendingMinor: 0 })
+  })
+
+  it('after a restart with the mint already on the ledger, recovery pays the top-up out once and never mints it again', async () => {
+    const db = new Database(':memory:')
+    const keystore = fakeKeyStore()
+    const landed = new Map<string, { amountMinor: number; reference: string; hash: string }>()
+    const before = world({ keystore, db })
+    workerMints(before.h, landed, new Promise<void>(() => {})) // the mint lands, then the API stops before it hears back
+    const ana = await before.h.signUp('ana')
+    const s = await before.session(ana.token)
+    before.testnet.txs.set(H1, rlusdDelivery(H1, before.treasury))
+    await before.webhook({ type: 'transaction_updated', data: buy(s.body.externalId, before.treasury) })
+    await eventually(() => expect(landed.size).toBe(1))
+
+    const after = world({ keystore, db }) // the API starts again on the same database; the pool worker kept its records
+    workerMints(after.h, landed)
+    after.testnet.txs.set(H1, rlusdDelivery(H1, after.treasury))
+    await after.h.app.jobs.tick() // what server.ts runs at start
+    after.testnet.emit(H1) // and the ramp's own scan
+    await after.h.settle()
+    expect([...landed.values()]).toEqual([expect.objectContaining({ amountMinor: 2852, reference: H1 })])
+    expect(after.h.pool.payouts).toEqual([expect.objectContaining({ to: ana.user.address, amountMinor: 2852 })])
+    const i = intents.byId(after.h.app.core, rampCredits.byHash(db, H1)!.intentId!)!
+    // Recovery (intents/flow.ts runTopup) still writes the Devnet mint hash over depositTxHash here: contract request to C.
+    expect(i).toMatchObject({ status: 'paid_out', network: 'testnet', reference: H1 })
+    expect(getBalance(after.h.app.core, ana.user.id)).toMatchObject({ availableMinor: 7852, pendingMinor: 0 })
   })
 })
 

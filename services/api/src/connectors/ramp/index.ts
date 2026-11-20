@@ -265,13 +265,15 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
         if (!(e instanceof ApiErr) || e.code !== 'limit_reached') throw e
         refusedCap = e.details?.capMinor ?? core.settings.tier0.balanceCapMinor
         const failure = { code: 'limit_reached', message: COPY.refusedLimit(refusedCap) }
-        intents.insert(core, { id: intentId, kind: 'topup', status: 'failed', fromUserId: ZECCA, toUserId: user.id, amountMinor, feeMinor: 0, note, network: 'testnet', depositTxHash: hash, failure })
+        intents.insert(core, { id: intentId, kind: 'topup', status: 'failed', fromUserId: ZECCA, toUserId: user.id, amountMinor, feeMinor: 0, note, network: 'testnet', depositTxHash: hash, reference: hash, failure })
         activityId = addActivity(core, { userId: user.id, intentId, direction: 'in', kind: 'topup', amountMinor, feeMinor: 0, note })
         rampCredits.patch(core.db, row.moonpayTxId, { status: 'refused_limit', intentId, reason: `tier-0 balance cap ${refusedCap}` }, at)
         outcome = 'refused'
         return
       }
-      intents.insert(core, { id: intentId, kind: 'topup', status: 'created', fromUserId: ZECCA, toUserId: user.id, amountMinor, feeMinor: 0, note, network: 'testnet', depositTxHash: hash })
+      // reference = the delivery hash: the API's top-up recovery (jobs tick, runTopup) mints a created top-up with its reference
+      // too, so whichever runs, the pool worker mints this delivery once.
+      intents.insert(core, { id: intentId, kind: 'topup', status: 'created', fromUserId: ZECCA, toUserId: user.id, amountMinor, feeMinor: 0, note, network: 'testnet', depositTxHash: hash, reference: hash })
       rampCredits.patch(core.db, row.moonpayTxId, { intentId }, at)
       outcome = 'credited'
     })()
