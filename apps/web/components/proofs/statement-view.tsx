@@ -11,7 +11,7 @@ import { useResource } from '@/lib/hooks'
 import { Button, HashChip, Skeleton } from '@/components/zecca/bits'
 import { Logo } from '@/components/zecca/wordmark'
 import { cn } from '@/lib/cn'
-import { checkSignature, statementTotals, type SignatureCheck } from './statement-verify'
+import { checkSignature, signerStatus, statementFile, statementTotals, type SignatureCheck } from './statement-verify'
 
 type Line = Statement['lines'][number]
 
@@ -19,6 +19,19 @@ const FALLBACK_EXPLORER: PublicConfig['explorer'] = { devnet: 'https://devnet.xr
 const txHref = (explorer: PublicConfig['explorer'], network: Network, hash: string) => `${explorer[network].replace(/\/+$/, '')}/${hash}`
 const when = (iso: string) => `${new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })} UTC`
 const day = (iso: string) => new Date(iso).toLocaleDateString('en-US', { dateStyle: 'medium', timeZone: 'UTC' })
+
+/** Saves the statement from memory: the API is another origin, where the download attribute is ignored. */
+function saveJson(s: Statement) {
+  const f = statementFile(s)
+  const url = URL.createObjectURL(new Blob([f.text], { type: f.type }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = f.name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
 
 export function StatementView({ id }: { id: string }) {
   const { api, config } = useApp()
@@ -38,13 +51,9 @@ export function StatementView({ id }: { id: string }) {
               <Button variant="secondary" className="min-h-11 px-4 text-[14px]" onClick={() => window.print()}>
                 <Printer className="size-4" aria-hidden="true" /> Print
               </Button>
-              <a
-                href={api.url('disclosureGet', { id })}
-                download={`zecca-statement-${id}.json`}
-                className="inline-flex min-h-11 items-center gap-2 rounded-[14px] border border-line bg-surface px-4 text-[14px] font-[680] hover:border-ink/30"
-              >
+              <Button variant="secondary" className="min-h-11 px-4 text-[14px]" onClick={() => saveJson(st.data!)}>
                 <Download className="size-4" aria-hidden="true" /> JSON
-              </a>
+              </Button>
             </div>
           )}
         </header>
@@ -61,14 +70,14 @@ export function StatementView({ id }: { id: string }) {
             <p className="mt-2 text-[15px] text-muted">Check the link, or ask the person who shared it for a new one.</p>
           </div>
         ) : (
-          <StatementBody s={st.data} explorer={explorer} />
+          <StatementBody s={st.data} explorer={explorer} config={config} />
         )}
       </div>
     </div>
   )
 }
 
-function StatementBody({ s, explorer }: { s: Statement; explorer: PublicConfig['explorer'] }) {
+function StatementBody({ s, explorer, config }: { s: Statement; explorer: PublicConfig['explorer']; config: PublicConfig | null | undefined }) {
   const totals = useMemo(() => statementTotals(s), [s])
   const proven = s.lines.filter((l) => l.amountProof).length
   return (
@@ -115,7 +124,7 @@ function StatementBody({ s, explorer }: { s: Statement; explorer: PublicConfig['
         </p>
       </section>
 
-      <SignatureBlock s={s} />
+      <SignatureBlock s={s} config={config} />
     </article>
   )
 }
@@ -169,7 +178,7 @@ function LineItem({ l, explorer }: { l: Line; explorer: PublicConfig['explorer']
   )
 }
 
-function SignatureBlock({ s }: { s: Statement }) {
+function SignatureBlock({ s, config }: { s: Statement; config: PublicConfig | null | undefined }) {
   const [check, setCheck] = useState<SignatureCheck | null>(null)
   const signer = useMemo(() => {
     try {
@@ -178,12 +187,14 @@ function SignatureBlock({ s }: { s: Statement }) {
       return undefined
     }
   }, [s.signature.publicKey])
+  // Zecca's key only when the config publishes it and it is this one; otherwise the page names the key, nothing more.
+  const status = signerStatus(signer, config)
   return (
     <section aria-labelledby="sig-title" className="rounded-[20px] border border-line bg-surface p-4 print:rounded-none">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 id="sig-title" className="flex items-center gap-2 text-[17px] font-[700]">
-            <ShieldCheck className="size-5" aria-hidden="true" /> Signed by Zecca
+            <ShieldCheck className="size-5" aria-hidden="true" /> {status === 'other' ? "Not signed with Zecca's statement key" : 'Signed by Zecca'}
           </h2>
           <p className="mt-1 max-w-[52ch] text-[13.5px] text-muted">Zecca signs the whole statement. Change one character and the signature no longer matches.</p>
         </div>
@@ -193,9 +204,13 @@ function SignatureBlock({ s }: { s: Statement }) {
       </div>
       <div aria-live="polite" className="mt-3 empty:hidden">
         {check &&
-          (check.ok ? (
+          (check.ok && status === 'other' ? (
+            <p className="flex items-center gap-2 rounded-[14px] bg-alert/10 px-3 py-2 text-[14px] font-[620] text-alert">
+              <X className="size-4" aria-hidden="true" /> The signature matches, but {check.signerAddress} is not Zecca&apos;s statement key.
+            </p>
+          ) : check.ok ? (
             <p className="flex items-center gap-2 rounded-[14px] bg-in/10 px-3 py-2 text-[14px] font-[620] text-in">
-              <Check className="size-4" aria-hidden="true" /> Signature valid. Signed with the key of {check.signerAddress}.
+              <Check className="size-4" aria-hidden="true" /> Signature valid. Signed with {status === 'zecca' ? "Zecca's statement key" : 'the key of'} {check.signerAddress}.
             </p>
           ) : (
             <p className="flex items-center gap-2 rounded-[14px] bg-alert/10 px-3 py-2 text-[14px] font-[620] text-alert">
@@ -206,7 +221,7 @@ function SignatureBlock({ s }: { s: Statement }) {
       <dl className="mt-4 grid gap-x-4 gap-y-2 text-[13px] sm:grid-cols-[max-content_1fr]">
         {signer && (
           <>
-            <dt className="text-muted">Zecca statement key</dt>
+            <dt className="text-muted">{status === 'zecca' ? 'Zecca statement key' : 'Signing key'}</dt>
             <dd className="break-all font-mono">{signer}</dd>
           </>
         )}
@@ -220,7 +235,8 @@ function SignatureBlock({ s }: { s: Statement }) {
       <p className="mt-4 text-[12px] leading-relaxed text-muted">
         How to check it yourself: take this statement as JSON, remove the signature field, and write it as compact JSON with every object&apos;s keys sorted;
         its SHA-256 is the fingerprint above, and the signature is an ECDSA {s.signature.alg} signature of that fingerprint, as made by ripple-keypairs. Amount proofs can be checked
-        against the public ledger with the open-source verifier in Zecca&apos;s repository (services/api/src/connectors/proofs/verify-cli.ts).
+        against the public ledger with the open-source verifier in Zecca&apos;s repository (services/api/src/connectors/proofs/verify-cli.ts), with Zecca&apos;s statement key
+        pinned (--signer).
       </p>
     </section>
   )

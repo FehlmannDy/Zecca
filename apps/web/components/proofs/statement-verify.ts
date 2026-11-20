@@ -52,3 +52,18 @@ export function statementTotals(s: Statement) {
   }
   return { inMinor, outMinor, feeMinor, count: s.lines.length }
 }
+
+/**
+ * Whether `signer` is Zecca's statement key, as Zecca's public config publishes it (addresses.statementSigner).
+ * 'unknown' while the config does not publish one: the page then names the key without calling it Zecca's.
+ */
+export function signerStatus(signer: string | undefined, config: unknown): 'zecca' | 'other' | 'unknown' {
+  const published = (config as { addresses?: { statementSigner?: unknown } } | null | undefined)?.addresses?.statementSigner
+  if (!signer || typeof published !== 'string' || !published) return 'unknown'
+  return signer === published ? 'zecca' : 'other'
+}
+
+/** The statement as a file to save (the signature covers canonical JSON, so the indentation does not matter). */
+export function statementFile(s: Statement): { name: string; type: string; text: string } {
+  return { name: `zecca-statement-${s.id}.json`, type: 'application/json', text: JSON.stringify(s, null, 2) }
+}

@@ -4,7 +4,7 @@ import type { Statement } from '@zecca/contracts'
 import { statement as fixture } from '@zecca/contracts/fixtures'
 // The API's signer: what the page checks must be exactly what the API signs.
 import { canonicalJson as apiCanonical, signStatement, statementKeyFrom } from '../../../../services/api/src/connectors/proofs/statement'
-import { canonicalJson, checkSignature, statementTotals } from './statement-verify'
+import { canonicalJson, checkSignature, signerStatus, statementFile, statementTotals } from './statement-verify'
 
 const seed = rk.generateSeed({ algorithm: 'ecdsa-secp256k1' })
 const key = statementKeyFrom({ address: rk.deriveAddress(rk.deriveKeypair(seed).publicKey), seed, algorithm: 'ecdsa-secp256k1' })
@@ -41,5 +41,22 @@ describe('statement check in the browser', () => {
 
   it('totals in and out, and fees', () => {
     expect(statementTotals(signed())).toEqual({ inMinor: 450, outMinor: 1200, feeMinor: 2, count: 2 })
+  })
+
+  it("names the signer Zecca only when it is the statement signer Zecca's config publishes", () => {
+    const zecca = { addresses: { pool: 'rPool', statementSigner: key.address } }
+    expect(signerStatus(key.address, zecca)).toBe('zecca')
+    expect(signerStatus(key.address, { addresses: { pool: 'rPool', statementSigner: 'rSomeoneElse' } })).toBe('other')
+    expect(signerStatus(key.address, { addresses: { pool: 'rPool' } })).toBe('unknown')
+    expect(signerStatus(key.address, null)).toBe('unknown')
+    expect(signerStatus(undefined, zecca)).toBe('unknown')
+  })
+
+  it('the JSON file is the statement as served: it still checks after a save', () => {
+    const s = signed()
+    const f = statementFile(s)
+    expect(f.name).toBe(`zecca-statement-${s.id}.json`)
+    expect(f.type).toBe('application/json')
+    expect(checkSignature(JSON.parse(f.text) as Statement)).toEqual({ ok: true, signerAddress: key.address })
   })
 })
