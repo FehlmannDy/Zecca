@@ -16,6 +16,7 @@
     "@zecca/keystore": "*",
     "@zecca/ledger-mock": "*",
     "@zecca/xrpl-core": "*",
-    "better-sqlite3": "13.2.0"
+    "better-sqlite3": "13.2.0",
+    "tsx": "4.23.15"
   }
 }

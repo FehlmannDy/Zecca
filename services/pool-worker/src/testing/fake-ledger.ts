@@ -25,7 +25,7 @@ type Hang = { apply: boolean }
 
 export type FakeLedger = Ledger & {
   t: {
-    deposit(o: { from: string; amountMinor: number; encryptedAmountMinor?: number; engineResult?: string; issuanceId?: string; stream?: boolean; to?: string }): LedgerTxEvent
+    deposit(o: { from: string; amountMinor: number; encryptedAmountMinor?: number; engineResult?: string; issuanceId?: string; stream?: boolean; to?: string; hash?: string }): LedgerTxEvent
     redeliver(e: LedgerTxEvent): void
     advance(n: number): void
     /** The next submit (of `txType` when given) returns this engine result; a tec consumes the sequence like the real ledger. */
@@ -78,9 +78,9 @@ export function createFakeLedger(opts: { submitDelayMs?: number; startLedger?: n
     const touched = new Set([String(e.tx.Account), String(e.tx.Destination ?? ''), String(e.tx.Delegate ?? '')])
     for (const a of touched) for (const cb of watchers.get(a) ?? []) queueMicrotask(() => cb(e))
   }
-  const record = (tx: Record<string, unknown>, engineResult: string): LedgerTxEvent => {
+  const record = (tx: Record<string, unknown>, engineResult: string, fixedHash?: string): LedgerTxEvent => {
     index += 1
-    const h = hash()
+    const h = fixedHash ?? hash()
     const e: LedgerTxEvent = { hash: h, ledgerIndex: index, validated: true, engineResult, tx: { ...tx, hash: h }, meta: { TransactionResult: engineResult } }
     events.push(e)
     return e
@@ -248,7 +248,7 @@ export function createFakeLedger(opts: { submitDelayMs?: number; startLedger?: n
         seq.set(from, nextSeq(from) + 1)
         const result = o.engineResult ?? 'tesSUCCESS'
         if (result === 'tesSUCCESS') bal(tx.Destination).inboxMinor += o.encryptedAmountMinor ?? o.amountMinor
-        const e = record(tx, result)
+        const e = record(tx, result, o.hash)
         if (o.stream !== false) notify(e)
         return e
       },
