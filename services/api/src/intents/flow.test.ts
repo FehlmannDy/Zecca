@@ -115,7 +115,7 @@ describe('p2p transfer through the pool', () => {
   })
 
   it('refuses unknown recipients, yourself, and more than the balance (insufficient_funds with shortMinor)', async () => {
-    const { h, ana, carla } = await two()
+    const { h, ana, carla } = await two({ env: { TIER0_TX_CAP_MINOR: '100000' } })
     expect((await h.json('POST', '/v1/transfers', { token: ana.token, body: { to: 'usr_nobody', amountMinor: 100 } })).status).toBe(404)
     expect((await h.json('POST', '/v1/transfers', { token: ana.token, body: { to: ana.user.id, amountMinor: 100 } })).status).toBe(400)
     const r = await h.json('POST', '/v1/transfers', { token: ana.token, body: { to: carla.user.id, amountMinor: 5120 } })

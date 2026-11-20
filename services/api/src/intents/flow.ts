@@ -32,9 +32,10 @@ export async function createSendIntent(
   const { sender, recipient } = o
   if (recipient.status !== 'active') throw Err.notFound("We couldn't find that person.")
   if (recipient.id === sender.id) throw Err.badRequest("You can't send money to yourself.")
+  // Limits first: the limit sheet tells the person more than "not enough money".
+  checkOutgoing(core, sender, recipient, o.amountMinor, o.feeMinor)
   const b = getBalance(core, sender.id)
   if (b.availableMinor < o.amountMinor) throw Err.insufficient(o.amountMinor - b.availableMinor)
-  checkOutgoing(core, sender, recipient, o.amountMinor, o.feeMinor)
   core.rateLimit(sender.address)
 
   const id = core.id('int')
@@ -85,9 +86,9 @@ export function registerSendHandler(core: Core): void {
           .prepare("UPDATE intents SET submitted_at = ? WHERE id = ? AND status = 'created' AND submitted_at IS NULL")
           .run(core.iso(), i.id).changes
         if (claimed !== 1) throw Err.policy('This payment is already being sent.')
+        checkOutgoing(core, sender, recipient, i.amountMinor, i.feeMinor, { excludeIntentId: i.id })
         const b = getBalance(core, sender.id)
         if (b.availableMinor < i.amountMinor) throw Err.insufficient(i.amountMinor - b.availableMinor)
-        checkOutgoing(core, sender, recipient, i.amountMinor, i.feeMinor, { excludeIntentId: i.id })
         if (i.paymentRequestId) claimRequest(core, i.paymentRequestId, i.id)
         adjustBalance(core, sender.id, { available: -i.amountMinor })
       })()
