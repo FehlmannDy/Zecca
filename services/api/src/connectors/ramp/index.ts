@@ -133,6 +133,7 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
       walletAddress: r.treasury,
       baseCurrencyCode: fiatCurrency,
       baseCurrencyAmount: String(fiatAmount),
+      lockAmount: 'true', // the amount the tier-0 check passed: not changeable in the widget
       externalCustomerId: u.id,
       externalTransactionId: externalId,
       allowedIpAddress,
@@ -148,9 +149,12 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
     const q = url.searchParams
     if (url.protocol !== 'https:' || !/^buy(-sandbox)?\.moonpay\.com$/.test(url.hostname)) return `host ${url.host}`
     if (q.get('apiKey') !== r.keys.publishableKey) return 'apiKey mismatch'
-    for (const k of ['walletAddresses', 'refundWalletAddress', 'refundWalletAddresses']) if (q.has(k)) return `${k} not allowed`
+    for (const k of ['walletAddresses', 'refundWalletAddress', 'refundWalletAddresses', 'quoteCurrencyAmount']) if (q.has(k)) return `${k} not allowed`
     const s = rampSessions.byExternalId(core.db, q.get('externalTransactionId'))
     if (!s || s.userId !== u.id) return 'externalTransactionId is not a session of this user'
+    if (s.doneAt) return 'session already credited'
+    if (q.get('baseCurrencyAmount') !== s.fiatAmount || q.get('baseCurrencyCode') !== s.fiatCurrency) return 'amount is not the session amount'
+    if (q.get('lockAmount') !== 'true') return 'amount not locked'
     if (q.get('walletAddress') !== s.walletAddress) return 'walletAddress is not our treasury'
     if (q.get('allowedIpAddress') !== s.ipHash) return 'allowedIpAddress was not issued for this session'
     if (q.has('currencyCode') && !Object.hasOwn(DELIVERED, q.get('currencyCode')!)) return `currency ${q.get('currencyCode')}`

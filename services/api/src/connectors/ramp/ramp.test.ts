@@ -134,6 +134,7 @@ describe('POST /v1/ramp/session', () => {
     expect(q.get('baseCurrencyAmount')).toBe('50')
     expect(q.get('externalTransactionId')).toBe(r.body.externalId)
     expect(q.get('allowedIpAddress')).toBe(ipHash(SK, BROWSER_IP))
+    expect(q.get('lockAmount')).toBe('true') // the amount the tier-0 check passed cannot be changed in the widget
     const sig = q.get('signature')!
     expect(sig).toBe(signQuery(SK, r.body.widgetUrl.split('&signature=')[0].slice(r.body.widgetUrl.indexOf('?'))))
     expect(r.body.params).toMatchObject({ apiKey: PK, walletAddress: w.treasury, externalTransactionId: r.body.externalId, baseCurrencyAmount: '50' })
@@ -232,6 +233,11 @@ describe('POST /v1/ramp/sign', () => {
       ['other user', (u) => u.searchParams.set('externalTransactionId', boSession.body.externalId)],
       ['currency', (u) => u.searchParams.set('currencyCode', 'btc')],
       ['prototype key', (u) => u.searchParams.set('currencyCode', 'constructor')],
+      ['amount', (u) => u.searchParams.set('baseCurrencyAmount', '5000')],
+      ['fiat currency', (u) => u.searchParams.set('baseCurrencyCode', 'eur')],
+      ['amount unlocked', (u) => u.searchParams.delete('lockAmount')],
+      ['amount lock off', (u) => u.searchParams.set('lockAmount', 'false')],
+      ['crypto amount', (u) => u.searchParams.set('quoteCurrencyAmount', '1000')],
     ]
     for (const [why, edit] of bad) {
       const u = await sdkUrl(w, ana.token)
@@ -240,6 +246,19 @@ describe('POST /v1/ramp/sign', () => {
       expect(r.status, why).toBe(400)
       expect(r.body.error.message, why).toBe('This top-up link is not valid. Start again.')
     }
+  })
+
+  it('refuses to sign a session again once it has been credited (one purchase per session)', async () => {
+    const w = world()
+    const ana = await w.h.signUp('ana')
+    const u = await sdkUrl(w, ana.token)
+    const sign = () => w.h.json('POST', '/v1/ramp/sign', { token: ana.token, body: { url: u.toString() } })
+    expect((await sign()).status).toBe(200)
+    w.testnet.txs.set(H1, rlusdDelivery(H1, w.treasury))
+    await w.webhook({ type: 'transaction_updated', data: buy(u.searchParams.get('externalTransactionId')!, w.treasury) })
+    await w.h.settle()
+    expect(w.h.pool.mints).toHaveLength(1)
+    expect((await sign()).status).toBe(400)
   })
 })
 
