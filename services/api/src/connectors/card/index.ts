@@ -153,7 +153,7 @@ export function mountCard(app: Hono, core: Core, opts: CardOptions = {}): void {
     if (!s.pan) throw Err.upstream(UNAVAILABLE)
     const descriptor = body.merchantName.toUpperCase().slice(0, 25)
     const { token } = await viaLithic(core, 'simulate a test purchase', () => ctx.gate.run(() => lithic.simulateAuthorize({ amount: body.amountMinor, descriptor, pan: s.pan! })))
-    const tx = await viaLithic(core, 'read the test purchase decision', () => waitForResult(lithic, token))
+    const tx = await viaLithic(core, 'read the test purchase decision', () => waitForResult(lithic, token, { timeoutMs: ctx.decisionTimeoutMs }))
     const approved = !!confirmDecision(core, ctx, lithic, token, tx)
     if (approved) core.track(clear(core, ctx, lithic, token), 'card clearing')
     const hold = ctx.store.hold(token)

@@ -397,6 +397,25 @@ describe('POST /v1/demo/shop/charge (the demo shop’s "Pay by card")', () => {
     expect(r.body.approved).toBe(true)
   })
 
+  it('a decision that could not be read is not charged twice: a retry of the same order picks up the first purchase', async () => {
+    const { h, lithic, ana } = await world({ card: { decisionTimeoutMs: 300 } })
+    await cardWith(h, ana, 4000)
+    const o = await order(h)
+    const s = await secretOf(h, ana)
+    lithic.lagReads = 1000 // our webhook approves, but the decision cannot be read in time
+    const r1 = await payByCard(h, o.orderId, s)
+    expect([r1.status, r1.body.error.code]).toEqual([502, 'upstream_error'])
+    expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(2550)
+    lithic.lagReads = 0
+    const r2 = await payByCard(h, o.orderId, s)
+    expect(r2.body.approved).toBe(true)
+    await h.settle()
+    expect(lithic.calls.filter((c) => c === 'simulateAuthorize')).toHaveLength(1)
+    expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(2550)
+    expect(cardChargeForOrder(h.app.core, o.orderId)).toMatchObject({ authToken: r2.body.receipt.reference, receipt: { status: 'completed' } })
+    expect(h.app.core.db.prepare('SELECT status FROM card_holds').all()).toEqual([{ status: 'completed' }])
+  })
+
   it('404 for an unknown order', async () => {
     const { h, ana } = await world()
     await cardWith(h, ana, 0)

@@ -311,6 +311,9 @@ export function cardStore(ctx: Ctx) {
 
     holdsOf: (userId: string, limit: number) =>
       (db.prepare('SELECT * FROM card_holds WHERE user_id = ? ORDER BY seq DESC LIMIT ?').all(userId, limit) as HoldRaw[]).map((r) => holdFrom(r)!),
+    /** The purchase of a demo shop order that still stands (approved, not voided), if any. */
+    liveHoldOfOrder: (orderId: string) =>
+      holdFrom(db.prepare("SELECT * FROM card_holds WHERE order_id = ? AND status IN ('authorised', 'completed') ORDER BY seq DESC LIMIT 1").get(orderId) as HoldRaw | undefined),
     /** Approved purchases not yet cleared or voided (the poller follows them on Lithic). */
     openHolds: () => (db.prepare("SELECT * FROM card_holds WHERE status = 'authorised' ORDER BY seq").all() as HoldRaw[]).map((r) => holdFrom(r)!),
 

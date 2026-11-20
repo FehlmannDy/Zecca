@@ -13,6 +13,8 @@ export type CardOptions = {
   simulateGapMs?: number
   /** Poll Lithic for clearing, voids and returns every n ms. 0 = off. Default 15 000. */
   pollMs?: number
+  /** How long a shop charge or a test purchase waits for Lithic's decision. Default 5000 ms (HANDOFF). */
+  decisionTimeoutMs?: number
 }
 
 export type CardCtx = {
@@ -20,6 +22,7 @@ export type CardCtx = {
   lithic: LithicApi | null
   gate: ReturnType<typeof createGate>
   pollMs: number
+  decisionTimeoutMs: number
   secret?: string
   secretP?: Promise<string>
   creating: Map<string, Promise<unknown>>
@@ -48,6 +51,7 @@ export function cardCtx(core: Core, opts: CardOptions = {}): CardCtx {
     lithic,
     gate: createGate(opts.simulateGapMs ?? 1100),
     pollMs: opts.pollMs ?? 15_000,
+    decisionTimeoutMs: opts.decisionTimeoutMs ?? 5000,
     creating: new Map(),
     charging: new Set(),
     syncing: false,

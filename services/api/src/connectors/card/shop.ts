@@ -46,6 +46,15 @@ async function matchCard(core: Core, lithic: LithicApi, ctx: CardCtx, b: { pan: 
   return undefined
 }
 
+/** Lithic simulates the shop's purchase (our webhook decides it); the hold is tied to the order at once. */
+async function purchase(core: Core, ctx: CardCtx, lithic: LithicApi, order: ShopOrder, pan: string): Promise<string> {
+  const { token } = await viaLithic(core, 'simulate a shop purchase', () =>
+    ctx.gate.run(() => lithic.simulateAuthorize({ amount: order.amountMinor, descriptor: SHOP_DESCRIPTOR, pan, mcc: SHOP_MCC })),
+  )
+  ctx.store.annotate(token, { orderId: order.id })
+  return token
+}
+
 export async function shopCharge(
   core: Core,
   ctx: CardCtx,
@@ -64,12 +73,13 @@ export async function shopCharge(
       core.log.info(`[card] shop charge for order ${order.id}: card details do not match a Zecca card`)
       return { approved: false, message: DECLINED }
     }
-    const { token } = await viaLithic(core, 'simulate a shop purchase', () =>
-      ctx.gate.run(() => lithic.simulateAuthorize({ amount: order.amountMinor, descriptor: SHOP_DESCRIPTOR, pan: b.pan, mcc: SHOP_MCC })),
-    )
-    ctx.store.annotate(token, { orderId: order.id })
-    const tx = await viaLithic(core, 'read the shop purchase decision', () => waitForResult(lithic, token))
-    if (!confirmDecision(core, ctx, lithic, token, tx)) return { approved: false, message: DECLINED }
+    // A purchase of this order whose decision could not be read (the buyer saw an error): pick it up, never buy twice.
+    const prior = ctx.store.liveHoldOfOrder(order.id)
+    if (prior && prior.cardToken !== card.token) throw Err.conflict('This order is being paid with another card.')
+    const token = prior?.authToken ?? (await purchase(core, ctx, lithic, order, b.pan))
+    const tx = await viaLithic(core, 'read the shop purchase decision', () => waitForResult(lithic, token, { timeoutMs: ctx.decisionTimeoutMs }))
+    const hold = confirmDecision(core, ctx, lithic, token, tx)
+    if (!hold) return { approved: false, message: DECLINED }
     const receipt: Receipt = {
       orderNumber: `SA-${order.seq}`,
       shopName: SHOP_NAME,
@@ -77,12 +87,12 @@ export async function shopCharge(
       amountMinor: order.amountMinor,
       method: 'card',
       cardLast4: card.last4,
-      status: 'authorised',
+      status: hold.status === 'completed' ? 'completed' : 'authorised',
       at: core.iso(),
       reference: token,
     }
     ctx.store.saveCharge(order.id, token, receipt)
-    core.track(clear(core, ctx, lithic, token), 'card clearing')
+    if (hold.status === 'authorised') core.track(clear(core, ctx, lithic, token), 'card clearing')
     return { approved: true, receipt }
   } finally {
     ctx.charging.delete(order.id)
