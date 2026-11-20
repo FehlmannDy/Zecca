@@ -437,6 +437,11 @@ export function createMockState(opts: { features?: Partial<Features>; delays?: P
       const items = all.slice(start, start + limit)
       return { items, ...(start + limit < all.length ? { nextCursor: String(start + limit) } : {}) }
     },
+    activityOne(u: User, id: string) {
+      const a = (data.activity[u.id] ?? []).find((x) => x.id === id || x.intentId === id)
+      if (!a) fail(404, 'not_found', "We couldn't find that payment.")
+      return a!
+    },
     createTransfer(token: string, to: string, amountMinor: number, note?: string) {
       const u = userOf(token)
       const dest = data.users[to]

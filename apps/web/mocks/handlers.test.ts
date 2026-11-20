@@ -98,6 +98,7 @@ describe('mock API handlers vs the contracts', () => {
     await h.state.settle()
     expect((await h.call('transferGet', { token: t, params: { id: tr.data.intent.id } })).data.status).toBe('paid_out')
     const act = await h.call('activity', { token: t, query: { limit: '10' } })
+    expect((await h.call('activityGet', { token: t, params: { id: act.data.items[0].id } })).data.id).toBe(act.data.items[0].id)
     expect(act.data.items.map((a: { kind: string }) => a.kind)).toEqual(['p2p', 'welcome'])
     expect((await h.call('contacts', { token: t })).data.map((p: { handle: string }) => p.handle)).toContain('carla')
 

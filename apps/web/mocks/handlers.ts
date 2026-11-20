@@ -71,6 +71,7 @@ export function createHandlers(state: MockState, origin: string): HttpHandler[] 
     contacts: ({ token }) => state.contacts(state.userOf(token)),
     transferCreate: ({ token, body }) => state.createTransfer(token!, body.to, body.amountMinor, body.note),
     transferGet: ({ token, params }) => state.intent(token!, params.id),
+    activityGet: ({ token, params }) => state.activityOne(state.userOf(token), params.id),
     activity: ({ token, url }) => state.activityPage(state.userOf(token), url.searchParams.get('cursor') ?? undefined, Number(url.searchParams.get('limit') ?? 20)),
     paymentRequestCreate: ({ token, body }) => state.createRequest(token!, body.amountMinor, body.reference),
     paymentRequestGet: ({ token, params }) => state.readRequest(params.id, token),

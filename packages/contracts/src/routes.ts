@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import * as A from './api'
 import { PublicConfig } from './config'
-import { Balance, Intent, PaymentRequest, PreparedTx, User, Card, CardSecret } from './domain'
+import { Activity, Balance, Intent, PaymentRequest, PreparedTx, User, Card, CardSecret } from './domain'
 
 /**
  * The route table: the single source of truth for the HTTP API (base path /v1).
@@ -41,6 +41,7 @@ export const routes = {
   transferCreate: r({ method: 'POST', path: '/v1/transfers', auth: 'user', phase: 1, body: A.TransferRequest, response: A.IntentWithPrepared }),
   transferGet: r({ method: 'GET', path: '/v1/transfers/:id', auth: 'user', phase: 1, response: Intent }),
   activity: r({ method: 'GET', path: '/v1/activity', auth: 'user', phase: 1, query: A.ActivityQuery, response: A.ActivityPage }),
+  activityGet: r({ method: 'GET', path: '/v1/activity/:id', auth: 'user', phase: 1, response: Activity }),
   paymentRequestCreate: r({ method: 'POST', path: '/v1/payment-requests', auth: 'merchant', phase: 1, body: A.PaymentRequestCreate, response: PaymentRequest }),
   paymentRequestGet: r({ method: 'GET', path: '/v1/payment-requests/:id', auth: 'public', phase: 1, response: PaymentRequest }),
   paymentRequestEvents: r({ method: 'GET', path: '/v1/payment-requests/:id/events', auth: 'public', phase: 1, response: 'sse' }),

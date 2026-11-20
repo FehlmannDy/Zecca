@@ -52,6 +52,10 @@ const CALLS: Record<string, (w: World) => Promise<Response>> = {
   transferCreate: ({ h, ana, carla }) => h.call('POST', routePath('transferCreate'), { token: ana.token, body: { to: carla.user.id, amountMinor: 100 } }),
   transferGet: ({ h, ana, intentId }) => h.call('GET', routePath('transferGet', { id: intentId }), { token: ana.token }),
   activity: ({ h, ana }) => h.call('GET', routePath('activity') + '?limit=50', { token: ana.token }),
+  activityGet: async ({ h, ana }) => {
+    const first = (await (await h.call('GET', routePath('activity'), { token: ana.token })).json()).items[0]
+    return h.call('GET', routePath('activityGet', { id: first.id }), { token: ana.token })
+  },
   paymentRequestCreate: ({ h, bruno }) => h.call('POST', routePath('paymentRequestCreate'), { token: bruno.token, body: { amountMinor: 300 } }),
   paymentRequestGet: ({ h, prId }) => h.call('GET', routePath('paymentRequestGet', { id: prId })),
   paymentRequestEvents: ({ h, prId }) => h.call('GET', routePath('paymentRequestEvents', { id: prId })),
