@@ -19,7 +19,7 @@ import { mountTransfers } from './transfers'
 import { mountPaymentRequests } from './paymentRequests/routes'
 import { mountEvents } from './events'
 import { mountDev } from './dev'
-import { mountRamp } from './connectors/ramp'
+import { mountRamp, type RampDeps } from './connectors/ramp'
 import { mountDemoShop } from './demoShop'
 import { registerSendHandler, wirePoolEvents } from './intents/flow'
 import { createJobs, type Jobs } from './jobs'
@@ -39,6 +39,8 @@ export type AppDeps = {
   clock?: () => number
   ids?: (prefix: string) => string
   log?: Logger
+  /** Ramp connector: MoonPay API and Testnet reader (defaults: the real ones). Tests pass fakes. */
+  ramp?: RampDeps
 }
 
 export type ZeccaApp = Hono & { core: Core; jobs: Jobs }
@@ -95,7 +97,7 @@ export function createApp(deps: AppDeps): ZeccaApp {
   mountPaymentRequests(app, core)
   mountEvents(app, core)
   mountDev(app, core)
-  mountRamp(app, core)
+  mountRamp(app, core, deps.ramp)
   mountDemoShop(app, core)
   registerSendHandler(core)
   wirePoolEvents(core)
