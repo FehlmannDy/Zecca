@@ -17,7 +17,12 @@ export async function seedDemoShop(core: Core): Promise<string | undefined> {
     core.log.warn(`[seed] @${DEMO_SHOP.handle} is taken by another account: the demo shop is not seeded`)
     return undefined
   }
-  if (!(await core.ledger.accountExists(w.address))) core.log.warn(`[seed] the demo shop account ${w.address} is not on the ledger yet (run the bootstrap script)`)
+  try {
+    if (!(await core.ledger.accountExists(w.address))) core.log.warn(`[seed] the demo shop account ${w.address} is not on the ledger yet (run the bootstrap script)`)
+  } catch (e) {
+    // Only a warning: the ledger may be briefly unreachable at startup (Devnet answers notSynced); the shop still opens.
+    core.log.warn(`[seed] could not check the demo shop account on the ledger: ${(e as Error).message}`)
+  }
   if (!core.keystore.has({ user: w.address })) core.keystore.createUserElGamal(w.address)
   const id = core.id('usr')
   const at = core.iso()

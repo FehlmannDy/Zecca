@@ -13,7 +13,17 @@ const db = env.DATABASE_PATH ?? (mode === 'mock' ? ':memory:' : './.data/zecca.s
 const app = createApp({ env, db, ledger: w.ledger, keystore: w.keystore, poolWorker: w.poolWorker, log: consoleLogger })
 
 if (env.DEMO_MODE === '1' || env.DEMO_MODE === 'true') await seedDemoShop(app.core)
-await w.poolWorker.start()
+// The ledger can be briefly unavailable (Devnet notSynced, a dropped connection): retry instead of exiting.
+for (let attempt = 1; ; attempt++) {
+  try {
+    await w.poolWorker.start()
+    break
+  } catch (e) {
+    if (attempt >= 10) throw e
+    console.warn(`[api] pool worker start failed (${(e as Error).message}); retrying in ${attempt * 2} s`)
+    await new Promise((r) => setTimeout(r, attempt * 2000))
+  }
+}
 app.jobs.start({ reconcileMs: env.RECONCILE_MS === '0' ? 0 : Number(env.RECONCILE_MS ?? 60_000) })
 
 const port = Number(env.API_PORT ?? env.PORT ?? 8800)
