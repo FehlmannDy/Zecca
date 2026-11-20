@@ -24,11 +24,13 @@ const H2 = 'B'.repeat(63) + '2'
 function fakeMoonPay() {
   const byExt = new Map<string, any[]>()
   const ipCalls: (string | undefined)[] = []
+  const extCalls: string[] = []
   let currencies: MoonPayCurrency[] = [{ code: 'xrp' }, { code: 'rlusd_xrp', isSuspended: false, notAllowedCountries: ['IT', 'FR'] }]
   let country = 'CH'
-  const api: MoonPayApi & { byExt: typeof byExt; ipCalls: typeof ipCalls; setCurrencies(c: MoonPayCurrency[]): void; setCountry(c: string): void } = {
+  const api: MoonPayApi & { byExt: typeof byExt; ipCalls: typeof ipCalls; extCalls: typeof extCalls; setCurrencies(c: MoonPayCurrency[]): void; setCountry(c: string): void } = {
     byExt,
     ipCalls,
+    extCalls,
     setCurrencies: (c) => (currencies = c),
     setCountry: (c) => (country = c),
     async ipCountry(ip) {
@@ -40,6 +42,7 @@ function fakeMoonPay() {
       return tx ? { status: 200, body: tx } : { status: 404, body: { message: 'Transaction not found' } }
     },
     async buyTransactionsByExternalId(id) {
+      extCalls.push(id)
       const l = byExt.get(id)
       return l ? { status: 200, body: l } : { status: 404, body: { message: 'Transaction not found' } }
     },
@@ -306,10 +309,14 @@ describe('POST /v1/webhooks/moonpay', () => {
     await w.h.settle()
     await w.webhook({ type: 'transaction_updated', data: tx })
     await w.webhook({ type: 'transaction_updated', data: buy(s2.body.externalId, w.treasury, { id: 'mp-other' }) })
+    // The watcher afterwards: s is done, s2 is still open and MoonPay reports the same delivery under it (and the credited tx).
     w.moonpay.byExt.set(s.body.externalId, [tx])
+    w.moonpay.byExt.set(s2.body.externalId, [buy(s2.body.externalId, w.treasury, { id: 'mp-other' }), tx])
     w.testnet.emit(H1)
     await w.h.settle()
+    expect(w.moonpay.extCalls).toEqual([s2.body.externalId])
     expect(w.h.pool.mints).toHaveLength(1)
+    expect(rampCredits.byMoonPayId(w.h.app.core.db, 'mp-other')).toBeUndefined()
     expect((await w.h.json('GET', '/v1/balance', { token: ana.token })).body.availableMinor).toBe(7852)
   })
 
@@ -480,5 +487,47 @@ describe('Testnet watcher (second trigger when the webhook is late)', () => {
     expect(rampCredits.byHash(w.h.app.core.db, H1)).toMatchObject({ status: 'credited', source: 'watcher' })
     // The session is done: later deliveries do not query MoonPay for it again.
     expect(rampSessions.open(w.h.app.core.db, '2000-01-01T00:00:00.000Z', 10).map((x) => x.externalId)).not.toContain(s.body.externalId)
+  })
+
+  it("other people's newer sessions (Continue pressed, nothing bought) never push a purchase out of the lookup", async () => {
+    const w = world()
+    const ana = await w.h.signUp('ana')
+    const s = await w.session(ana.token)
+    const bo = await w.h.signUp('bob')
+    for (let k = 0; k < 30; k++) {
+      w.h.clock.advance(1000)
+      await w.session(bo.token)
+    }
+    w.moonpay.byExt.set(s.body.externalId, [buy(s.body.externalId, w.treasury)])
+    w.testnet.txs.set(H1, rlusdDelivery(H1, w.treasury))
+    w.testnet.emit(H1)
+    await w.h.settle()
+    expect(w.h.pool.mints).toEqual([{ amountMinor: 2852, reference: H1 }])
+  })
+
+  it('still credits a purchase that completes hours after its session (slow verification at MoonPay)', async () => {
+    const w = world()
+    const ana = await w.h.signUp('ana')
+    const s = await w.session(ana.token)
+    w.h.clock.advance(5 * 3_600_000)
+    w.moonpay.byExt.set(s.body.externalId, [buy(s.body.externalId, w.treasury)])
+    w.testnet.txs.set(H1, rlusdDelivery(H1, w.treasury))
+    w.testnet.emit(H1)
+    await w.h.settle()
+    expect(w.h.pool.mints).toEqual([{ amountMinor: 2852, reference: H1 }])
+  })
+
+  it('stops asking MoonPay about a session whose delivery was refused for good', async () => {
+    const w = world()
+    const ana = await w.h.signUp('ana')
+    const s = await w.session(ana.token)
+    w.moonpay.byExt.set(s.body.externalId, [buy(s.body.externalId, w.treasury)])
+    w.testnet.txs.set(H1, rlusdDelivery(H1, w.treasury, { result: 'tecPATH_PARTIAL' }))
+    w.testnet.emit(H1)
+    await w.h.settle()
+    expect(rampCredits.byHash(w.h.app.core.db, H1)?.status).toBe('rejected')
+    w.testnet.emit(H2)
+    await w.h.settle()
+    expect(w.moonpay.extCalls).toEqual([s.body.externalId])
   })
 })

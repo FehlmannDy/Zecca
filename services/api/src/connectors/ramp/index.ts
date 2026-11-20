@@ -31,9 +31,9 @@ export type RampDeps = {
 const PRIMARY = 'rlusd_xrp'
 const FALLBACK = 'xrp'
 const DELIVERED: Record<string, DeliveredCurrency> = { rlusd_xrp: 'RLUSD', xrp: 'XRP' }
-/** Sessions the watcher keeps asking MoonPay about. */
-const OPEN_WINDOW_MS = 2 * 3_600_000
-const OPEN_MAX = 25
+/** Sessions the watcher keeps asking MoonPay about: a day (verification at MoonPay can take hours), the newest few per user. */
+const OPEN_WINDOW_MS = 24 * 3_600_000
+const OPEN_PER_USER = 5
 
 const COPY = {
   unavailable: 'Top-up is not available right now.',
@@ -200,6 +200,7 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
 
   function reject(tx: any, s: RampSession, hash: string, reason: string, source: string): Outcome {
     rampCredits.insert(core.db, { moonpayTxId: String(tx.id), deliveryHash: hash, externalId: s.externalId, userId: s.userId, status: 'rejected', reason, source }, core.iso())
+    rampSessions.markDone(core.db, s.externalId, core.iso()) // final: the watcher stops asking about it
     core.log.error(`[ramp] NOT credited: MoonPay ${tx.id} delivery ${hash} for session ${s.externalId}: ${reason}`)
     return 'rejected'
   }
@@ -332,7 +333,7 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
   async function scanOnce(): Promise<void> {
     // Credits recorded before a restart whose mint never ran (mintIn is idempotent by reference).
     for (const c of rampCredits.withStatus(core.db, 'credited')) if (c.intentId && intents.byId(core, c.intentId)?.status === 'created') await mint(c.intentId)
-    for (const s of rampSessions.open(core.db, core.iso(core.now() - OPEN_WINDOW_MS), OPEN_MAX)) {
+    for (const s of rampSessions.open(core.db, core.iso(core.now() - OPEN_WINDOW_MS), OPEN_PER_USER)) {
       const r = await mp()
         .buyTransactionsByExternalId(s.externalId)
         .catch(() => null)
