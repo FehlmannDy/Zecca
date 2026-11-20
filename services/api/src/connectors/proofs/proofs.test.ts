@@ -141,7 +141,7 @@ describe('POST /v1/disclosures and GET /v1/disclosures/:id', () => {
     const poolAddress = h.keystore.getWallet('pool').address
     h.ledger.txByHash = async (hash: string) =>
       hash === p.depositHash
-        ? { hash, ledgerIndex: 5, validated: true, engineResult: 'tesSUCCESS', tx: { TransactionType: 'ConfidentialMPTSend', Account: ana.user.address, Destination: poolAddress, DestinationEncryptedAmount: ct } }
+        ? { hash, ledgerIndex: 5, validated: true, engineResult: 'tesSUCCESS', tx: { TransactionType: 'ConfidentialMPTSend', MPTokenIssuanceID: h.ledger.issuanceId, Account: ana.user.address, Destination: poolAddress, DestinationEncryptedAmount: ct } }
         : null
     const out = (await activity(h, ana)).find((a) => a.kind === 'p2p')!
     const r = await h.json('POST', '/v1/disclosures', { token: ana.token, body: { activityIds: [out.id] } })

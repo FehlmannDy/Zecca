@@ -86,7 +86,8 @@ export async function verifyAmountProof(p: { amountProof: string; amountMinor: n
   }
 }
 
-export type ProveDeps = { ledger: Pick<Ledger, 'txByHash'>; poolAddress: string; poolKey: ElGamalKeyPair }
+/** holderAddress: the statement's holder. A proof is made only for a payment the outside reader accepts (verify.ts). */
+export type ProveDeps = { ledger: Pick<Ledger, 'txByHash' | 'issuanceId'>; poolAddress: string; poolKey: ElGamalKeyPair; holderAddress: string }
 export type ProvableLine = { direction: 'in' | 'out'; amountMinor: number; depositTxHash?: string; payoutTxHash?: string }
 
 /** The pool-side proof for one line, or undefined when no true proof can be made (never throws). */
@@ -96,10 +97,11 @@ export async function proveLine(d: ProveDeps, line: ProvableLine): Promise<strin
   try {
     const ev = await d.ledger.txByHash(txHash)
     if (!ev || !ev.validated || ev.engineResult !== 'tesSUCCESS' || ev.tx.TransactionType !== 'ConfidentialMPTSend') return undefined
+    if (String(ev.tx.MPTokenIssuanceID ?? '').toUpperCase() !== d.ledger.issuanceId.toUpperCase()) return undefined
     const field: ProofField | undefined =
-      line.direction === 'out' && ev.tx.Destination === d.poolAddress
+      line.direction === 'out' && ev.tx.Account === d.holderAddress && ev.tx.Destination === d.poolAddress
         ? 'DestinationEncryptedAmount'
-        : line.direction === 'in' && ev.tx.Account === d.poolAddress
+        : line.direction === 'in' && ev.tx.Account === d.poolAddress && ev.tx.Destination === d.holderAddress
           ? 'SenderEncryptedAmount'
           : undefined
     if (!field) return undefined

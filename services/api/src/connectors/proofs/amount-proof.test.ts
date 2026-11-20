@@ -13,6 +13,7 @@ const POOL = 'rNwvGErbykbsfcRnmq6fXhqmrrL94WcZSZ'
 const ANA = 'rB5Pc1c7EYx98o4iWfk4Jx96JrCWgqhfZ3'
 const H1 = 'A'.repeat(64)
 const H2 = 'B'.repeat(64)
+const CMPT = '006C6AA175853178147D8F0D592D9DE3658C836F69985AB9'
 const enc = async (amount: number, pub = pool.publicKey) => encryptAmount(BigInt(amount), pub, await generateBlindingFactor())
 
 describe('amount proof (plaintext-equality sigma proof from @xrplf/mpt-crypto)', () => {
@@ -66,19 +67,19 @@ describe('amount proof (plaintext-equality sigma proof from @xrplf/mpt-crypto)',
 })
 
 describe('proveLine (from the ledger transaction)', () => {
-  const ledgerOf = (txs: Record<string, LedgerTxEvent>) => ({ txByHash: async (h: string) => txs[h] ?? null })
+  const ledgerOf = (txs: Record<string, LedgerTxEvent>) => ({ issuanceId: CMPT, txByHash: async (h: string) => txs[h] ?? null })
   const send = (hash: string, tx: Record<string, unknown>, ok = true): LedgerTxEvent => ({
     hash,
     ledgerIndex: 10,
     validated: ok,
     engineResult: ok ? 'tesSUCCESS' : 'tecBAD_PROOF',
-    tx: { TransactionType: 'ConfidentialMPTSend', ...tx },
+    tx: { TransactionType: 'ConfidentialMPTSend', MPTokenIssuanceID: CMPT, ...tx },
   })
 
   it('out line: the deposit to the pool (DestinationEncryptedAmount)', async () => {
     const ct = await enc(1200)
     const ledger = ledgerOf({ [H1]: send(H1, { Account: ANA, Destination: POOL, DestinationEncryptedAmount: ct }) })
-    const p = await proveLine({ ledger, poolAddress: POOL, poolKey: pool }, { direction: 'out', amountMinor: 1200, depositTxHash: H1 })
+    const p = await proveLine({ ledger, poolAddress: POOL, poolKey: pool, holderAddress: ANA }, { direction: 'out', amountMinor: 1200, depositTxHash: H1 })
     expect(parseAmountProof(p!)).toMatchObject({ txHash: H1, field: 'DestinationEncryptedAmount' })
     expect(await verifyAmountProof({ amountProof: p!, amountMinor: 1200, ciphertext: ct })).toBe(true)
   })
@@ -86,13 +87,13 @@ describe('proveLine (from the ledger transaction)', () => {
   it('in line: the payout from the pool (SenderEncryptedAmount)', async () => {
     const ct = await enc(995)
     const ledger = ledgerOf({ [H2]: send(H2, { Account: POOL, Destination: ANA, SenderEncryptedAmount: ct, DestinationEncryptedAmount: await enc(995, elgamal().publicKey) }) })
-    const p = await proveLine({ ledger, poolAddress: POOL, poolKey: pool }, { direction: 'in', amountMinor: 995, depositTxHash: H1, payoutTxHash: H2 })
+    const p = await proveLine({ ledger, poolAddress: POOL, poolKey: pool, holderAddress: ANA }, { direction: 'in', amountMinor: 995, depositTxHash: H1, payoutTxHash: H2 })
     expect(parseAmountProof(p!)).toMatchObject({ txHash: H2, field: 'SenderEncryptedAmount' })
   })
 
   it('no proof when it cannot be true: wrong amount, failed or missing tx, not a pool send, mock ciphertexts', async () => {
     const ct = await enc(1200)
-    const deps = (txs: Record<string, LedgerTxEvent>) => ({ ledger: ledgerOf(txs), poolAddress: POOL, poolKey: pool })
+    const deps = (txs: Record<string, LedgerTxEvent>) => ({ ledger: ledgerOf(txs), poolAddress: POOL, poolKey: pool, holderAddress: ANA })
     const line = { direction: 'out' as const, amountMinor: 1300, depositTxHash: H1 }
     expect(await proveLine(deps({ [H1]: send(H1, { Account: ANA, Destination: POOL, DestinationEncryptedAmount: ct }) }), line)).toBeUndefined()
     expect(await proveLine(deps({ [H1]: send(H1, { Account: ANA, Destination: POOL, DestinationEncryptedAmount: ct }, false) }), { ...line, amountMinor: 1200 })).toBeUndefined()
@@ -101,7 +102,20 @@ describe('proveLine (from the ledger transaction)', () => {
     const mock = '02' + (1200).toString(16).padStart(130, '0').toUpperCase()
     expect(await proveLine(deps({ [H1]: send(H1, { Account: ANA, Destination: POOL, DestinationEncryptedAmount: mock }) }), { ...line, amountMinor: 1200 })).toBeUndefined()
     expect(await proveLine(deps({}), { direction: 'in', amountMinor: 1 })).toBeUndefined()
-    const throwing = { ledger: { txByHash: async () => Promise.reject(new Error('down')) }, poolAddress: POOL, poolKey: pool }
+    const throwing = { ledger: { issuanceId: CMPT, txByHash: async () => Promise.reject(new Error('down')) }, poolAddress: POOL, poolKey: pool, holderAddress: ANA }
     expect(await proveLine(throwing, { ...line, amountMinor: 1200 })).toBeUndefined()
+  })
+
+  it("no proof for a payment that is not the holder's or not in Zecca's issuance (the outside reader would refuse it)", async () => {
+    const OTHER = 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe'
+    const out = await enc(1200)
+    const inn = await enc(995)
+    const deps = (txs: Record<string, LedgerTxEvent>) => ({ ledger: ledgerOf(txs), poolAddress: POOL, poolKey: pool, holderAddress: ANA })
+    const outLine = { direction: 'out' as const, amountMinor: 1200, depositTxHash: H1 }
+    const inLine = { direction: 'in' as const, amountMinor: 995, payoutTxHash: H2 }
+    expect(await proveLine(deps({ [H1]: send(H1, { Account: OTHER, Destination: POOL, DestinationEncryptedAmount: out }) }), outLine)).toBeUndefined()
+    expect(await proveLine(deps({ [H2]: send(H2, { Account: POOL, Destination: OTHER, SenderEncryptedAmount: inn }) }), inLine)).toBeUndefined()
+    expect(await proveLine(deps({ [H1]: send(H1, { Account: ANA, Destination: POOL, DestinationEncryptedAmount: out, MPTokenIssuanceID: '0'.repeat(48) }) }), outLine)).toBeUndefined()
+    expect(await proveLine(deps({ [H1]: send(H1, { Account: ANA, Destination: POOL, DestinationEncryptedAmount: out }) }), outLine)).toMatch(/^mpt-dleq-v1:/)
   })
 })

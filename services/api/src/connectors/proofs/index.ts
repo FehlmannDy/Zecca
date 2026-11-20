@@ -51,10 +51,10 @@ function lineOf(a: Activity): StatementLine {
   }
 }
 
-async function withAmountProofs(core: Core, lines: StatementLine[]): Promise<StatementLine[]> {
+async function withAmountProofs(core: Core, holderAddress: string, lines: StatementLine[]): Promise<StatementLine[]> {
   const ks = core.keystore
   if (!ks.has('pool') || !ks.hasWallet('pool')) return lines
-  const deps = { ledger: core.ledger, poolAddress: ks.getWallet('pool').address, poolKey: ks.getElGamal('pool') }
+  const deps = { ledger: core.ledger, poolAddress: ks.getWallet('pool').address, poolKey: ks.getElGamal('pool'), holderAddress }
   const out: StatementLine[] = []
   for (let k = 0; k < lines.length; k += PROOF_CONCURRENCY) {
     const chunk = lines.slice(k, k + PROOF_CONCURRENCY)
@@ -88,7 +88,7 @@ export function mountProofs(app: Hono, core: Core): void {
     if (acts.some((a) => a.status !== 'done')) throw Err.conflict('Only completed payments can go on a statement.')
 
     const key = statementKey(core)
-    const lines = await withAmountProofs(core, acts.map(lineOf))
+    const lines = await withAmountProofs(core, me.address, acts.map(lineOf))
     const unsigned: UnsignedStatement = {
       id: core.id('stm'),
       createdAt: core.iso(),
