@@ -26,6 +26,8 @@ export function Till({ className }: { className?: string }) {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
   const [request, setRequest] = useState<PaymentRequest | null>(null)
+  // Stable, so ChargeScreen's poll (and the effects that depend on it) do not change on every render.
+  const onRequest = useCallback((r: PaymentRequest) => setRequest((c) => mergeRequest(c, r)), [])
 
   const cap = config?.limits.txCapMinor
   const tooBig = minor !== null && cap !== undefined && minor > cap
@@ -73,7 +75,7 @@ export function Till({ className }: { className?: string }) {
       <Button className="mt-4 w-full max-w-[320px]" disabled={!canCharge} onClick={charge} aria-busy={creating}>
         {creating ? 'Charging…' : minor ? `Charge ${formatUsd(minor)}` : 'Charge'}
       </Button>
-      {request && phase !== 'entry' && phase !== 'creating' && <ChargeScreen request={request} onRequest={(r) => setRequest((c) => mergeRequest(c, r))} onNew={newCharge} />}
+      {request && phase !== 'entry' && phase !== 'creating' && <ChargeScreen request={request} onRequest={onRequest} onNew={newCharge} />}
     </div>
   )
 }
@@ -100,7 +102,8 @@ function ChargeScreen({ request, onRequest, onNew }: { request: PaymentRequest; 
   useEffect(() => {
     if (due) poll()
   }, [due, poll])
-  useInterval(poll, 2000, due)
+  // While the stream is down it already polls every 2 s.
+  useInterval(poll, 2000, due && stream !== 'polling')
 
   async function cancel() {
     setCancelError('')

@@ -19,7 +19,7 @@ import { GlassBackdrop } from '@/components/zecca/glass'
 import { LimitSheet } from '@/components/zecca/limit-sheet'
 import { useHydrated } from '@/components/zecca/user-shell'
 import { Logo } from '@/components/zecca/wordmark'
-import { paidAnnouncement, payErrorView, payState, payTitle, type PayFailure } from './pay-model'
+import { paidAnnouncement, payErrorView, payHrefs, payState, payTitle, type PayFailure } from './pay-model'
 import { mergeRequest } from './till-model'
 import { useInterval, useRequestStream } from './use-request-stream'
 
@@ -92,7 +92,7 @@ export function PayScreen({ id }: { id: string }) {
     }
   }
 
-  const signInHref = `/app/signup?next=${encodeURIComponent(`/pay/${id}${returnTo ? `?return=${encodeURIComponent(returnTo)}` : ''}`)}`
+  const hrefs = payHrefs(id, returnTo)
   const doneHref = returnTo ?? '/app'
   const doneLabel = returnTo ? `Back to ${request?.merchantName ?? 'the shop'}` : 'Done'
 
@@ -133,7 +133,7 @@ export function PayScreen({ id }: { id: string }) {
                 <div className="mt-9 flex w-full flex-col items-center">
                   {state.kind === 'signin' && (
                     <>
-                      <Link href={signInHref} className={`${linkCls} bg-ink text-paper hover:opacity-90`}>
+                      <Link href={hrefs.signIn} className={`${linkCls} bg-ink text-paper hover:opacity-90`}>
                         Sign in to pay
                       </Link>
                       <p className="mt-3 text-[13.5px] text-muted">New to Zecca? Signing up takes a minute and comes with demo credit.</p>
@@ -168,7 +168,7 @@ export function PayScreen({ id }: { id: string }) {
                       <p className="text-[17px] font-[680]" role="alert">
                         {state.shortMinor > 0 ? `You need ${formatUsd(state.shortMinor)} more.` : state.message}
                       </p>
-                      <Link href={`/app/topup?next=${encodeURIComponent(`/pay/${id}`)}`} className={`${linkCls} mt-5 bg-ink text-paper hover:opacity-90`}>
+                      <Link href={hrefs.topUp} className={`${linkCls} mt-5 bg-ink text-paper hover:opacity-90`}>
                         Top up
                       </Link>
                       <Button variant="ghost" className="mt-2 w-full" onClick={approve}>

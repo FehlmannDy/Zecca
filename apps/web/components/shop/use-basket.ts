@@ -7,18 +7,19 @@ const KEY = 'settearchi.basket'
 const listeners = new Set<() => void>()
 let cache: { raw: string | null; basket: Basket } = { raw: null, basket: {} }
 
-function read(): Basket {
-  let raw: string | null = null
+export function readBasket(): Basket {
+  let raw: string | null
   try {
     raw = window.localStorage.getItem(KEY)
   } catch {
-    raw = null
+    // Storage blocked: the in-memory basket that writeBasket keeps.
+    return cache.basket
   }
   if (raw !== cache.raw) cache = { raw, basket: parseBasket(raw) }
   return cache.basket
 }
 
-function write(b: Basket) {
+export function writeBasket(b: Basket) {
   try {
     window.localStorage.setItem(KEY, JSON.stringify(b))
   } catch {
@@ -41,13 +42,13 @@ export function useBasket() {
         window.removeEventListener('storage', onStorage)
       }
     },
-    read,
+    readBasket,
     () => EMPTY,
   )
   return {
     basket,
-    add: (sku: string) => write(addToBasket(read(), sku)),
-    set: (sku: string, qty: number) => write(setQty(read(), sku, qty)),
-    clear: () => write({}),
+    add: (sku: string) => writeBasket(addToBasket(readBasket(), sku)),
+    set: (sku: string, qty: number) => writeBasket(setQty(readBasket(), sku, qty)),
+    clear: () => writeBasket({}),
   }
 }

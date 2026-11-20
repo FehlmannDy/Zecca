@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PaymentRequest } from '@zecca/contracts'
 import { ZeccaApiError } from '../../lib/api'
-import { paidAnnouncement, payErrorView, payLinkTarget, payState, payTitle } from './pay-model'
+import { paidAnnouncement, payErrorView, payHrefs, payLinkTarget, payState, payTitle } from './pay-model'
 
 const pr = (status: PaymentRequest['status'], extra: Partial<PaymentRequest> = {}): PaymentRequest => ({
   id: 'pr_1',
@@ -37,6 +37,20 @@ describe('pay page view model', () => {
       kind: 'paid',
       at: '2026-11-21T09:01:00.000Z',
     })
+  })
+
+  it('state: the paid event can beat our submit answer; while our approval runs it is not "already paid"', () => {
+    const paid = pr('paid', { paidAt: '2026-11-21T09:01:00.000Z' })
+    expect(payState({ request: paid, signedIn: true, paying: true, paidByMe: false }).kind).toBe('working')
+    // Our approval failed (someone else paid it): now it is.
+    expect(payState({ request: paid, signedIn: true, paying: false, paidByMe: false }).kind).toBe('already_paid')
+  })
+
+  it('hrefs: sign in and top up both come back to this request, keeping the shop return path', () => {
+    expect(payHrefs('pr_1', null)).toEqual({ signIn: '/app/signup?next=%2Fpay%2Fpr_1', topUp: '/app/topup?next=%2Fpay%2Fpr_1' })
+    const back = '/demo/shop/checkout/ord_1'
+    const here = `/pay/pr_1?return=${encodeURIComponent(back)}`
+    expect(payHrefs('pr_1', back)).toEqual({ signIn: `/app/signup?next=${encodeURIComponent(here)}`, topUp: `/app/topup?next=${encodeURIComponent(here)}` })
   })
 
   it('state: terminal requests win over sign-in (expired, cancelled, already paid)', () => {

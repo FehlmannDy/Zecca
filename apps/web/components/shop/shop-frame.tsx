@@ -34,7 +34,7 @@ export function ShopFrame({ children }: { children: ReactNode }) {
             <span className="text-[24px] italic leading-none" style={{ fontFamily: SERIF }}>
               Sette Archi
             </span>
-            <span className="hidden text-[12px] uppercase tracking-[0.18em] text-[var(--s-muted)] sm:inline">Torrefazione · Bari</span>
+            <span className="hidden text-[12px] uppercase tracking-[0.18em] text-[var(--s-muted)] sm:inline">Coffee roasters · Bari</span>
           </Link>
           <Link href="/demo/shop/basket" className="relative inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--s-line)] bg-[var(--s-card)] px-4 text-[14px] font-[600] print:hidden">
             <ShoppingBag className="size-[18px]" aria-hidden="true" />

@@ -26,10 +26,13 @@ export const tillStatusLine = (p: TillPhase): string => LINES[p] ?? ''
 
 const RANK: Record<PaymentRequest['status'], number> = { created: 0, opened: 1, paid: 2, expired: 2, cancelled: 2 }
 
-/** Events and polls can arrive out of order: keep the furthest state of the same request. */
+const same = (a: PaymentRequest, b: PaymentRequest) =>
+  (Object.keys({ ...a, ...b }) as Array<keyof PaymentRequest>).every((k) => a[k] === b[k])
+
+/** Events and polls can arrive out of order: keep the furthest state of the same request (the same object when nothing changed). */
 export function mergeRequest(current: PaymentRequest | null, incoming: PaymentRequest): PaymentRequest {
   if (!current) return incoming
-  if (incoming.id !== current.id) return current
+  if (incoming.id !== current.id || same(current, incoming)) return current
   return RANK[incoming.status] >= RANK[current.status] ? incoming : current
 }
 

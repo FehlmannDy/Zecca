@@ -38,7 +38,8 @@ export function payState(o: {
 }): PayState {
   const r = o.request
   if (!r) return o.loadError ? { kind: 'error', message: o.loadError } : { kind: 'loading' }
-  if (r.status === 'paid') return o.paidByMe ? { kind: 'paid', at: r.paidAt } : { kind: 'already_paid' }
+  // The paid event can arrive before our submit answer: while our approval runs, keep the arches going.
+  if (r.status === 'paid') return o.paidByMe ? { kind: 'paid', at: r.paidAt } : o.paying ? { kind: 'working' } : { kind: 'already_paid' }
   if (r.status === 'expired') return { kind: 'expired' }
   if (r.status === 'cancelled') return { kind: 'cancelled' }
   if (o.paying) return { kind: 'working' }
@@ -49,6 +50,12 @@ export function payState(o: {
   if (!o.signedIn) return { kind: 'signin' }
   if (o.userId && o.userId === r.merchantId) return { kind: 'own' }
   return { kind: 'ready' }
+}
+
+/** Sign in and top up both return to this request, keeping the shop's return path. */
+export function payHrefs(id: string, returnTo: string | null): { signIn: string; topUp: string } {
+  const next = encodeURIComponent(`/pay/${id}${returnTo ? `?return=${encodeURIComponent(returnTo)}` : ''}`)
+  return { signIn: `/app/signup?next=${next}`, topUp: `/app/topup?next=${next}` }
 }
 
 export function payErrorView(e: unknown): PayFailure {

@@ -40,6 +40,14 @@ describe('till view model', () => {
     expect(mergeRequest(null, pr('opened')).status).toBe('opened')
   })
 
+  it('merging an unchanged copy keeps the current object, so a poll with no news does not re-render', () => {
+    const current = pr('opened')
+    expect(mergeRequest(current, pr('opened'))).toBe(current)
+    expect(mergeRequest(current, pr('opened', { expiresAt: '2026-11-21T09:20:00.000Z' }))).not.toBe(current)
+    const paid = pr('paid', { paidAt: '2026-11-21T09:01:00.000Z' })
+    expect(mergeRequest(pr('opened'), paid)).toBe(paid)
+  })
+
   it('NFC: an intent: link for the Zecca NFC app with the encoded request url', () => {
     expect(nfcIntentUrl('https://zecca.example/pay/pr_1')).toBe(
       'intent:#Intent;action=android.intent.action.VIEW;package=ch.ixh.nfcpaylink;S.url=https%3A%2F%2Fzecca.example%2Fpay%2Fpr_1;end',

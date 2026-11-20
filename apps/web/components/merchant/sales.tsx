@@ -94,7 +94,7 @@ export function Sales({ wide }: { wide: boolean }) {
         Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[104px] rounded-[20px]" />)
       ) : (
         <>
-          <Metric tone="in" title="Today" icon={<Banknote />} value={<Amount minor={today.grossMinor} size="lg" className="!text-white" />} caption={`${today.count} ${today.count === 1 ? 'sale' : 'sales'} today`} />
+          <Metric tone="in" title="Today" icon={<Banknote />} value={<Amount minor={today.grossMinor} size="lg" className="!text-current" />} caption={`${today.count} ${today.count === 1 ? 'sale' : 'sales'} today`} />
           <Metric title="Sales" icon={<Hash />} value={<span className="tabular">{t.count}</span>} caption={period === 'Today' ? 'Paid today' : `Last ${period}`} />
           <Metric title="Average" icon={<Receipt />} value={<Amount minor={t.averageMinor} size="lg" />} caption="Per sale" />
           <Metric title="Fees" icon={<Percent />} value={<Amount minor={t.feeMinor} size="lg" />} caption={feeLine(feeBps)} />
