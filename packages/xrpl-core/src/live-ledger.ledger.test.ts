@@ -106,6 +106,25 @@ describe('createLiveLedger on Devnet', () => {
     expect((await ledger.client.accountInfo(U2.address))?.Balance).toBe('1')
   })
 
+  it('a sign-up whose reserved issuer sequence was used meanwhile is reported failed (outer validates, inners do not); preparing again works', async () => {
+    const U3 = mockRawSigner()
+    await ledger.ensureAccount(U3.address)
+    sys.keystore.createUserElGamal(U3.address)
+    const key = sys.keystore.getElGamal({ user: U3.address })
+    const p = { address: U3.address, publicKey: U3.publicKey, holderKey: key, welcomeCreditMinor: 100 }
+    const stale = await ledger.buildOnboarding(p)
+    const issuer = sys.wallets.issuer.classicAddress
+    expect((await ledger.submitAs('issuer', { TransactionType: 'AccountSet', Account: issuer })).engineResult).toBe('tesSUCCESS')
+    const r = await ledger.submitUserSigned((await U3.sign(stale)).tx_blob)
+    record('signup U3 with a stale issuer sequence', r)
+    expect(r).toMatchObject({ validated: false, engineResult: 'tecBATCH_INNER_FAILED' })
+    expect(await ledger.confidentialBalance(U3.address, key)).toEqual({ spendableMinor: 0, inboxMinor: 0 })
+    const again = await ledger.submitUserSigned((await U3.sign(await ledger.buildOnboarding(p))).tx_blob)
+    record('signup U3 prepared again', again)
+    expect(again.engineResult).toBe('tesSUCCESS')
+    expect(await ledger.confidentialBalance(U3.address, key)).toEqual({ spendableMinor: 100, inboxMinor: 0 })
+  })
+
   it('a delegated merge for a user who granted nothing is refused', async () => {
     const r = await ledger.submitAs('relayer', await ledger.buildMergeInbox({ account: U1.address, sponsored: false, delegate: sys.wallets.relayer.classicAddress }))
     record('relayer merge U1 (no delegation)', r)

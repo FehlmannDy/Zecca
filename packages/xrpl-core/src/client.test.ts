@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { EventEmitter } from 'node:events'
 import xrpl from 'xrpl'
 import { createClient, NETWORK_URLS, type RawClient } from './client'
+import { buildBatch } from './batch'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const rippledError = (error: string) => Object.assign(new Error(error), { data: { error } })
@@ -88,6 +89,39 @@ describe('createClient', () => {
   })
 })
 
+describe('flaky network (phone hotspot)', () => {
+  const connErr = (name = 'NotConnectedError') => Object.assign(new Error(name), { name })
+
+  it('retries a failed connect', async () => {
+    const raw = fakeRaw({ ledger: () => ({ ledger_index: 7 }) })
+    const connect = raw.connect.bind(raw)
+    let fails = 2
+    raw.connect = async () => {
+      if (fails-- > 0) throw connErr('ConnectionError')
+      return connect()
+    }
+    expect(await createClient('devnet', { raw, retryMs: 0 }).ledgerIndex()).toBe(7)
+  })
+
+  it('retries a read once when the socket dropped during the request', async () => {
+    let n = 0
+    const raw = fakeRaw({ ledger: () => (n++ === 0 ? connErr() : { ledger_index: 8 }) })
+    expect(await createClient('devnet', { raw, retryMs: 0 }).ledgerIndex()).toBe(8)
+  })
+
+  it('a submit lost with the socket is sent again; a tef then means it may have applied, so it waits by hash', async () => {
+    let submits = 0
+    const raw = fakeRaw({
+      submit: () => (submits++ === 0 ? connErr('DisconnectedError') : { engine_result: 'tefPAST_SEQ' }),
+      tx: () => ({ validated: true, ledger_index: 12, meta: { TransactionResult: 'tesSUCCESS' } }),
+      ledger: () => ({ ledger_index: 11 }),
+    })
+    const r = await createClient('devnet', { raw, pollMs: 0, retryMs: 0 }).submitAndWait(blob())
+    expect(submits).toBe(2)
+    expect(r).toMatchObject({ validated: true, engineResult: 'tesSUCCESS' })
+  })
+})
+
 describe('submitAndWait', () => {
   it('returns the validated result with the ledger hash', async () => {
     let polls = 0
@@ -144,6 +178,38 @@ describe('submitAndWait', () => {
     const raw = fakeRaw({ submit: () => ({ engine_result: 'terPRE_SEQ' }), tx: () => rippledError('txnNotFound'), ledger: () => ({ ledger_index: ledger++ }) })
     const r = await createClient('devnet', { raw, pollMs: 0 }).submitAndWait(blob(100))
     expect(r).toMatchObject({ validated: false, engineResult: 'terPRE_SEQ' })
+  })
+
+  it('an AllOrNothing Batch counts as done only when every inner tx is in the ledger (Devnet: outer tesSUCCESS, inners not applied)', async () => {
+    const user = xrpl.Wallet.generate(xrpl.ECDSA.secp256k1)
+    const issuer = xrpl.Wallet.generate(xrpl.ECDSA.secp256k1)
+    const b = buildBatch({
+      outer: { Account: user.classicAddress, Sequence: 5, LastLedgerSequence: 100 },
+      inners: [
+        { TransactionType: 'AccountSet', Account: user.classicAddress, Sequence: 6 },
+        { TransactionType: 'Payment', Account: issuer.classicAddress, Sequence: 9, Destination: user.classicAddress, Amount: '1000' },
+      ],
+      cosigners: [issuer],
+      baseFeeDrops: 1,
+    })
+    const blobB = user.sign(b as never).tx_blob
+    const outer = xrpl.hashes.hashSignedTx(blobB)
+    const inners = (b.RawTransactions as any[]).map((r) => xrpl.hashes.hashSignedTx(r.RawTransaction))
+    const make = (applied: string[]) =>
+      fakeRaw({
+        submit: () => ({ engine_result: 'tesSUCCESS' }),
+        ledger: () => ({ ledger_index: 50 }),
+        tx: (r) =>
+          r.transaction === outer || applied.includes(r.transaction)
+            ? { validated: true, ledger_index: 51, meta: { TransactionResult: 'tesSUCCESS' } }
+            : rippledError('txnNotFound'),
+      })
+    const failed = await createClient('devnet', { raw: make([]), pollMs: 0 }).submitAndWait(blobB)
+    expect(failed).toMatchObject({ validated: false, engineResult: 'tecBATCH_INNER_FAILED', hash: outer, ledgerIndex: 51 })
+    const half = await createClient('devnet', { raw: make([inners[0]]), pollMs: 0 }).submitAndWait(blobB)
+    expect(half.engineResult).toBe('tecBATCH_INNER_FAILED')
+    const done = await createClient('devnet', { raw: make(inners), pollMs: 0 }).submitAndWait(blobB)
+    expect(done).toMatchObject({ validated: true, engineResult: 'tesSUCCESS', hash: outer })
   })
 
   it('reports a submit that the server rejects outright', async () => {
