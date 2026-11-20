@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NFC PayLink</string>
+    <string name="service_description">NFC PayLink payment link tag</string>
+    <string name="aid_group_description">NFC Forum Type 4 NDEF tag</string>
+    <string name="url_hint">https://…/pay/demo</string>
+    <string name="serve">Serve this link over NFC</string>
+    <string name="instructions">Keep this screen open and unlocked. Customer taps the back of their phone to the back of this phone.</string>
+</resources>
