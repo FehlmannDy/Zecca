@@ -3,6 +3,8 @@
 import type { WalletManager } from 'xrpl-connect'
 import type { PrivyAdapter } from '@xrpl-commons/xrpl-connect-privy'
 import type { WalletSigner } from './types'
+import { passkeyErrorMessage } from '../passkey/errors'
+import { patchPrivyIframeReady } from '../passkey/iframe-ready'
 
 export type PrivyHandle = { manager: WalletManager; adapter: PrivyAdapter }
 
@@ -13,7 +15,10 @@ export function getPrivy(appId: string): Promise<PrivyHandle> {
   if (typeof window === 'undefined') return Promise.reject(new Error('Privy runs in the browser only'))
   handle ??= (async () => {
     const [{ WalletManager }, { PrivyAdapter }] = await Promise.all([import('xrpl-connect'), import('@xrpl-commons/xrpl-connect-privy')])
-    const adapter = new PrivyAdapter({ appId, redirectUri: `${window.location.origin}/wallet/privy` })
+    // timeoutMs: room for a Face ID check inside a signature (adapter default 15 s; the MFA handler gives up at 40 s).
+    const adapter = new PrivyAdapter({ appId, redirectUri: `${window.location.origin}/wallet/privy`, timeoutMs: 45_000 })
+    // Cold-cache sign-in race: the adapter pings Privy's iframe once, before it listens (lib/passkey/iframe-ready.ts).
+    patchPrivyIframeReady(adapter)
     const manager = new WalletManager({ adapters: [adapter], network: 'devnet', autoConnect: false })
     return { manager, adapter }
   })()
@@ -40,7 +45,10 @@ export function privySigner(manager: WalletManager): WalletSigner {
     address: account.address,
     publicKey: account.publicKey,
     async sign(tx) {
-      const signed = await manager.sign(tx as never)
+      const signed = await manager.sign(tx as never).catch((e: unknown) => {
+        const passkey = passkeyErrorMessage(e)
+        throw passkey ? new Error(passkey) : e
+      })
       const out = signed as unknown as { tx_blob?: string; hash?: string }
       if (!out.tx_blob || !out.hash) throw new Error('The approval did not complete. Try again.')
       return { tx_blob: out.tx_blob, hash: out.hash }

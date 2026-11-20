@@ -9,6 +9,7 @@ import { isApiError } from '@/lib/api'
 import { sessionStore } from '@/lib/session'
 import { signedUpUser } from '@/lib/signup'
 import { signAndSubmit } from '@/lib/wallet/sign-and-submit'
+import { usePasskeyApproval } from '@/components/passkey/use-passkey'
 import { cn } from '@/lib/cn'
 import { Amount } from './amount'
 import { ArchesProgress } from './arches'
@@ -48,6 +49,7 @@ const inputCls =
 export function SignupFlow({ business = false, homeHref = '/app', onFinished }: { business?: boolean; homeHref?: string; /** Replaces the navigation at the end (e.g. /merchant switches to the till in place). */ onFinished?: (user: User) => void }) {
   const { api, config, configError, reloadConfig, signIn, getSigner, signOut } = useApp()
   const router = useRouter()
+  const passkey = usePasskeyApproval()
   const [step, setStep] = useState<Step>('welcome')
   const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
@@ -102,7 +104,11 @@ export function SignupFlow({ business = false, homeHref = '/app', onFinished }: 
 
   function finish(u: User) {
     if (onFinished) onFinished(u)
-    else router.replace(u.role.includes('merchant') && business ? '/merchant' : homeHref)
+    else {
+      const dest = u.role.includes('merchant') && business ? '/merchant' : homeHref
+      // FEATURE_PASSKEY: offer "Add Face ID" once, then continue to where the person was going.
+      router.replace(passkey.on && passkey.available && !passkey.enrolled ? `/app/security?next=${encodeURIComponent(dest)}` : dest)
+    }
   }
 
   /** Sign-up already finished on the server: keep the user in the session and go in. */

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { formatUsd } from '@zecca/contracts'
 import { approveStatus, archesFill } from '@/lib/arches'
 import { isApiError, type ZeccaApiError } from '@/lib/api'
+import { usePasskeyApproval } from '@/components/passkey/use-passkey'
 import { ArchesProgress } from './arches'
 import { Button } from './bits'
 import { Sheet } from './sheet'
@@ -26,7 +27,7 @@ export function ApproveSheet({
   subline,
   feeMinor,
   details,
-  approveLabel = 'Approve',
+  approveLabel,
   expectedMs = 10_000,
   run,
   onDone,
@@ -54,6 +55,8 @@ export function ApproveSheet({
   const [outcome, setOutcome] = useState<ApproveOutcome | null>(null)
   const [error, setError] = useState('')
   const started = useRef(0)
+  // "Approve with Face ID" only with FEATURE_PASSKEY on, a phone that has it and a passkey enrolled (UI.md §5.4).
+  const passkey = usePasskeyApproval()
 
   useEffect(() => {
     if (open) {
@@ -111,7 +114,7 @@ export function ApproveSheet({
               </div>
             )}
             <Button className="mt-6 w-full" onClick={approve} data-autofocus>
-              {approveLabel}
+              {approveLabel ?? passkey.label}
             </Button>
           </>
         )}
