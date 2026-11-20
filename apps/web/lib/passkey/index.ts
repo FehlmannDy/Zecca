@@ -1,0 +1,9 @@
+// "Approve with Face ID": Privy passkey MFA answered next to the xrpl-connect adapter (SPEC §4.11, DECISIONS #13).
+export { getPrivyClient, type PasskeyPrivyClient, type PrivyUserLike } from './privy-client'
+export { installMfaHandler, PasskeyMfaError, type MfaHandler, type MfaHandlerOptions, type MfaOutcome, type MfaPhase } from './mfa-handler'
+export { installPasskeyMfa, type InstalledPasskeyMfa, type PasskeyEvent } from './install'
+export { enrollPasskeyMfa, linkPasskey, passkeyStatus, readPasskeyStatus, verifyPasskeyNow, type PasskeyStatus } from './enroll'
+export { approveLabel, biometricWord, isPasskeyAvailable, passkeyFeatureOn, type BiometricWord } from './availability'
+export { passkeyErrorMessage } from './errors'
+export { verifySignedBlob } from './verify'
+export { patchPrivyIframeReady } from './iframe-ready'
