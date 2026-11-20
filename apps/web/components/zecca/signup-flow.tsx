@@ -6,7 +6,8 @@ import { AtSign, Check, Circle, LoaderCircle } from 'lucide-react'
 import { formatUsd, type User } from '@zecca/contracts'
 import { useApp } from '@/lib/app'
 import { isApiError } from '@/lib/api'
-import { useSession, sessionStore } from '@/lib/session'
+import { sessionStore } from '@/lib/session'
+import { signedUpUser } from '@/lib/signup'
 import { signAndSubmit } from '@/lib/wallet/sign-and-submit'
 import { cn } from '@/lib/cn'
 import { Amount } from './amount'
@@ -14,7 +15,7 @@ import { ArchesProgress } from './arches'
 import { Button, Skeleton } from './bits'
 import { Logo } from './wordmark'
 
-type Step = 'welcome' | 'handle' | 'approve' | 'done'
+type Step = 'resume' | 'welcome' | 'handle' | 'approve' | 'done'
 const EXPECTED_MS = 7000
 const TICKS = ['Creating your account', 'Opening your private balance', 'Adding your demo credit'] as const
 
@@ -45,8 +46,7 @@ const inputCls =
   'h-12 w-full rounded-[14px] border border-line bg-surface px-4 text-[16px] text-ink placeholder:text-muted/80 outline-none transition-colors focus-visible:border-ink/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brass)] aria-[invalid=true]:border-alert'
 
 export function SignupFlow({ business = false, homeHref = '/app', onFinished }: { business?: boolean; homeHref?: string; /** Replaces the navigation at the end (e.g. /merchant switches to the till in place). */ onFinished?: (user: User) => void }) {
-  const { api, config, configError, reloadConfig, signIn, getSigner } = useApp()
-  const session = useSession()
+  const { api, config, configError, reloadConfig, signIn, getSigner, signOut } = useApp()
   const router = useRouter()
   const [step, setStep] = useState<Step>('welcome')
   const [email, setEmail] = useState('')
@@ -63,10 +63,22 @@ export function SignupFlow({ business = false, homeHref = '/app', onFinished }: 
   const [balanceMinor, setBalanceMinor] = useState<number | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
 
-  // A signed-in session without a user (came back mid sign-up) resumes at the handle step.
+  // Arrived with a session but no user (came back mid sign-up). If the server already finished it, for example the
+  // tab was reloaded during the approval, go straight in; otherwise pick up at the handle step. Once, on arrival.
   useEffect(() => {
-    if (step === 'welcome' && session && !session.user) setStep('handle')
-  }, [session, step])
+    const s = sessionStore().get()
+    if (!s || s.user) return
+    let live = true
+    setStep('resume')
+    signedUpUser(api).then((u) => {
+      if (!live) return
+      if (u) enter(u)
+      else setStep('handle')
+    })
+    return () => {
+      live = false
+    }
+  }, [])
 
   useEffect(() => {
     heading.current?.focus()
@@ -91,6 +103,20 @@ export function SignupFlow({ business = false, homeHref = '/app', onFinished }: 
   function finish(u: User) {
     if (onFinished) onFinished(u)
     else router.replace(u.role.includes('merchant') && business ? '/merchant' : homeHref)
+  }
+
+  /** Sign-up already finished on the server: keep the user in the session and go in. */
+  function enter(u: User) {
+    sessionStore().update({ user: u })
+    finish(u)
+  }
+
+  /** Start again at the welcome step, for a session that cannot approve (key gone, another account). */
+  async function onSignOut() {
+    await signOut().catch(() => {})
+    setError('')
+    setRun('idle')
+    setStep('welcome')
   }
 
   async function onWelcome(method: 'email' | 'google' = 'email') {
@@ -150,6 +176,8 @@ export function SignupFlow({ business = false, homeHref = '/app', onFinished }: 
       setTimeout(() => setStep('done'), 900)
     } catch (e) {
       clearInterval(tick)
+      const signedUp = isApiError(e) && e.code === 'already_signed_up' ? await signedUpUser(api) : null
+      if (signedUp) return enter(signedUp)
       setRun('failed')
       if (isApiError(e) && e.code === 'handle_taken') {
         setStep('handle')
@@ -169,7 +197,7 @@ export function SignupFlow({ business = false, homeHref = '/app', onFinished }: 
     <div className="mx-auto flex min-h-svh w-full max-w-[440px] flex-col px-5 pb-10 pt-6 lg:max-w-[520px] lg:justify-center">
       <header className="flex items-center justify-between">
         <Logo />
-        {step !== 'welcome' && step !== 'done' && (
+        {(step === 'handle' || step === 'approve') && (
           <span className="label-caps text-muted" aria-label={`Step ${step === 'handle' ? 2 : 3} of 3`}>
             {step === 'handle' ? '2' : '3'} / 3
           </span>
@@ -177,6 +205,14 @@ export function SignupFlow({ business = false, homeHref = '/app', onFinished }: 
       </header>
 
       <main className="flex flex-1 flex-col justify-center py-8 lg:my-10 lg:flex-none lg:rounded-[28px] lg:border lg:border-[color-mix(in_srgb,var(--ink)_8%,transparent)] lg:bg-[color-mix(in_srgb,var(--surface)_72%,transparent)] lg:px-10 lg:py-10 lg:shadow-[var(--shadow-float)] lg:backdrop-blur-md">
+        {step === 'resume' && (
+          <div className="flex flex-col gap-3" aria-busy="true" aria-label="Loading">
+            <Skeleton className="h-9 w-3/4" />
+            <Skeleton className="h-5 w-1/2" />
+            <Skeleton className="mt-6 h-12 w-full rounded-[14px]" />
+          </div>
+        )}
+
         {step === 'welcome' && (
           <form
             className="flex flex-col"
@@ -288,6 +324,9 @@ export function SignupFlow({ business = false, homeHref = '/app', onFinished }: 
               <Button type="submit" className="mt-3" disabled={!canContinue}>
                 Continue
               </Button>
+              <Button variant="ghost" onClick={onSignOut}>
+                Sign out
+              </Button>
             </div>
           </form>
         )}
@@ -333,6 +372,11 @@ export function SignupFlow({ business = false, homeHref = '/app', onFinished }: 
                 <Button variant="ghost" onClick={() => setStep('handle')}>
                   Back
                 </Button>
+                {run === 'failed' && (
+                  <Button variant="ghost" onClick={onSignOut}>
+                    Sign out
+                  </Button>
+                )}
               </div>
             ) : null}
           </section>
