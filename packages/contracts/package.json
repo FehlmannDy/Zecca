@@ -1,0 +1,11 @@
+{
+  "name": "@zecca/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": { ".": "./src/index.ts", "./fixtures": "./src/fixtures.ts" },
+  "scripts": { "test": "vitest run --root ../.. --project unit packages/contracts" },
+  "dependencies": { "zod": "4.6.7" }
+}

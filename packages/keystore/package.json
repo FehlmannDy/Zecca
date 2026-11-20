@@ -1,0 +1,11 @@
+{
+  "name": "@zecca/keystore",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "test": "vitest run --root ../.. --project unit packages/keystore" },
+  "dependencies": { "@zecca/contracts": "*", "xrpl": "5.3.0" }
+}
