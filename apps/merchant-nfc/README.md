@@ -32,6 +32,8 @@ The allowlist is the Gradle property `zeccaNfcHosts`, compiled into `BuildConfig
 ./gradlew test assembleDebug -PzeccaNfcHosts=pay.zecca.ch
 ```
 
+Entries are bare host names: no scheme, no port, no path, no trailing dot (`pay.zecca.ch`, not `https://pay.zecca.ch` or `pay.zecca.ch:443`; a link's port is not checked). The app ignores any other entry, so `./gradlew test` fails on one; always build with `test`.
+
 `*.trycloudflare.com` lets any quick tunnel through, including one an attacker opens; keep it for the demo only and build with the fixed production host otherwise.
 
 ## Build

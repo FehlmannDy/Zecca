@@ -152,6 +152,18 @@ class PayLinkPolicyTest {
         assertFalse(built.any { it == "*" || it.startsWith("*.") && it.count { c -> c == '.' } < 2 })
     }
 
+    @Test fun `no entry of the built-in allowlist is dropped`() {
+        // parseHosts drops a bad entry at runtime; a bad -PzeccaNfcHosts must fail the build instead.
+        val entries = BuildConfig.PAYLINK_HOSTS.split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+        assertEquals(
+            "zeccaNfcHosts entries the app would ignore: ${entries - built().toSet()} (host names only: no scheme, port, path or trailing dot)",
+            entries,
+            built(),
+        )
+    }
+
+    private fun built() = PayLinkPolicy.configuredHosts
+
     // ---- incoming intents (Chrome intent: link with the url extra, or the deep link) ----
 
     @Test fun `launcher start without a link does nothing`() {
