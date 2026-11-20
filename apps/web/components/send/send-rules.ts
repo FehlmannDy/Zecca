@@ -1,5 +1,6 @@
 // What stops a send, in the order the API checks it (limits first, then the balance), and the copy around it.
 // A tier 0 limit opens the limit sheet (UI.md §5.12); a missing amount is "You need $x more." with "Top up".
+// The top-up screen works with the ramp on, or with demo credit in demo mode; "Top up" shows in either case.
 import { formatUsd, type ApiError, type Limits, type PublicProfile, type Tier } from '@zecca/contracts'
 
 type Details = NonNullable<ApiError['error']['details']>
