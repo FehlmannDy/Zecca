@@ -7,3 +7,4 @@ export { approveLabel, biometricWord, isPasskeyAvailable, passkeyFeatureOn, type
 export { passkeyErrorMessage } from './errors'
 export { verifySignedBlob } from './verify'
 export { patchPrivyIframeReady } from './iframe-ready'
+export { createEnrolledCache, type EnrolledCache } from './enrolled-cache'
