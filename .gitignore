@@ -1,0 +1,65 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.keystore.json
+keystore*.enc
+keystore*.json
+.keystore/
+/data/
+.data/
+*.pem
+*.key
+state.json
+
+# Databases
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+# Dependencies and build output
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.turbo/
+.vercel/
+
+# Test output
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Android build output (release APK under apps/merchant-nfc/release/ is committed on purpose)
+apps/merchant-nfc/android/.gradle/
+apps/merchant-nfc/android/app/build/
+apps/merchant-nfc/android/build/
+apps/merchant-nfc/android/local.properties
+apps/merchant-nfc/android/.idea/
+*.iml
+
+# Logs and runtime files
+*.log
+logs/
+*.pid
+.tunnel-url
+
+# Internal docs (not published)
+docs/BUILD.md
+docs/LAUNCH_PROMPT.md
+docs/PROGRESS.md
+docs/HUMAN_STEPS.md
+docs/NFC_TEST_KIT.md
+docs/ui/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
