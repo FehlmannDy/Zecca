@@ -50,6 +50,20 @@ function assertPositiveInt(n: number, what: string) {
 
 type Reconciled = { kind: 'found'; hash: string } | { kind: 'free' } | { kind: 'unknown'; why: string }
 
+/** The fresh ciphertext of a pool tx (ElGamal randomness): unique per build, so it tells our tx from any other on the same sequence. */
+const FINGERPRINT_FIELD: Record<string, string> = { ConfidentialMPTSend: 'DestinationEncryptedAmount', ConfidentialMPTConvert: 'HolderEncryptedAmount' }
+function fingerprintOf(tx: Record<string, unknown>): string | undefined {
+  const field = FINGERPRINT_FIELD[String(tx.TransactionType)]
+  const v = field ? tx[field] : undefined
+  return typeof v === 'string' && v ? `${String(tx.TransactionType)}:${v.toUpperCase()}` : undefined
+}
+
+/**
+ * A result after which the tx can never apply and paid nothing: tec (validated, sequence used, nothing moved) or a tem/tef/tel refusal.
+ * Not tefMAX_LEDGER: the live client also reports it when its last status check failed, so the tx may still have validated.
+ */
+const isFinalFailure = (code: string) => /^(tec|tem|tef|tel)/.test(code) && code !== 'tefMAX_LEDGER'
+
 export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
   const { ledger, keystore, store } = o
   const log = o.log ?? ((m: string) => console.log(m))
@@ -173,16 +187,20 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
   }
 
   /**
-   * What happened to a pool tx reserved at `seq`? found: it validated with tesSUCCESS and matches. free: the sequence was
-   * consumed by something else or failed, or it expired unvalidated, so nothing was paid. unknown: cannot tell (manual).
-   * Waits while the reserved tx could still validate (ledger index not past its LastLedgerSequence).
+   * What happened to the pool tx reserved at `seq` (identified by its fingerprint)? found: that very tx validated with tesSUCCESS.
+   * free: the sequence was used by another tx, or ours failed, or it expired unvalidated, so it paid nothing and never will.
+   * unknown: cannot tell (manual). Waits while the reserved tx could still validate (ledger index not past its LastLedgerSequence).
    */
-  async function reconcile(seq: number, lls: number | null, matches: (tx: Record<string, unknown>) => boolean, wait = true): Promise<Reconciled> {
+  async function reconcile(seq: number, lls: number | null, fingerprint: string | undefined, wait = true): Promise<Reconciled> {
     for (;;) {
       const idx = await ledger.ledgerIndex()
       const own = (await ledger.accountTx(pool, RECOVERY_LIMIT)).filter((e) => e.validated && e.tx.Account === pool)
       const hit = own.find((e) => Number(e.tx.Sequence) === seq)
-      if (hit) return hit.engineResult === 'tesSUCCESS' && matches(hit.tx) ? { kind: 'found', hash: hit.hash.toUpperCase() } : { kind: 'free' }
+      if (hit) {
+        if (hit.engineResult !== 'tesSUCCESS') return { kind: 'free' }
+        if (!fingerprint) return { kind: 'unknown', why: `sequence ${seq} was used by ${hit.hash} and no fingerprint was recorded to tell whether it is this transaction` }
+        return fingerprintOf(hit.tx) === fingerprint ? { kind: 'found', hash: hit.hash.toUpperCase() } : { kind: 'free' }
+      }
       if (own.some((e) => Number(e.tx.Sequence) > seq)) return { kind: 'unknown', why: `sequence ${seq} is older than the last ${own.length} pool transactions` }
       if (lls === null) return { kind: 'unknown', why: `no LastLedgerSequence was recorded for sequence ${seq}` }
       if (idx > lls + 1) return { kind: 'free' }
@@ -205,7 +223,13 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
     balance = { spendableMinor: b.spendableMinor + b.inboxMinor, inboxMinor: 0 }
   }
 
-  const isPayoutTo = (to: string) => (tx: Record<string, unknown>) => tx.TransactionType === 'ConfidentialMPTSend' && tx.Destination === to
+  /** The reserved tx can never apply: drop the reservation, so a retry sends fresh without looking the old sequence up again. */
+  function releasePayout(rec: PayoutRecord): PayoutRecord {
+    const { fingerprint: _f, ...rest } = rec
+    const released = { ...rest, reservedSequence: null, lastLedgerSequence: null }
+    store.putPayout(released)
+    return released
+  }
 
   function confirmPayout(rec: PayoutRecord, hash: string): string {
     const { error: _e, ...rest } = rec
@@ -223,12 +247,13 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
     const t0 = clock()
     try {
       if (prev && prev.reservedSequence !== null) {
-        const r = await reconcile(prev.reservedSequence, prev.lastLedgerSequence, isPayoutTo(i.to))
+        const r = await reconcile(prev.reservedSequence, prev.lastLedgerSequence, prev.fingerprint)
         if (r.kind === 'found') {
           log(`[pool] payout for intent ${i.intentId} had already landed tx=${r.hash}`)
           return { hash: confirmPayout(prev, r.hash) }
         }
         if (r.kind === 'unknown') throw new PoolError('payout_unknown', `intent ${i.intentId}: ${r.why}; check the pool's transactions by hand before paying again`)
+        releasePayout(prev)
       }
       await ensureSpendable(i.amountMinor)
       const tx = await withLastLedger(await ledger.buildSend({ from: pool, to: i.to, amountMinor: i.amountMinor, senderKey: poolKey(), sponsored: false }))
@@ -239,10 +264,14 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
         status: 'reserved',
         reservedSequence: Number(tx.Sequence),
         lastLedgerSequence: Number(tx.LastLedgerSequence),
+        fingerprint: fingerprintOf(tx),
       }
       store.putPayout(rec) // before the submit: a restart looks this sequence up before ever sending again
       const res = await ledger.submitAs('pool', tx)
-      if (res.engineResult !== 'tesSUCCESS') throw new PoolError(res.engineResult, `pool send for intent ${i.intentId}: ${res.engineResult} tx=${res.hash}`)
+      if (res.engineResult !== 'tesSUCCESS') {
+        if (isFinalFailure(res.engineResult)) releasePayout(rec)
+        throw new PoolError(res.engineResult, `pool send for intent ${i.intentId}: ${res.engineResult} tx=${res.hash}`)
+      }
       balance = { ...balance, spendableMinor: Math.max(0, balance.spendableMinor - i.amountMinor) }
       const hash = confirmPayout(rec, res.hash)
       log(`[pool] paid out ${i.amountMinor} for intent ${i.intentId} in ${clock() - t0} ms tx=${hash}`)
@@ -260,7 +289,7 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
   async function reconcileReservedPayouts() {
     for (const p of store.payouts()) {
       if (p.status === 'sent' || p.reservedSequence === null) continue
-      const r = await reconcile(p.reservedSequence, p.lastLedgerSequence, isPayoutTo(p.to), false)
+      const r = await reconcile(p.reservedSequence, p.lastLedgerSequence, p.fingerprint, false)
       if (r.kind === 'found') {
         log(`[pool] payout for intent ${p.intentId} landed while the worker was down tx=${r.hash}`)
         confirmPayout(p, r.hash)
@@ -283,14 +312,14 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
       const r = await ledger.submitAs('issuer', pay)
       if (r.engineResult !== 'tesSUCCESS') {
         // Final, nothing moved: a tec (validated with a failure; the live client reports it as validated: false) or a tef/tem/tel.
-        if (r.validated || /^(tec|tef|tem|tel)/.test(r.engineResult)) store.putMint({ ...m, status: 'failed', error: r.engineResult })
+        if (r.validated || isFinalFailure(r.engineResult)) store.putMint({ ...m, status: 'failed', error: r.engineResult })
         throw new PoolError(r.engineResult, `issuer payment for mint ${reference}: ${r.engineResult} tx=${r.hash}`)
       }
       m = { ...m, status: 'paid', paymentHash: r.hash }
       store.putMint(m)
     }
     if (m.convertSequence !== undefined && m.convertSequence !== null) {
-      const r = await reconcile(m.convertSequence, m.convertLastLedgerSequence ?? null, (tx) => tx.TransactionType === 'ConfidentialMPTConvert' && Number(tx.MPTAmount) === amount)
+      const r = await reconcile(m.convertSequence, m.convertLastLedgerSequence ?? null, m.convertFingerprint)
       if (r.kind === 'found') {
         store.putMint({ ...m, status: 'done', convertHash: r.hash })
         return { hash: r.hash }
@@ -298,11 +327,13 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
       if (r.kind === 'unknown') throw new PoolError('mint_unknown', `mint ${reference}: ${r.why}; check the pool's transactions by hand`)
     }
     const tx = await withLastLedger(await ledger.buildConvert({ account: pool, amountMinor: amount, holderKey: poolKey() }))
-    m = { ...m, status: 'converting', convertSequence: Number(tx.Sequence), convertLastLedgerSequence: Number(tx.LastLedgerSequence) }
+    m = { ...m, status: 'converting', convertSequence: Number(tx.Sequence), convertLastLedgerSequence: Number(tx.LastLedgerSequence), convertFingerprint: fingerprintOf(tx) }
     store.putMint(m)
     const r = await ledger.submitAs('pool', tx)
     if (r.engineResult !== 'tesSUCCESS') {
-      store.putMint({ ...m, status: 'failed', error: r.engineResult })
+      const { convertFingerprint: _f, ...rest } = m
+      // A final refusal frees the sequence (the retry converts fresh); otherwise the retry looks the reserved sequence up first.
+      store.putMint(isFinalFailure(r.engineResult) ? { ...rest, status: 'failed', error: r.engineResult, convertSequence: null, convertLastLedgerSequence: null } : { ...m, status: 'failed', error: r.engineResult })
       throw new PoolError(r.engineResult, `pool convert for mint ${reference}: ${r.engineResult} tx=${r.hash}`)
     }
     store.putMint({ ...m, status: 'done', convertHash: r.hash })

@@ -317,6 +317,54 @@ describe('payouts', () => {
     expect(s2.of('paidOut').map((e) => e.intentId)).toEqual(['other', 'p9'])
   })
 
+  it('a payout refused before it applied (tel) frees its sequence: a retry after another payout to the same recipient sends its own tx', async () => {
+    const s = setup()
+    s.ledger.t.setBal(ADDR.pool, { spendableMinor: 1000 })
+    s.ledger.t.failNextSubmit('telINSUF_FEE_P')
+    await expect(s.worker.payout({ intentId: 'r1', to: MERCHANT, amountMinor: 300 })).rejects.toThrow(/telINSUF_FEE_P/)
+    const other = await s.worker.payout({ intentId: 'r2', to: MERCHANT, amountMinor: 100 }) // takes the sequence r1 had reserved
+    const retry = await s.worker.payout({ intentId: 'r1', to: MERCHANT, amountMinor: 300 })
+    expect(retry.hash).not.toBe(other.hash)
+    expect(s.ledger.t.bal(MERCHANT).inboxMinor).toBe(400)
+    expect(s.of('paidOut').map((e) => [e.intentId, e.txHash])).toEqual([
+      ['r2', other.hash],
+      ['r1', retry.hash],
+    ])
+  })
+
+  it('a reserved sequence later used by a payout to the same recipient is not taken for this payout (retry)', async () => {
+    const s = setup()
+    s.ledger.t.setBal(ADDR.pool, { spendableMinor: 1000 })
+    s.ledger.t.throwNextSubmit('socket hang up') // outcome unknown: the reservation is kept
+    await expect(s.worker.payout({ intentId: 'r3', to: MERCHANT, amountMinor: 300 })).rejects.toThrow()
+    const other = await s.worker.payout({ intentId: 'r4', to: MERCHANT, amountMinor: 100 }) // same recipient, takes the reserved sequence
+    const retry = await s.worker.payout({ intentId: 'r3', to: MERCHANT, amountMinor: 300 })
+    expect(retry.hash).not.toBe(other.hash)
+    expect(s.ledger.t.bal(MERCHANT).inboxMinor).toBe(400)
+    expect(s.store.getPayout('r3')).toMatchObject({ status: 'sent', txHash: retry.hash })
+  })
+
+  it('a reserved sequence later used by a payout to the same recipient is not taken for this payout (restart)', async () => {
+    const ledger = createFakeLedger()
+    const store = createMemoryPoolStore()
+    ledger.t.setBal(ADDR.pool, { spendableMinor: 1000 })
+    const s1 = setup({ ledger, store })
+    ledger.t.hangNextSubmit({ apply: false })
+    void s1.worker.payout({ intentId: 'r5', to: MERCHANT, amountMinor: 300 })
+    await waitFor(() => ledger.t.submits.length === 1)
+    await s1.worker.stop()
+    const s2 = setup({ ledger, store })
+    const other = await s2.worker.payout({ intentId: 'r6', to: MERCHANT, amountMinor: 100 })
+    const s3 = setup({ ledger, store })
+    await s3.worker.start()
+    expect(s3.of('paidOut')).toEqual([])
+    expect(store.getPayout('r5')?.status).not.toBe('sent')
+    const retry = await s3.worker.payout({ intentId: 'r5', to: MERCHANT, amountMinor: 300 })
+    expect(retry.hash).not.toBe(other.hash)
+    expect(ledger.t.bal(MERCHANT).inboxMinor).toBe(400)
+    await s3.worker.stop()
+  })
+
   it('a reserved payout without a LastLedgerSequence and not on the ledger is left for a human, never resent', async () => {
     const store = createMemoryPoolStore()
     store.putPayout({ intentId: 'u1', to: MERCHANT, amountMinor: 100, status: 'reserved', reservedSequence: 1, lastLedgerSequence: null })
@@ -439,6 +487,30 @@ describe('mint in (top-up, SPEC §2.7)', () => {
     expect(hash).toBe(ledger.t.submits[1].result!.hash)
     expect(ledger.t.submits.length).toBe(2)
     expect(ledger.t.bal(ADDR.pool).inboxMinor).toBe(600)
+  })
+
+  it('a reserved convert sequence used by another mint of the same amount is not taken for this mint', async () => {
+    const ledger = createFakeLedger()
+    const store = createMemoryPoolStore()
+    const s1 = setup({ ledger, store })
+    ledger.t.hangNextSubmit({ apply: false }, 'ConfidentialMPTConvert') // paid, the convert never reaches the ledger
+    void s1.worker.mintIn(600, 'ref-a')
+    await waitFor(() => ledger.t.submits.length === 2)
+    await s1.worker.stop()
+    const s2 = setup({ ledger, store })
+    const other = await s2.worker.mintIn(600, 'ref-b') // same amount, takes the reserved convert sequence
+    const retry = await s2.worker.mintIn(600, 'ref-a')
+    expect(retry.hash).not.toBe(other.hash)
+    expect(ledger.t.bal(ADDR.pool)).toMatchObject({ publicMinor: 0, inboxMinor: 1200 })
+  })
+
+  it('a convert refused before it applied (tem) frees its sequence for the retry', async () => {
+    const s = setup()
+    s.ledger.t.failNextSubmit('temMALFORMED', 'ConfidentialMPTConvert')
+    await expect(s.worker.mintIn(300, 'ref-8')).rejects.toThrow(/temMALFORMED/)
+    expect(s.store.getMint('ref-8')).toMatchObject({ status: 'failed', convertSequence: null })
+    await s.worker.mintIn(300, 'ref-8')
+    expect(s.ledger.t.bal(ADDR.pool)).toMatchObject({ publicMinor: 0, inboxMinor: 300 })
   })
 
   it('does not pay again when a payment may have been sent before a restart', async () => {

@@ -18,6 +18,8 @@ export function fakeKeyStore(): KeyStore {
 
 export const enc = (amountMinor: number) => `ENC:${amountMinor}`
 const hash = () => randomBytes(32).toString('hex').toUpperCase()
+/** A builder's ciphertext: like the real ElGamal one (fresh randomness), two builds of the same amount differ. */
+const encFresh = (amountMinor: number) => `ENC:${amountMinor}:${randomBytes(8).toString('hex').toUpperCase()}`
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 type Bal = { spendableMinor: number; inboxMinor: number; publicMinor: number }
@@ -70,7 +72,7 @@ export function createFakeLedger(opts: { submitDelayMs?: number; startLedger?: n
     return b
   }
   const amountOf = (ct: unknown) => {
-    const m = /^ENC:(\d+)$/.exec(String(ct))
+    const m = /^ENC:(\d+)(?::[0-9A-F]+)?$/.exec(String(ct))
     if (!m) throw new Error('could not decrypt amount')
     return Number(m[1])
   }
@@ -147,7 +149,7 @@ export function createFakeLedger(opts: { submitDelayMs?: number; startLedger?: n
     async buildSend(p) {
       calls.push({ method: 'buildSend', args: [p] })
       if (!p.sponsored && bal(p.from).spendableMinor < p.amountMinor) throw new Error(`insufficient spendable balance (${bal(p.from).spendableMinor} < ${p.amountMinor})`)
-      return { TransactionType: 'ConfidentialMPTSend', ...base(p.from), Destination: p.to, DestinationEncryptedAmount: enc(p.amountMinor), SenderEncryptedAmount: enc(p.amountMinor) }
+      return { TransactionType: 'ConfidentialMPTSend', ...base(p.from), Destination: p.to, DestinationEncryptedAmount: encFresh(p.amountMinor), SenderEncryptedAmount: encFresh(p.amountMinor) }
     },
     async buildMergeInbox(p) {
       calls.push({ method: 'buildMergeInbox', args: [p] })
@@ -155,7 +157,7 @@ export function createFakeLedger(opts: { submitDelayMs?: number; startLedger?: n
     },
     async buildConvert(p) {
       calls.push({ method: 'buildConvert', args: [p] })
-      return { TransactionType: 'ConfidentialMPTConvert', ...base(p.account), MPTAmount: String(p.amountMinor) }
+      return { TransactionType: 'ConfidentialMPTConvert', ...base(p.account), MPTAmount: String(p.amountMinor), HolderEncryptedAmount: encFresh(p.amountMinor) }
     },
     async prepareSponsored(tx) {
       return tx

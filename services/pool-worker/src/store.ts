@@ -24,6 +24,8 @@ export type PayoutRecord = {
   status: PayoutStatus
   reservedSequence: number | null
   lastLedgerSequence: number | null
+  /** Identifies the exact tx built for the reserved sequence (its fresh ciphertext), so another tx on that sequence is never taken for it. */
+  fingerprint?: string
   txHash?: string
   error?: string
 }
@@ -37,6 +39,7 @@ export type MintRecord = {
   paymentHash?: string
   convertSequence?: number | null
   convertLastLedgerSequence?: number | null
+  convertFingerprint?: string
   convertHash?: string
   error?: string
 }
