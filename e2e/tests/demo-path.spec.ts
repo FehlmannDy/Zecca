@@ -140,4 +140,10 @@ test('E2E-1: the demo path', async ({ browser }) => {
   for (const k of ['6', '0']) await ana.getByRole('button', { name: k, exact: true }).click()
   await ana.getByRole('button', { name: /continue|next|review/i }).click()
   await expect(ana.getByText("You've reached the limit for unverified accounts.").first()).toBeVisible({ timeout: 30_000 })
+
+  // The dock's More screen lists what is on, and signs out.
+  await ana.goto('/app/more')
+  await expect(ana.getByRole('link', { name: /Activity/ }).first()).toBeVisible()
+  await expect(ana.getByRole('link', { name: /How Zecca works/ }).first()).toBeVisible()
+  await expect(ana.getByRole('button', { name: 'Sign out' }).filter({ hasText: 'Sign out' })).toBeVisible()
 })
