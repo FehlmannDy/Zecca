@@ -16,7 +16,7 @@ import { useApp } from '@/lib/app'
 import { cn } from '@/lib/cn'
 import { useLiveEvents } from '@/lib/hooks'
 import { cachedActivity, rememberActivities } from './activity-cache'
-import { applyIntent, findActivity, ledgerRows, statusWord, type LedgerMode, type LedgerRow } from './ledger-view'
+import { applyIntent, findActivity, ledgerCaption, ledgerRows, statusWord, type LedgerMode, type LedgerRow } from './ledger-view'
 
 const MAX_PAGES = 10
 
@@ -190,7 +190,6 @@ function LedgerPanel({ a, config }: { a: Activity; config: PublicConfig }) {
   const rows = ledgerRows(a, mode, { explorer: config.explorer })
   const base = useId()
   const tabs = useRef<Record<LedgerMode, HTMLButtonElement | null>>({ you: null, everyone: null })
-  const who = a.counterparty ? a.counterparty.displayName.split(/\s+/)[0] : null
   const select = (m: LedgerMode) => {
     setMode(m)
     tabs.current[m]?.focus()
@@ -221,13 +220,7 @@ function LedgerPanel({ a, config }: { a: Activity; config: PublicConfig }) {
         ))}
       </div>
       <div role="tabpanel" id={`${base}-panel`} aria-labelledby={`${base}-${mode}`} className="mt-4">
-        <p className="text-[14px] text-muted">
-          {mode === 'you'
-            ? who
-              ? `What you and ${who} see.`
-              : 'What you see.'
-            : 'What anyone reading the public ledger sees: that a payment happened, not how much, and not who paid whom.'}
-        </p>
+        <p className="text-[14px] text-muted">{ledgerCaption(a, mode)}</p>
         <dl className="mt-3 divide-y divide-line">
           {rows.map((r) => (
             <div key={r.key} className="flex min-h-14 items-center justify-between gap-4 py-2.5">

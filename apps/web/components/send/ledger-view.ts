@@ -2,6 +2,7 @@
 // public ledger sees ("Everyone else"), built only from the real Activity the API returned. Plus the small
 // helpers that keep an activity current from intent.updated events.
 import { activityStatusOf, type Activity, type Intent, type Network, type PublicConfig } from '@zecca/contracts'
+import { recipientShortName } from './send-rules'
 
 export type LedgerMode = 'you' | 'everyone'
 
@@ -61,6 +62,16 @@ export function ledgerRows(a: Activity, mode: LedgerMode, opts: { explorer: Publ
   rows.push(tx('deposit', 'Into the pool', a.ledger.depositTxHash, 'Waiting'))
   if (POOL_PAYOUT_KINDS.has(a.kind)) rows.push(tx('payout', 'Out of the pool', a.ledger.payoutTxHash, 'On its way'))
   return rows
+}
+
+/**
+ * The line above the rows. "Everyone else" claims only that the amount is hidden: addresses are public and timing can
+ * link a deposit to its payout (SPEC §11), so it never says the ledger hides who paid whom.
+ */
+export function ledgerCaption(a: Activity, mode: LedgerMode): string {
+  if (mode === 'you') return a.counterparty ? `What you and ${recipientShortName(a.counterparty)} see.` : 'What you see.'
+  const seen = a.kind === 'welcome' ? 'a payment happened' : POOL_PAYOUT_KINDS.has(a.kind) ? 'a payment into the Zecca pool and one out of it' : 'a payment into the Zecca pool'
+  return `What anyone reading the public ledger sees: ${seen}, not how much.`
 }
 
 /** The status in words (never colour alone). */

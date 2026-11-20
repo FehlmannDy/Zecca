@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as fx from '@zecca/contracts/fixtures'
 import type { Activity, Intent } from '@zecca/contracts'
-import { applyIntent, explorerHref, findActivity, ledgerRows, mergeActivity, statusWord } from './ledger-view'
+import { applyIntent, explorerHref, findActivity, ledgerCaption, ledgerRows, mergeActivity, statusWord } from './ledger-view'
 
 const explorer = { devnet: 'https://devnet.xrpl.org/transactions/', testnet: 'https://testnet.xrpl.org/transactions' }
 
@@ -29,6 +29,24 @@ describe('ledgerRows: You', () => {
 
   it('never shows a hash', () => {
     expect(ledgerRows(fx.activity.sentCarla, 'you', { explorer }).some((r) => r.kind === 'hash')).toBe(false)
+  })
+})
+
+describe('ledgerCaption', () => {
+  it('names people by first name and businesses in full', () => {
+    expect(ledgerCaption(fx.activity.sentCarla, 'you')).toBe('What you and Carla see.')
+    expect(ledgerCaption(fx.activity.coffee, 'you')).toBe('What you and Caffè Bruno see.')
+    expect(ledgerCaption(fx.activity.welcome, 'you')).toBe('What you see.')
+  })
+
+  it('claims only what the ledger hides: the amount (timing and addresses can link who paid whom)', () => {
+    for (const a of [fx.activity.sentCarla, fx.activity.coffee, fx.activity.welcome, fx.activity.topup, fx.activity.shop]) {
+      const text = ledgerCaption(a, 'everyone')
+      expect(text).toMatch(/not how much\.$/)
+      expect(text).not.toMatch(/who|anonym|private/i)
+    }
+    expect(ledgerCaption(fx.activity.sentCarla, 'everyone')).toBe('What anyone reading the public ledger sees: a payment into the Zecca pool and one out of it, not how much.')
+    expect(ledgerCaption(fx.activity.welcome, 'everyone')).toBe('What anyone reading the public ledger sees: a payment happened, not how much.')
   })
 })
 
