@@ -23,6 +23,18 @@ export function metalMetadataHex(symbol: MetalSymbol): string {
   return Buffer.from(JSON.stringify(json), 'utf8').toString('hex').toUpperCase()
 }
 
+/** The ticker in an issuance's XLS-89 metadata (hex JSON), or undefined. */
+export function tickerOfMetadata(hex: unknown): string | undefined {
+  if (typeof hex !== 'string' || !/^([0-9A-Fa-f]{2})+$/.test(hex)) return undefined
+  try {
+    const j = JSON.parse(Buffer.from(hex, 'hex').toString('utf8')) as { ticker?: unknown; t?: unknown }
+    const t = j.ticker ?? j.t
+    return typeof t === 'string' ? t : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function metalIssuanceCreate(account: string, symbol: MetalSymbol): Record<string, unknown> & { TransactionType: string; Account: string } {
   return { TransactionType: 'MPTokenIssuanceCreate', Account: account, AssetScale: 0, Flags: 0, MPTokenMetadata: metalMetadataHex(symbol) }
 }
