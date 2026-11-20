@@ -44,9 +44,9 @@ type Loaded = { priceMinor: number; at: string; history: Day[] }
 const dayOf = (iso: string) => iso.slice(0, 10)
 
 /** Yahoo Finance v8 chart -> price per gram, its time, daily closes per gram (the newest replaced by the price). */
-export function parseYahooChart(j: unknown): Loaded & { history: number[] } {
+export function parseYahooChart(j: unknown): { priceMinor: number; at: string; history: number[] } {
   const l = yahooLoaded(j)
-  return { ...l, history: l.history.map((d) => d.minor) }
+  return { priceMinor: l.priceMinor, at: l.at, history: l.history.map((d) => d.minor) }
 }
 
 function yahooLoaded(j: unknown): Loaded {
