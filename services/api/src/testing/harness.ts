@@ -21,6 +21,8 @@ export type Harness<L extends Ledger = FakeLedger, P extends PoolWorker = FakePo
   signUp(handle: string, o?: { role?: 'user' | 'merchant'; businessName?: string; displayName?: string; email?: string; phone?: string }): Promise<TestUser>
   sign(signer: MockRawSigner, prepared: PreparedTx): Promise<string>
   submit(u: { token: string; signer: MockRawSigner }, prepared: PreparedTx): Promise<{ status: number; body: any }>
+  /** Lets fake pool ticks fire and every background task (payout, merge) finish. */
+  settle(): Promise<void>
 }
 
 export type TestUser = { token: string; signer: MockRawSigner; user: User }
@@ -86,6 +88,12 @@ export function makeHarness<L extends Ledger = FakeLedger, P extends PoolWorker 
     },
     async submit(u, prepared) {
       return json('POST', '/v1/tx/submit', { token: u.token, body: { prepareId: prepared.prepareId, txBlob: await h.sign(u.signer, prepared) } })
+    },
+    async settle() {
+      for (let k = 0; k < 3; k++) {
+        await new Promise((r) => setTimeout(r, 5))
+        await app.core.idle()
+      }
     },
     async signUp(handle, so = {}) {
       const { token, signer } = await h.signIn()
