@@ -36,6 +36,10 @@ describe('privy verifier', () => {
     expect(calls[0].headers['privy-app-id']).toBe(APP)
     expect(calls[0].headers.authorization).toBe('Basic ' + Buffer.from(`${APP}:test-secret`).toString('base64'))
   })
+  it("returns the Privy account's email (lowercase) when it has one", async () => {
+    const { verifier, sign } = await setup([{ type: 'email', address: 'Ana@Example.com' }, { type: 'wallet', chain_type: 'xrpl', address: ADDR }])
+    await expect(verifier.verify(await sign(), ADDR)).resolves.toEqual({ privyUserId: DID, email: 'ana@example.com' })
+  })
   it('refuses another audience, another issuer, an expired token', async () => {
     const { verifier, sign } = await setup()
     await expect(verifier.verify(await sign({ aud: 'other' }), ADDR)).rejects.toThrow(/refused/)

@@ -2,8 +2,11 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose'
 
 export interface PrivyVerifier {
-  /** Resolves with the Privy user id when the token is valid and `address` is one of that user's XRPL wallets. Throws otherwise. */
-  verify(token: string, address: string): Promise<{ privyUserId: string }>
+  /**
+   * Resolves with the Privy user id when the token is valid and `address` is one of that user's XRPL wallets. Throws otherwise.
+   * `email` is the Privy account's email (Privy verified it with a code), lowercase, when it has one.
+   */
+  verify(token: string, address: string): Promise<{ privyUserId: string; email?: string }>
 }
 
 export class PrivyAuthError extends Error {
@@ -45,7 +48,8 @@ export function createPrivyVerifier(opts: {
         (a) => a.type === 'wallet' && a.chain_type === 'xrpl' && a.address === address,
       )
       if (!linked) throw new PrivyAuthError('address is not a wallet of this Privy user')
-      return { privyUserId: sub }
+      const email = (user.linked_accounts ?? []).find((a) => a.type === 'email' && typeof a.address === 'string' && a.address)?.address
+      return { privyUserId: sub, ...(email ? { email: email.toLowerCase() } : {}) }
     },
   }
 }

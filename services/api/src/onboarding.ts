@@ -34,7 +34,9 @@ export function mountOnboarding(app: Hono, core: Core): void {
       handle,
       displayName: body.displayName.trim(),
       roles: body.role === 'merchant' ? ['user', 'merchant'] : ['user'],
-      email: body.email?.toLowerCase(),
+      // Privy sign-in: the email Privy verified, whatever the form says. Test sign-in: the typed email, kept for the profile only.
+      email: s.privyUserId ? s.email : body.email?.toLowerCase(),
+      emailVerified: Boolean(s.privyUserId && s.email),
       tier: 0,
       businessName: body.role === 'merchant' ? body.businessName!.trim() : undefined,
       feeBps: body.role === 'merchant' ? core.settings.merchantFeeBps : undefined,

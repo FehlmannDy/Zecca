@@ -39,12 +39,15 @@ export function mountAuth(app: Hono, core: Core): void {
     const publicKey = body.publicKey.toUpperCase()
     if (!keyMatches(body.address, publicKey)) throw Err.unauthorized("Sign-in failed: that key doesn't belong to this address.")
     let privyUserId: string | undefined
+    let email: string | undefined
 
     if ('privyToken' in body) {
       if (!privyAllowed(core)) throw Err.badRequest('Email sign-in is off here. Use the test sign-in.')
       if (!core.privy) throw Err.upstream("Email sign-in isn't configured on this server.")
       try {
-        privyUserId = (await core.privy.verify(body.privyToken, body.address)).privyUserId
+        const v = await core.privy.verify(body.privyToken, body.address)
+        privyUserId = v.privyUserId
+        email = v.email
       } catch (e) {
         core.log.warn(`[auth] privy session refused: ${(e as Error).message}`)
         throw Err.unauthorized('Sign-in failed. Sign in with your email again.')
@@ -66,7 +69,7 @@ export function mountAuth(app: Hono, core: Core): void {
     if (existing && existing.publicKey.toUpperCase() !== publicKey) throw Err.unauthorized('Sign-in failed. Try again.')
     if (existing?.privyUserId && privyUserId && existing.privyUserId !== privyUserId) throw Err.unauthorized('Sign-in failed. Try again.')
 
-    const token = createSession(core, { address: body.address, publicKey, privyUserId })
+    const token = createSession(core, { address: body.address, publicKey, privyUserId, email })
     return { token, ...(existing?.status === 'active' ? { user: toUser(existing) } : {}) }
   })
 

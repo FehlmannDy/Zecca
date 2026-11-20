@@ -136,6 +136,12 @@ const MIGRATIONS: string[] = [
     created_at TEXT NOT NULL
   );
   `,
+  // 2: only an email Privy verified finds someone in the directory, and it finds one person.
+  `
+  ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0 CHECK (email_verified IN (0, 1));
+  CREATE UNIQUE INDEX users_verified_email ON users (lower(email)) WHERE status = 'active' AND email_verified = 1;
+  ALTER TABLE sessions ADD COLUMN email TEXT;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

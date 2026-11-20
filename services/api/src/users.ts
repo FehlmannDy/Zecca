@@ -10,6 +10,8 @@ export type UserRow = {
   displayName: string
   roles: Role[]
   email?: string
+  /** True when Privy verified the email (only then does it find this user in the directory). */
+  emailVerified?: boolean
   phone?: string
   tier: 0 | 1
   businessName?: string
@@ -28,6 +30,7 @@ type Raw = {
   display_name: string
   roles: string
   email: string | null
+  email_verified: number
   phone: string | null
   tier: number
   business_name: string | null
@@ -47,6 +50,7 @@ const fromRaw = (r: Raw | undefined): UserRow | undefined =>
     displayName: r.display_name,
     roles: r.roles.split(',') as Role[],
     email: r.email ?? undefined,
+    emailVerified: r.email_verified === 1,
     phone: r.phone ?? undefined,
     tier: r.tier === 1 ? 1 : 0,
     businessName: r.business_name ?? undefined,
@@ -83,8 +87,11 @@ export const users = {
     fromRaw(core.db.prepare('SELECT * FROM users WHERE address = ?').get(address) as Raw | undefined),
   byHandle: (core: Core, handle: string) =>
     fromRaw(core.db.prepare('SELECT * FROM users WHERE handle = ?').get(handle.toLowerCase()) as Raw | undefined),
+  /** Only a verified email finds someone (unique among active users). */
   activeByEmail: (core: Core, email: string) =>
-    fromRaw(core.db.prepare("SELECT * FROM users WHERE lower(email) = ? AND status = 'active'").get(email.toLowerCase()) as Raw | undefined),
+    fromRaw(
+      core.db.prepare("SELECT * FROM users WHERE lower(email) = ? AND status = 'active' AND email_verified = 1").get(email.toLowerCase()) as Raw | undefined,
+    ),
   activeByPhone: (core: Core, phone: string) =>
     fromRaw(core.db.prepare("SELECT * FROM users WHERE phone = ? AND status = 'active'").get(phone) as Raw | undefined),
   byPrivyId: (core: Core, privyUserId: string) =>
@@ -93,13 +100,14 @@ export const users = {
   insert(core: Core, u: UserRow): void {
     core.db
       .prepare(
-        `INSERT INTO users (id, address, public_key, handle, display_name, roles, email, phone, tier, business_name, fee_bps, privy_user_id, status, created_at, activated_at)
-         VALUES (@id, @address, @publicKey, @handle, @displayName, @roles, @email, @phone, @tier, @businessName, @feeBps, @privyUserId, @status, @createdAt, @activatedAt)`,
+        `INSERT INTO users (id, address, public_key, handle, display_name, roles, email, email_verified, phone, tier, business_name, fee_bps, privy_user_id, status, created_at, activated_at)
+         VALUES (@id, @address, @publicKey, @handle, @displayName, @roles, @email, @emailVerified, @phone, @tier, @businessName, @feeBps, @privyUserId, @status, @createdAt, @activatedAt)`,
       )
       .run({
         ...u,
         roles: u.roles.join(','),
         email: u.email ?? null,
+        emailVerified: u.email && u.emailVerified ? 1 : 0,
         phone: u.phone ?? null,
         businessName: u.businessName ?? null,
         feeBps: u.feeBps ?? null,
@@ -110,8 +118,17 @@ export const users = {
   remove(core: Core, id: string): void {
     core.db.prepare('DELETE FROM users WHERE id = ?').run(id)
   },
+  /** A verified email another active user already holds stays on this profile but does not find this user. */
   activate(core: Core, id: string, at: string): void {
-    core.db.prepare("UPDATE users SET status = 'active', activated_at = ? WHERE id = ?").run(at, id)
+    core.db.transaction(() => {
+      core.db
+        .prepare(
+          `UPDATE users SET email_verified = 0 WHERE id = ? AND email_verified = 1 AND EXISTS (
+             SELECT 1 FROM users o WHERE o.id != users.id AND o.status = 'active' AND o.email_verified = 1 AND lower(o.email) = lower(users.email))`,
+        )
+        .run(id)
+      core.db.prepare("UPDATE users SET status = 'active', activated_at = ? WHERE id = ?").run(at, id)
+    })()
   },
   setTier(core: Core, id: string, tier: 0 | 1): void {
     core.db.prepare('UPDATE users SET tier = ? WHERE id = ?').run(tier, id)
