@@ -196,16 +196,61 @@ export function onRequestPaid(f: (core: Core, paymentRequestId: string) => void)
   emitRequestHook = f
 }
 
-async function payout(core: Core, id: string): Promise<void> {
-  const i = intents.byId(core, id)!
-  const to = users.byId(core, i.toUserId!)!
-  if (netOf(i) <= 0) return onPaidOut(core, { type: 'paidOut', intentId: id, txHash: '', to: to.address, amountMinor: 0 })
+// ---------- background work: one run at a time per key; recovery tries a failed run again after a backoff ----------
+type Runs = { running: Set<string>; retry: Map<string, { tries: number; at: number }> }
+const runsByCore = new WeakMap<Core, Runs>()
+function runsOf(core: Core): Runs {
+  let r = runsByCore.get(core)
+  if (!r) runsByCore.set(core, (r = { running: new Set(), retry: new Map() }))
+  return r
+}
+
+/** Runs `job` unless the same key is running. When it returns false (or throws), recovery waits 5 s, 10 s, 20 s ... up to 60 s. */
+async function runOnce(core: Core, key: string, job: () => Promise<boolean>): Promise<void> {
+  const r = runsOf(core)
+  if (r.running.has(key)) return
+  r.running.add(key)
+  let done = false
   try {
-    const { hash } = await core.pool.payout({ intentId: id, to: to.address, amountMinor: netOf(i) })
-    await onPaidOut(core, { type: 'paidOut', intentId: id, txHash: hash, to: to.address, amountMinor: netOf(i) })
-  } catch (err) {
-    await onFailed(core, { type: 'failed', intentId: id, stage: 'payout', code: 'payout_failed', message: (err as Error).message })
+    done = await job()
+  } finally {
+    r.running.delete(key)
+    if (done) r.retry.delete(key)
+    else {
+      const tries = (r.retry.get(key)?.tries ?? 0) + 1
+      r.retry.set(key, { tries, at: core.now() + Math.min(60_000, 5_000 * 2 ** (tries - 1)) })
+    }
   }
+}
+const due = (core: Core, key: string) => !runsOf(core).running.has(key) && (runsOf(core).retry.get(key)?.at ?? 0) <= core.now()
+
+/** Intents whose received money goes through payout and merge here (connectors with their own received handler settle their own). */
+const viaPayout = (core: Core, i: IntentRow) => !!i.toUserId && i.kind !== 'welcome' && !core.receivedHandlers.has(i.kind)
+
+/** The pool worker could not tell whether the payout landed; asking again is safe (it looks the payout up before sending). */
+const PAYOUT_UNKNOWN = 'payout_unknown'
+
+function payout(core: Core, id: string): Promise<void> {
+  return runOnce(core, `payout:${id}`, async () => {
+    const i = intents.byId(core, id)!
+    if (i.status !== 'received') return true
+    const to = users.byId(core, i.toUserId!)!
+    if (netOf(i) <= 0) {
+      await onPaidOut(core, { type: 'paidOut', intentId: id, txHash: '', to: to.address, amountMinor: 0 })
+      return true
+    }
+    try {
+      const { hash } = await core.pool.payout({ intentId: id, to: to.address, amountMinor: netOf(i) })
+      await onPaidOut(core, { type: 'paidOut', intentId: id, txHash: hash, to: to.address, amountMinor: netOf(i) })
+    } catch (err) {
+      if ((err as { code?: string }).code === PAYOUT_UNKNOWN) {
+        core.log.warn(`[intents] payout for ${id} not confirmed yet: ${(err as Error).message}; asked again later`)
+        return false
+      }
+      await onFailed(core, { type: 'failed', intentId: id, stage: 'payout', code: 'payout_failed', message: (err as Error).message })
+    }
+    return true
+  })
 }
 
 export async function onPaidOut(core: Core, e: Extract<PoolEvent, { type: 'paidOut' }>): Promise<void> {
@@ -215,28 +260,36 @@ export async function onPaidOut(core: Core, e: Extract<PoolEvent, { type: 'paidO
   core.track(settle(core, e.intentId), 'merge')
 }
 
-/** After the payout: the relayer merges the recipient's inbox, then the pending amount becomes available. */
-async function settle(core: Core, id: string, attempt = 1): Promise<void> {
-  const i = intents.byId(core, id)!
-  const to = users.byId(core, i.toUserId!)!
-  if (netOf(i) > 0) {
-    try {
-      await core.pool.mergeInboxFor(to.address)
-    } catch (err) {
-      core.log.warn(`[intents] merge for ${to.handle} after ${id} failed (attempt ${attempt}): ${(err as Error).message}`)
-      if (attempt < 3) {
-        await new Promise((r) => setTimeout(r, 2000 * attempt))
-        return settle(core, id, attempt + 1)
+/**
+ * After the payout: the relayer merges the recipient's inbox, then the pending amount becomes available. A merge takes the whole
+ * inbox, so it settles every payout to that recipient that was paid out before it started, including one whose own merge failed.
+ */
+function settle(core: Core, id: string): Promise<void> {
+  return runOnce(core, `settle:${id}`, async () => {
+    const i = intents.byId(core, id)!
+    const to = users.byId(core, i.toUserId!)!
+    // Taken before the merge: each of these payouts is already in the inbox the merge moves.
+    const batch = intents.unsettled(core, to.id).filter((x) => viaPayout(core, x))
+    if (!batch.some((x) => x.id === id)) return true
+    if (batch.some((x) => netOf(x) > 0)) {
+      try {
+        await core.pool.mergeInboxFor(to.address)
+      } catch (err) {
+        core.log.warn(`[intents] merge for ${to.handle} after ${id} failed: ${(err as Error).message}; the money stays pending and is merged later`)
+        return false
       }
-      return core.log.error(`[intents] ${id}: ${to.handle}'s money stays pending until a merge succeeds`)
     }
-  }
-  const moved = core.db.transaction(() => {
-    if (!claimEffect(core, `${id}:settled`)) return false
-    adjustBalance(core, to.id, { pending: -netOf(i), available: netOf(i) })
+    let moved = false
+    for (const x of batch) {
+      core.db.transaction(() => {
+        if (!claimEffect(core, `${x.id}:settled`)) return
+        adjustBalance(core, to.id, { pending: -netOf(x), available: netOf(x) })
+        moved = true
+      })()
+    }
+    if (moved) emitBalance(core, to.id)
     return true
-  })()
-  if (moved) emitBalance(core, to.id)
+  })
 }
 
 const FAILED_COPY = {
@@ -248,6 +301,7 @@ export async function onFailed(core: Core, e: Extract<PoolEvent, { type: 'failed
   const i = intents.byId(core, e.intentId)
   if (!i) return core.log.warn(`[intents] failed for unknown intent ${e.intentId}`)
   if (e.stage === 'merge') return core.log.warn(`[intents] merge failed after ${i.id}: ${e.code} ${e.message}`)
+  if (e.stage === 'payout' && e.code === PAYOUT_UNKNOWN) return core.log.warn(`[intents] payout for ${i.id} not confirmed yet: ${e.message}`)
   core.log.error(`[intents] ${i.id} failed at ${e.stage}: ${e.code} ${e.message} (money stays in the pool; retry is manual)`)
   const message = FAILED_COPY[e.stage]
   let touched: string | undefined
@@ -270,22 +324,50 @@ export function startTopup(core: Core, user: UserRow, amountMinor: number, o: { 
   const id = core.id('int')
   core.db.transaction(() => {
     checkIncoming(core, user, amountMinor, 'self')
-    intents.insert(core, { id, kind: 'topup', status: 'created', fromUserId: ZECCA, toUserId: user.id, amountMinor, feeMinor: 0, note: o.note })
+    const reference = o.reference ?? `dev-credit:${id}`
+    intents.insert(core, { id, kind: 'topup', status: 'created', fromUserId: ZECCA, toUserId: user.id, amountMinor, feeMinor: 0, note: o.note, reference })
   })()
-  core.track(runTopup(core, id, o.reference ?? `dev-credit:${id}`), 'topup')
+  core.track(runTopup(core, id), 'topup')
   return toIntent(intents.byId(core, id)!)
 }
 
-async function runTopup(core: Core, id: string, reference: string): Promise<void> {
-  const i = intents.byId(core, id)!
-  try {
-    const { hash } = await core.pool.mintIn(i.amountMinor, reference)
-    intents.transition(core, id, 'created', 'submitted', { depositTxHash: hash, submittedAt: core.iso() })
-  } catch (err) {
-    core.log.error(`[topup] ${id} mint failed: ${(err as Error).message}`)
-    intents.transition(core, id, 'created', 'failed', { failure: { code: 'mint_failed', message: "The top-up didn't go through. Nothing was charged." } })
-    return emitIntent(core, id)
+/** Mints with the intent's reference: the pool worker answers a reference it already minted with the same hash, never twice. */
+function runTopup(core: Core, id: string): Promise<void> {
+  return runOnce(core, `topup:${id}`, async () => {
+    const i = intents.byId(core, id)!
+    if (i.status !== 'created') return true
+    try {
+      const { hash } = await core.pool.mintIn(i.amountMinor, i.reference ?? `dev-credit:${id}`)
+      intents.transition(core, id, 'created', 'submitted', { depositTxHash: hash, submittedAt: core.iso() })
+    } catch (err) {
+      core.log.error(`[topup] ${id} mint failed: ${(err as Error).message}`)
+      intents.transition(core, id, 'created', 'failed', { failure: { code: 'mint_failed', message: "The top-up didn't go through. Nothing was charged." } })
+      emitIntent(core, id)
+      return true
+    }
+    emitIntent(core, id)
+    applyReceived(core, id)
+    return true
+  })
+}
+
+// ---------- recovery (jobs tick; the first tick runs at start) ----------
+/**
+ * Picks up what a failure or a restart left behind: received intents with no payout running, paid-out intents whose money is still
+ * pending, top-ups not minted yet. The pool worker is idempotent per intent (payout) and per reference (mint).
+ */
+export function recoverIntents(core: Core): void {
+  for (const i of intents.withStatus(core, 'received')) {
+    if (viaPayout(core, i) && due(core, `payout:${i.id}`)) core.track(payout(core, i.id), 'payout')
   }
-  emitIntent(core, id)
-  applyReceived(core, id)
+  const recipients = new Set<string>()
+  for (const i of intents.unsettled(core)) {
+    if (!viaPayout(core, i) || recipients.has(i.toUserId!)) continue
+    recipients.add(i.toUserId!) // one merge settles them all
+    if (due(core, `settle:${i.id}`)) core.track(settle(core, i.id), 'merge')
+  }
+  for (const i of intents.withStatus(core, 'created')) {
+    if (i.kind === 'topup' && due(core, `topup:${i.id}`)) core.track(runTopup(core, i.id), 'topup')
+  }
+  for (const i of intents.withStatus(core, 'submitted')) if (i.kind === 'topup') applyReceived(core, i.id)
 }

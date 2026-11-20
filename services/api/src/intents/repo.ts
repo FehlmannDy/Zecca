@@ -22,6 +22,8 @@ export type IntentRow = {
   depositTxHash?: string
   payoutTxHash?: string
   ciphertextPreview?: string
+  /** Top-ups: the mint reference given to the pool worker (idempotency key there). */
+  reference?: string
   network: Network
   failure?: { code: string; message: string }
   createdAt: string
@@ -43,6 +45,7 @@ type Raw = {
   deposit_tx_hash: string | null
   payout_tx_hash: string | null
   ciphertext_preview: string | null
+  reference: string | null
   network: Network
   failure_code: string | null
   failure_message: string | null
@@ -65,6 +68,7 @@ const fromRaw = (r: Raw): IntentRow => ({
   depositTxHash: r.deposit_tx_hash ?? undefined,
   payoutTxHash: r.payout_tx_hash ?? undefined,
   ciphertextPreview: r.ciphertext_preview ?? undefined,
+  reference: r.reference ?? undefined,
   network: r.network,
   failure: r.failure_code ? { code: r.failure_code, message: r.failure_message ?? '' } : undefined,
   createdAt: r.created_at,
@@ -110,13 +114,24 @@ export const intents = {
   withStatus(core: Core, status: IntentStatus): IntentRow[] {
     return (core.db.prepare('SELECT * FROM intents WHERE status = ?').all(status) as Raw[]).map(fromRaw)
   },
+  /** paid_out intents whose money has not moved from pending to available yet (no '<id>:settled' effect), oldest first. */
+  unsettled(core: Core, toUserId?: string): IntentRow[] {
+    return (
+      core.db
+        .prepare(
+          `SELECT * FROM intents WHERE status = 'paid_out' AND to_user_id IS NOT NULL AND (@to IS NULL OR to_user_id = @to)
+             AND NOT EXISTS (SELECT 1 FROM effects WHERE key = intents.id || ':settled') ORDER BY created_at, id`,
+        )
+        .all({ to: toUserId ?? null }) as Raw[]
+    ).map(fromRaw)
+  },
   insert(core: Core, i: Omit<IntentRow, 'createdAt' | 'updatedAt' | 'network'> & { network?: Network }): IntentRow {
     const at = core.iso()
     core.db
       .prepare(
         `INSERT INTO intents (id, kind, status, from_user_id, to_user_id, amount_minor, fee_minor, note, payment_request_id, prepare_id,
-           deposit_tx_hash, payout_tx_hash, ciphertext_preview, network, failure_code, failure_message, created_at, updated_at, submitted_at)
-         VALUES (@id, @kind, @status, @from, @to, @amount, @fee, @note, @pr, @prep, @dep, @pay, @ct, @network, @fc, @fm, @at, @at, @sub)`,
+           deposit_tx_hash, payout_tx_hash, ciphertext_preview, reference, network, failure_code, failure_message, created_at, updated_at, submitted_at)
+         VALUES (@id, @kind, @status, @from, @to, @amount, @fee, @note, @pr, @prep, @dep, @pay, @ct, @ref, @network, @fc, @fm, @at, @at, @sub)`,
       )
       .run({
         id: i.id,
@@ -132,6 +147,7 @@ export const intents = {
         dep: i.depositTxHash ?? null,
         pay: i.payoutTxHash ?? null,
         ct: i.ciphertextPreview ?? null,
+        ref: i.reference ?? null,
         network: i.network ?? 'devnet',
         fc: i.failure?.code ?? null,
         fm: i.failure?.message ?? null,

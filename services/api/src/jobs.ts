@@ -3,7 +3,7 @@
 import type { Core } from './core'
 import { getBalance } from './books'
 import { intents } from './intents/repo'
-import { emitIntent } from './intents/flow'
+import { emitIntent, recoverIntents } from './intents/flow'
 import { preparedForIntent } from './prepared/store'
 import { expireRequests } from './paymentRequests/routes'
 import { users } from './users'
@@ -69,6 +69,7 @@ export function createJobs(core: Core): Jobs {
     try {
       expireRequests(core)
       await expireIntents(core)
+      recoverIntents(core)
     } catch (e) {
       core.log.warn(`[jobs] tick: ${(e as Error).message}`)
     } finally {
@@ -79,6 +80,7 @@ export function createJobs(core: Core): Jobs {
     tick,
     reconcile: () => reconcile(core),
     start(o = {}) {
+      void tick() // at start: picks up what the last run left behind
       timers.push(setInterval(() => void tick(), o.tickMs ?? 5_000))
       if (o.reconcileMs !== 0) timers.push(setInterval(() => void reconcile(core), o.reconcileMs ?? 60_000))
       for (const t of timers) t.unref?.()

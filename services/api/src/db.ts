@@ -142,6 +142,10 @@ const MIGRATIONS: string[] = [
   CREATE UNIQUE INDEX users_verified_email ON users (lower(email)) WHERE status = 'active' AND email_verified = 1;
   ALTER TABLE sessions ADD COLUMN email TEXT;
   `,
+  // 3: a top-up keeps its mint reference, so a restart can ask the pool worker again with the same one.
+  `
+  ALTER TABLE intents ADD COLUMN reference TEXT;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length
