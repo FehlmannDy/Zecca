@@ -34,6 +34,23 @@ describe('amount proof (plaintext-equality sigma proof from @xrplf/mpt-crypto)',
     expect(await verifyAmountProof({ amountProof: moved, amountMinor: 1200, ciphertext: ct })).toBe(false)
   })
 
+  it('the WASM verifier itself refuses a proof whose key was swapped for another one (not only the string check)', async () => {
+    const ct = await enc(1200)
+    const other = elgamal()
+    const p = await makeAmountProof({ txHash: H1, field: 'DestinationEncryptedAmount', ciphertext: ct, amountMinor: 1200, key: pool })
+    const swapped = p.replace(pool.publicKey.toUpperCase(), other.publicKey.toUpperCase())
+    expect(parseAmountProof(swapped)?.publicKey).toBe(other.publicKey.toUpperCase())
+    expect(await verifyAmountProof({ amountProof: swapped, amountMinor: 1200, ciphertext: ct, publicKey: other.publicKey })).toBe(false)
+    expect(await verifyAmountProof({ amountProof: swapped, amountMinor: 1200, ciphertext: ct })).toBe(false)
+  })
+
+  it('an amount of 0 is proven and checked like any other', async () => {
+    const ct = await enc(0)
+    const p = await makeAmountProof({ txHash: H1, field: 'SenderEncryptedAmount', ciphertext: ct, amountMinor: 0, key: pool })
+    expect(await verifyAmountProof({ amountProof: p, amountMinor: 0, ciphertext: ct, publicKey: pool.publicKey })).toBe(true)
+    expect(await verifyAmountProof({ amountProof: p, amountMinor: 1, ciphertext: ct, publicKey: pool.publicKey })).toBe(false)
+  })
+
   it('the context hash binds tx, field and amount', () => {
     expect(amountContext(H1, 'DestinationEncryptedAmount', 1200)).toMatch(/^[0-9A-F]{64}$/)
     expect(amountContext(H1, 'DestinationEncryptedAmount', 1200)).not.toBe(amountContext(H1, 'SenderEncryptedAmount', 1200))
