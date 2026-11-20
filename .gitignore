@@ -63,3 +63,4 @@ docs/ui/
 .idea/
 .vscode/
 *.swp
+.vitest/
