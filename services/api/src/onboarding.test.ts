@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { Balance, PreparedTx, User } from '@zecca/contracts'
+import { mockRawSigner } from '@zecca/xrpl-core/signer'
 import { makeHarness } from './testing/harness'
+import type { PrivyVerifier } from './auth/privy'
 
 const body = (s: { address: string; publicKey: string }, o: Record<string, unknown> = {}) => ({
   address: s.address,
@@ -132,5 +134,21 @@ describe('onboarding', () => {
     expect(r.body.error.code).toBe('rate_limited')
     h.clock.advance(61_000)
     expect((await h.json('POST', '/v1/onboarding/prepare', { token, body: body(signer) })).status).toBe(200)
+  })
+
+  it('one sign-up per Privy user: a second address of the same Privy user is refused', async () => {
+    const a = mockRawSigner()
+    const b = mockRawSigner()
+    const privy: PrivyVerifier = { verify: async (token, address) => ({ privyUserId: 'did:privy:same' + (address === a.address || address === b.address ? '' : token) }) }
+    const h = makeHarness({ env: { SIGNER_MODE: 'privy', DEMO_MODE: '0' }, privy })
+    const session = async (s: typeof a) =>
+      (await h.json('POST', '/v1/auth/session', { body: { privyToken: 'privy-token-' + s.address, address: s.address, publicKey: s.publicKey } })).body.token as string
+    const ta = await session(a)
+    const p = await h.json('POST', '/v1/onboarding/prepare', { token: ta, body: body(a) })
+    expect((await h.submit({ token: ta, signer: a }, p.body)).body.status).toBe('validated')
+    const tb = await session(b)
+    const r = await h.json('POST', '/v1/onboarding/prepare', { token: tb, body: body(b, { handle: 'other' }) })
+    expect(r.status).toBe(409)
+    expect(r.body.error.code).toBe('already_signed_up')
   })
 })
