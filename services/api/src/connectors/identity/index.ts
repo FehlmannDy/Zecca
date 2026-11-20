@@ -48,14 +48,15 @@ const COPY = {
   startAgain: 'Start the identity check again.',
 } as const
 
-/** IDENTITY_MODE: 'eudi' (or 'live') = the public EU reference verifier; anything else = the fixed test identity. */
+/**
+ * IDENTITY_MODE: 'eudi' (or 'live') = the public EU reference verifier (https://verifier-backend.eudiw.dev, intended use
+ * TEST-01); anything else = the fixed test identity.
+ */
 export function verifierFromEnv(env: Env, o: { now: () => number; fetch?: typeof fetch; log?: Logger }): IdentityVerifier {
   const mode = (env.IDENTITY_MODE ?? '').trim().toLowerCase()
   if (mode === 'eudi' || mode === 'live') {
     return createEudiVerifier({
       fetch: o.fetch,
-      backend: env.IDENTITY_VERIFIER_URL || undefined,
-      intendedUseId: env.IDENTITY_INTENDED_USE_ID || undefined,
       // A public CA certificate (PEM, base64), e.g. the test issuer a Paradym wallet got its PID from.
       extraCa: env.IDENTITY_EXTRA_CA_B64 ? Buffer.from(env.IDENTITY_EXTRA_CA_B64, 'base64').toString('utf8') : undefined,
       log: o.log,
