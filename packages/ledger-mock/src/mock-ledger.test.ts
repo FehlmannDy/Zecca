@@ -129,6 +129,16 @@ describe('mock ledger: confidential sends', () => {
   })
 })
 
+describe('mock ledger: seeded demo shop', () => {
+  it('the demo shop merchant lets the relayer merge its inbox, like a merchant signed up through the app', async () => {
+    const env = createMockEnvironment()
+    const shop = env.keystore.getWallet('demoShop').address
+    const relayer = env.keystore.getWallet('relayer').address
+    const r = await env.ledger.submitAs('relayer', await env.ledger.buildMergeInbox({ account: shop, sponsored: false, delegate: relayer }))
+    expect(r.engineResult).toBe('tesSUCCESS')
+  })
+})
+
 describe('mock ledger: what a node refuses', () => {
   it('a tampered blob fails signature verification', async () => {
     const env = createMockEnvironment()

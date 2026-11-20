@@ -109,6 +109,10 @@ export function createMockLedger(opts: MockLedgerOptions): MockLedger {
     h.authorized = true
     h.keyRegistered = true
   }
+  // The demo shop is a merchant seeded outside the app: like any sign-up, it lets the relayer merge its inbox (SPEC §2.5).
+  if (keystore.hasWallet('demoShop') && keystore.hasWallet('relayer')) {
+    account(keystore.getWallet('demoShop').address)!.delegates.set(keystore.getWallet('relayer').address, new Set(['ConfidentialMPTMergeInbox']))
+  }
 
   const serial = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
     const prev = queues.get(key) ?? Promise.resolve()
