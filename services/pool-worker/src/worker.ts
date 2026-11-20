@@ -126,10 +126,16 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
   }
 
   function failDeposit(d: ExpectedDeposit, code: string, message: string) {
-    store.putDeposit({ ...d, status: 'failed', code })
+    store.putDeposit({ ...d, status: 'failed', code, message })
     buffered.delete(d.txHash)
     log(`[pool] deposit ${d.txHash} for intent ${d.intentId} failed (${code}): ${message}`)
     emit({ type: 'failed', intentId: d.intentId, stage: 'deposit', code, message, txHash: d.txHash })
+  }
+
+  /** Delivers a decided deposit's outcome again (the API's handlers are idempotent per intent), so a lost event can be recovered. */
+  function replay(d: ExpectedDeposit) {
+    if (d.status === 'received') emit({ type: 'received', intentId: d.intentId, txHash: d.txHash, from: d.from, amountMinor: d.amountMinor })
+    else if (d.status === 'failed') emit({ type: 'failed', intentId: d.intentId, stage: 'deposit', code: d.code ?? 'deposit_failed', message: d.message ?? d.code ?? 'deposit failed', txHash: d.txHash })
   }
 
   async function verify(hash: string, e: LedgerTxEvent): Promise<void> {
@@ -147,8 +153,7 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
         return failDeposit(d, 'decrypt_failed', `deposit ${hash} could not be decrypted with the pool key: ${msg(err)}`)
       }
       if (amount !== d.amountMinor) return failDeposit(d, 'amount_mismatch', `deposit ${hash} carries ${amount}, the intent expects ${d.amountMinor}`)
-      if (!store.markCredited(hash)) return
-      store.putDeposit({ ...d, status: 'received' })
+      if (!store.creditDeposit(hash)) return
       buffered.delete(hash)
       balance = { ...balance, inboxMinor: balance.inboxMinor + amount }
       log(`[pool] received ${amount} for intent ${d.intentId} tx=${hash}`)
@@ -412,7 +417,7 @@ export function createPoolWorker(o: PoolWorkerOptions): PoolWorker {
         log(`[pool] deposit ${hash} already belongs to intent ${prev.intentId}; ignored for intent ${i.intentId}`)
         return
       }
-      if (prev && prev.status !== 'pending') return
+      if (prev && prev.status !== 'pending') return queueMicrotask(() => replay(prev))
       if (!prev) store.putDeposit({ intentId: i.intentId, txHash: hash, from: i.from, amountMinor: i.amountMinor, status: 'pending' })
       lookUp(hash)
     },

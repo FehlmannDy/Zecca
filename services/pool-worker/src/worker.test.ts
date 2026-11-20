@@ -145,11 +145,79 @@ describe('deposits', () => {
     await s.worker.stop()
     const s2 = setup({ ledger, store }) // restart on the same store and ledger
     await s2.worker.start()
-    s2.worker.expectDeposit({ intentId: 'i8', txHash: d.hash, from: USER, amountMinor: 900 })
     ledger.t.redeliver(d)
     await sleep(30)
     expect(s2.events).toEqual([])
+    const decrypts = ledger.t.calls.filter((c) => c.method === 'decryptAmount').length
+    s2.worker.expectDeposit({ intentId: 'i8', txHash: d.hash, from: USER, amountMinor: 900 }) // asked again: the stored outcome is delivered again
+    await waitFor(() => s2.events.length === 1)
+    expect(s2.events).toEqual([{ type: 'received', intentId: 'i8', txHash: d.hash, from: USER, amountMinor: 900 }])
+    expect(ledger.t.calls.filter((c) => c.method === 'decryptAmount').length).toBe(decrypts) // from the store, not re-verified
     await s2.worker.stop()
+  })
+
+  it('a received event the API failed to handle is delivered again when it calls expectDeposit again, also after a restart', async () => {
+    const ledger = createFakeLedger()
+    const store = createMemoryPoolStore()
+    const s = setup({ ledger, store })
+    let handled = 0
+    let broken = true
+    s.worker.on('received', () => {
+      if (broken) {
+        broken = false
+        throw new Error('SQLITE_BUSY')
+      }
+      handled++
+    })
+    await s.worker.start()
+    const d = ledger.t.deposit({ from: USER, amountMinor: 400 })
+    s.worker.expectDeposit({ intentId: 'lr', txHash: d.hash, from: USER, amountMinor: 400 })
+    await waitFor(() => s.of('received').length === 1)
+    expect(handled).toBe(0)
+    s.worker.expectDeposit({ intentId: 'lr', txHash: d.hash, from: USER, amountMinor: 400 })
+    await waitFor(() => handled === 1)
+    await s.worker.stop()
+    const s2 = setup({ ledger, store })
+    await s2.worker.start()
+    s2.worker.expectDeposit({ intentId: 'lr', txHash: d.hash, from: USER, amountMinor: 400 })
+    await waitFor(() => s2.of('received').length === 1)
+    expect(s2.of('received')[0]).toEqual({ type: 'received', intentId: 'lr', txHash: d.hash, from: USER, amountMinor: 400 })
+    await s2.worker.stop()
+  })
+
+  it('a failed deposit is reported again, with its code and message, when expectDeposit is called again', async () => {
+    const s = setup()
+    await s.worker.start()
+    const d = s.ledger.t.deposit({ from: USER, amountMinor: 500, encryptedAmountMinor: 1 })
+    s.worker.expectDeposit({ intentId: 'lf', txHash: d.hash, from: USER, amountMinor: 500 })
+    await waitFor(() => s.of('failed').length === 1)
+    s.worker.expectDeposit({ intentId: 'lf', txHash: d.hash, from: USER, amountMinor: 500 })
+    await waitFor(() => s.of('failed').length === 2)
+    expect(s.of('failed')[1]).toEqual(s.of('failed')[0])
+    expect(s.of('received')).toEqual([])
+    await s.worker.stop()
+  })
+
+  it('a store write failing while crediting never strands a deposit as credited but not received', async () => {
+    const store = createMemoryPoolStore()
+    const put = store.putDeposit
+    let failOnce = true
+    store.putDeposit = (dep) => {
+      if (dep.status === 'received' && failOnce) {
+        failOnce = false
+        throw new Error('disk I/O error')
+      }
+      put(dep)
+    }
+    const s = setup({ store })
+    await s.worker.start()
+    const d = s.ledger.t.deposit({ from: USER, amountMinor: 800 })
+    s.worker.expectDeposit({ intentId: 'ls', txHash: d.hash, from: USER, amountMinor: 800 })
+    await sleep(20)
+    s.ledger.t.redeliver(d)
+    await waitFor(() => s.of('received').length === 1)
+    expect(store.getDeposit(d.hash)?.status).toBe('received')
+    await s.worker.stop()
   })
 
   it('on start, recovers an expected deposit that validated while the worker was down', async () => {

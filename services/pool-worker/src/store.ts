@@ -13,6 +13,8 @@ export type ExpectedDeposit = {
   status: DepositStatus
   /** Failure code when status is 'failed' (e.g. 'amount_mismatch'). */
   code?: string
+  /** Failure message when status is 'failed' (delivered again with the code). */
+  message?: string
 }
 
 /** reserved: Sequence persisted, submit may or may not have reached the ledger. sent: confirmed hash. failed: no money moved, or unknown (manual). */
@@ -48,8 +50,11 @@ export interface PoolStore {
   putDeposit(d: ExpectedDeposit): void
   getDeposit(txHash: string): ExpectedDeposit | undefined
   pendingDeposits(): ExpectedDeposit[]
-  /** True the first time a hash is credited, false ever after. */
-  markCredited(txHash: string): boolean
+  /**
+   * Credits an expected deposit: marks its hash credited and the deposit 'received' in one atomic step.
+   * True the first time, false ever after, and false (nothing marked) when no deposit is expected for that hash.
+   */
+  creditDeposit(txHash: string): boolean
   isCredited(txHash: string): boolean
   putPayout(p: PayoutRecord): void
   getPayout(intentId: string): PayoutRecord | undefined
@@ -70,9 +75,11 @@ export function createMemoryPoolStore(): PoolStore {
     putDeposit: (d) => void deposits.set(d.txHash, structuredClone(d)),
     getDeposit: (h) => copy(deposits.get(h)),
     pendingDeposits: () => [...deposits.values()].filter((d) => d.status === 'pending').map((d) => structuredClone(d)),
-    markCredited(h) {
-      if (credited.has(h)) return false
+    creditDeposit(h) {
+      const d = deposits.get(h)
+      if (!d || credited.has(h)) return false
       credited.add(h)
+      deposits.set(h, { ...d, status: 'received' })
       return true
     },
     isCredited: (h) => credited.has(h),
@@ -87,7 +94,7 @@ export function createMemoryPoolStore(): PoolStore {
 
 // better-sqlite3 ships no types and @types/better-sqlite3 is not installed; type the few calls used here locally.
 type Statement = { run(...p: unknown[]): { changes: number }; get(...p: unknown[]): unknown; all(...p: unknown[]): unknown[] }
-type Database = { pragma(s: string): unknown; exec(sql: string): unknown; prepare(sql: string): Statement; close(): void }
+type Database = { pragma(s: string): unknown; exec(sql: string): unknown; prepare(sql: string): Statement; transaction<A extends unknown[], R>(fn: (...a: A) => R): (...a: A) => R; close(): void }
 type DatabaseCtor = new (path: string) => Database
 
 export function createSqlitePoolStore(path: string): PoolStore {
@@ -116,11 +123,18 @@ export function createSqlitePoolStore(path: string): PoolStore {
   }
   const one = <T>(row: unknown): T | undefined => (row ? (JSON.parse((row as { data: string }).data) as T) : undefined)
   const all = <T>(rows: unknown[]): T[] => rows.map((r) => JSON.parse((r as { data: string }).data) as T)
+  // One transaction: a crash can never leave a deposit credited but still pending.
+  const creditDeposit = db.transaction((h: string): boolean => {
+    const d = one<ExpectedDeposit>(q.getDeposit.get(h))
+    if (!d || q.credit.run(h, Date.now()).changes !== 1) return false
+    q.putDeposit.run(h, 'received', JSON.stringify({ ...d, status: 'received' }))
+    return true
+  })
   return {
     putDeposit: (d) => void q.putDeposit.run(d.txHash, d.status, JSON.stringify(d)),
     getDeposit: (h) => one<ExpectedDeposit>(q.getDeposit.get(h)),
     pendingDeposits: () => all<ExpectedDeposit>(q.pending.all()),
-    markCredited: (h) => q.credit.run(h, Date.now()).changes === 1,
+    creditDeposit,
     isCredited: (h) => Boolean(q.isCredited.get(h)),
     putPayout: (p) => void q.putPayout.run(p.intentId, JSON.stringify(p)),
     getPayout: (id) => one<PayoutRecord>(q.getPayout.get(id)),
