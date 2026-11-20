@@ -12,6 +12,7 @@ import type { Logger } from '../../core'
 import { users } from '../../users'
 import { wiringFor } from '../../wiring'
 import { cardCtx } from './context'
+import { waitForResult } from './lithic-api'
 import { cardBalanceOf, cardSync, mountCard, registerCard } from './index'
 import { enrollCardWebhook } from './setup'
 
@@ -87,6 +88,34 @@ export async function liveCheck(o: { port: number; zeccaRoot: string }): Promise
     const d = (await call('GET', '/v1/card', token)).body
     say(`card balance ${d.balanceMinor}; payments: ${d.authorizations.map((a: { status: string; amountMinor: number; merchant: string }) => `${a.merchant} ${a.amountMinor} ${a.status}`).join(', ')}`)
     for (const h of ctx.store.holdsOf(userId, 5)) say(`  ${h.authToken.slice(0, 8)}… ${h.status} settle=${h.settleTx ? h.settleTx.slice(0, 12) + '…' : (h.settleError ?? '-')}`)
+
+    // After the purchase: a void and a return straight from Lithic, picked up by the poller.
+    const lithic = ctx.lithic!
+    const v = await ctx.gate.run(() => lithic.simulateAuthorize({ amount: 300, descriptor: 'CAFFE BRUNO', pan: secret.pan }))
+    const vtx = await waitForResult(lithic, v.token)
+    say(`void target: Lithic ${vtx.status} ${vtx.result}`)
+    let voided = false
+    for (let i = 0; i < 5 && !voided; i++) {
+      try {
+        await ctx.gate.run(() => lithic.simulateVoid({ token: v.token }))
+        voided = true
+      } catch (e) {
+        say(`void attempt ${i + 1}: ${(e as Error).message}`)
+        await sleep(2000)
+      }
+    }
+    const ret = await ctx.gate.run(() => lithic.simulateReturn({ amount: 250, descriptor: 'SETTE ARCHI', pan: secret.pan }))
+    for (let i = 0; i < 10; i++) {
+      await sleep(1500)
+      await cardSync(app.core)
+      const hs = ctx.store.holdsOf(userId, 5)
+      if (hs.some((h) => h.authToken === v.token && h.status === 'voided') && hs.some((h) => h.status === 'refunded')) break
+    }
+    const vt = await lithic.getTransaction(v.token)
+    const rt = await lithic.getTransaction(ret.token)
+    say(`void: Lithic ${vt?.status} [${(vt?.events ?? []).map((e) => `${e.type}:${e.amount}`).join(',')}]; return: Lithic ${rt?.status} [${(rt?.events ?? []).map((e) => `${e.type}:${e.amount}`).join(',')}]`)
+    const d2 = (await call('GET', '/v1/card', token)).body
+    say(`after void and return: card balance ${d2.balanceMinor}; payments: ${d2.authorizations.map((a: { status: string; amountMinor: number; merchant: string }) => `${a.merchant} ${a.amountMinor} ${a.status}`).join(', ')}`)
   } finally {
     server.close()
     await w.poolWorker.stop().catch(() => {})

@@ -397,3 +397,36 @@ describe('after the purchase: clearing, voids and returns from Lithic (poller)',
     expect(a.body.approved).toBe(true)
   })
 })
+
+describe('integration: the real mock ledger and pool worker', () => {
+  it('load through the pool, an approved purchase settled pool -> card settlement on the ledger', async () => {
+    const { createMockEnvironment } = await import('@zecca/ledger-mock')
+    const { createMemoryPoolStore, createPoolWorker } = await import('@zecca/pool-worker')
+    const { eventually } = await import('../../testing/harness')
+    const env = createMockEnvironment()
+    const pool = createPoolWorker({ ledger: env.ledger, keystore: env.keystore, store: createMemoryPoolStore(), log: () => {}, pollMs: 1e9, lagMonitor: false })
+    const h = makeHarness({ env: { FEATURE_CARD: '1' }, ledger: env.ledger as never, keystore: env.keystore, pool: pool as never })
+    const lithic = createFakeLithic()
+    mountCard(h.app, h.app.core, { lithic, simulateGapMs: 0, pollMs: 0 })
+    registerCard(h.app.core)
+    lithic.asa = async (body) => (await asa(h, lithic, body)).body.result
+    await pool.start()
+    const ana = await h.signUp('ana', { displayName: 'Ana Ferri' })
+    users.setTier(h.app.core, ana.user.id, 1)
+    await h.json('POST', '/v1/card', { token: ana.token })
+    const l = await h.json('POST', '/v1/card/load', { token: ana.token, body: { amountMinor: 2000 } })
+    expect((await h.submit(ana, l.body.prepared)).body.status).toBe('validated')
+    await eventually(() => expect(cardBalanceOf(h.app.core, ana.user.id)).toBe(2000), 5000)
+    const settlement = env.keystore.getWallet('cardSettlement').address
+    const before = env.ledger.mock.balances(settlement).spendableMinor + env.ledger.mock.balances(settlement).inboxMinor
+    const r = await h.json('POST', '/v1/dev/card/simulate', { token: ana.token, body: { amountMinor: 1200, merchantName: 'Sette Archi' } })
+    expect(r.body.approved).toBe(true)
+    await eventually(() => {
+      const b = env.ledger.mock.balances(settlement)
+      expect(b.spendableMinor + b.inboxMinor - before).toBe(1200)
+    }, 5000)
+    expect(env.ledger.mock.balances(ana.user.address).spendableMinor).toBe(3000)
+    await h.app.core.idle()
+    await pool.stop()
+  })
+})

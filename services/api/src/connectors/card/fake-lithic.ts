@@ -120,8 +120,9 @@ export function createFakeLithic(o: { secret?: string } = {}): FakeLithic {
       check('simulateVoid')
       const tx = f.txs.get(token)
       if (!tx || tx.status !== 'PENDING') throw new LithicError(400, 'not voidable')
+      // As observed on the sandbox (2026-11-20): status VOIDED, an AUTHORIZATION_REVERSAL event with a negative amount.
       tx.status = 'VOIDED'
-      tx.events = [...(tx.events ?? []), { token: `ev-${++n}`, type: 'VOID', amount: tx.amount, result: 'APPROVED' }]
+      tx.events = [...(tx.events ?? []), { token: `ev-${++n}`, type: 'AUTHORIZATION_REVERSAL', amount: -(tx.amount ?? 0), result: 'APPROVED' }]
     },
     async simulateReturn({ amount, descriptor, pan }) {
       check('simulateReturn')
@@ -136,7 +137,8 @@ export function createFakeLithic(o: { secret?: string } = {}): FakeLithic {
         amount,
         amounts: { cardholder: { amount } },
         merchant: { descriptor },
-        events: [{ token: `ev-${++n}`, type: 'RETURN', amount, result: 'APPROVED' }],
+        // As observed on the sandbox: status SETTLED, one RETURN event with a negative amount.
+        events: [{ token: `ev-${++n}`, type: 'RETURN', amount: -amount, result: 'APPROVED' }],
         created: new Date().toISOString(),
       })
       return { token }
