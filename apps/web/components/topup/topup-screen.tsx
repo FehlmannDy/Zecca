@@ -35,6 +35,10 @@ export function TopupScreen() {
   const widget = useRef<MoonPayWidget | null>(null)
   /** Recent events, replayed after a demo credit starts: its events can arrive before the POST answers. */
   const recent = useRef<ZeccaEvent[]>([])
+  const phase = useRef(state)
+  phase.current = state
+  /** Activity rows already there when the purchase started: polling (no live stream) only looks at newer ones. */
+  const before = useRef<Set<string> | null>(null)
 
   const onEvent = useCallback(
     (e: ZeccaEvent) => {
@@ -45,12 +49,35 @@ export function TopupScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   )
-  const onPoll = useCallback(() => balance.refresh(), []) // eslint-disable-line react-hooks/exhaustive-deps
+  const onPoll = useCallback(() => {
+    balance.refresh()
+    const s = phase.current
+    if ((s.phase !== 'waiting' && s.phase !== 'arriving') || (!s.intentId && !before.current)) return
+    api
+      .call('activity', { query: { limit: 20 } })
+      .then((p) => {
+        const seen = before.current
+        dispatch({ type: 'activity', items: s.intentId || !seen ? p.items : p.items.filter((x) => !seen.has(x.id)) })
+      })
+      .catch(() => {}) // the next poll tries again
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useLiveEvents(onEvent, onPoll)
 
   const failWith = (e: unknown) => {
     if (isApiError(e) && e.code === 'limit_reached') setLimit(e.details ?? {})
     else setError(e instanceof Error ? e.message : 'Something went wrong. Try again.')
+  }
+
+  /** The purchase started (MoonPay calls back on created and completed: only the first counts). */
+  function purchased(amountMinor: number) {
+    if (phase.current.phase === 'choose') {
+      before.current = null
+      api
+        .call('activity', { query: { limit: 20 } })
+        .then((p) => (before.current = new Set(p.items.map((x) => x.id))))
+        .catch(() => {}) // without it, only the live stream moves the screen on
+    }
+    dispatch({ type: 'purchased', amountMinor })
   }
 
   async function openMoonPay() {
@@ -68,18 +95,18 @@ export function TopupScreen() {
         // The SDK could not load (blocked script): the signed URL works on its own in a new tab.
         window.open(s.widgetUrl, '_blank', 'noopener')
         setExternalTab(true)
-        dispatch({ type: 'purchased', amountMinor })
+        purchased(amountMinor)
         return
       }
-      const purchased = async () => dispatch({ type: 'purchased', amountMinor })
+      const onPurchase = async () => purchased(amountMinor)
       const w = sdk.init({
         flow: 'buy',
         environment: sdkEnvironment(s.widgetUrl),
         variant: 'overlay',
         params: s.params!,
         handlers: {
-          onTransactionCreated: purchased,
-          onTransactionCompleted: purchased,
+          onTransactionCreated: onPurchase,
+          onTransactionCompleted: onPurchase,
           onUnsupportedRegion: async () => {
             try {
               w.close?.()

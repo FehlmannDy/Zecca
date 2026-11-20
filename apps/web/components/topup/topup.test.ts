@@ -86,6 +86,26 @@ describe('after the purchase: live events', () => {
     expect(run(s, ev.activity({ intentId: 'int_demo', amountMinor: 5000 }))).toMatchObject({ phase: 'done', amountMinor: 5000 })
   })
 
+  it("a later MoonPay callback (onTransactionCompleted after onTransactionCreated) never sends a finished screen back to waiting", () => {
+    const done = run(waiting, ev.intent({ status: 'paid_out' }))
+    expect(done.phase).toBe('done')
+    expect(topupReducer(done, { type: 'purchased', amountMinor: 5000 })).toEqual(done)
+    const arriving = run(waiting, ev.intent({ status: 'submitted' }))
+    expect(topupReducer(arriving, { type: 'purchased', amountMinor: 5000 })).toEqual(arriving)
+    expect(topupReducer(waiting, { type: 'purchased', amountMinor: 5000 })).toEqual(waiting)
+  })
+
+  it('without the live stream, the activity the screen polls moves it on (new rows only, the newest top-up, then the tracked one)', () => {
+    const poll = (s: TopupState, items: Activity[]) => topupReducer(s, { type: 'activity', items })
+    const later = '2026-11-21T09:01:00.000Z'
+    const arriving = poll(waiting, [activity({ kind: 'p2p', intentId: 'int_p' }), activity({ intentId: 'int_old', status: 'pending' }), activity({ intentId: 'int_1', status: 'pending', at: later })])
+    expect(arriving).toMatchObject({ phase: 'arriving', intentId: 'int_1', amountMinor: 2852 })
+    expect(poll(arriving, [activity({ intentId: 'int_2', status: 'done', at: later })])).toEqual(arriving)
+    expect(poll(arriving, [activity({ intentId: 'int_1', status: 'done', at: later })])).toMatchObject({ phase: 'done', intentId: 'int_1' })
+    expect(poll(waiting, [activity({ direction: 'out' }), activity({ kind: 'p2p' })])).toEqual(waiting)
+    expect(poll(initialTopup, [activity({})])).toEqual(initialTopup)
+  })
+
   it('reset goes back to choosing an amount', () => {
     expect(topupReducer(run(waiting, ev.activity({})), { type: 'reset' })).toEqual(initialTopup)
   })
