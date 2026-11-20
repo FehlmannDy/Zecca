@@ -17,8 +17,7 @@ import { useApp } from '@/lib/app'
 import { cn } from '@/lib/cn'
 import { sessionStore, useSession } from '@/lib/session'
 import { useMediaQuery } from '@/lib/use-media'
-import { signAndSubmit } from '@/lib/wallet/sign-and-submit'
-import { formatBirthDate, liftedLimitsLine, needsFreshApproval, nextPollMs, POLL_MS, viewOf, walletLink, WALLETS, type View, type WalletId } from './flow'
+import { approveIdentity, formatBirthDate, liftedLimitsLine, nextPollMs, POLL_MS, viewOf, walletLink, WALLETS, type View, type WalletId } from './flow'
 
 type Session = z.output<typeof IdentitySession>
 type Phase = { kind: 'intro' } | { kind: 'starting' } | { kind: 'start-failed'; message: string } | { kind: 'session'; session: Session; view: View; pollError?: string }
@@ -32,6 +31,8 @@ export function IdentityScreen() {
   const [phase, setPhase] = useState<Phase>({ kind: 'intro' })
   const [approveOpen, setApproveOpen] = useState(false)
   const autoOpened = useRef<string | null>(null)
+  /** The session whose approval was already pressed once: a retry asks the server again instead of resending a used one. */
+  const attempted = useRef<string | null>(null)
 
   const start = useCallback(async () => {
     setPhase({ kind: 'starting' })
@@ -88,15 +89,24 @@ export function IdentityScreen() {
 
   async function approve(): Promise<ApproveOutcome> {
     if (phase.kind !== 'session' || phase.view.kind !== 'approve') throw new Error('Start the identity check again.')
-    let prepared = phase.view.prepared
-    if (needsFreshApproval(prepared, Date.now())) {
-      const fresh = viewOf(await api.call('identitySessionGet', { params: { id: phase.session.id } }))
-      if (fresh.kind !== 'approve') throw new Error(fresh.kind === 'failed' ? fresh.message : 'Start the identity check again.')
-      prepared = fresh.prepared
-    }
-    const signer = await getSigner()
-    const res = await signAndSubmit(api, signer, prepared)
-    if (res.user) sessionStore().update({ user: res.user })
+    const id = phase.session.id
+    const retry = attempted.current === id
+    attempted.current = id
+    const lifted = await approveIdentity(
+      {
+        session: () => api.call('identitySessionGet', { params: { id } }),
+        submit: async (p) => {
+          const { tx_blob } = await (await getSigner()).sign(p.tx)
+          return api.call('txSubmit', { body: { prepareId: p.prepareId, txBlob: tx_blob } })
+        },
+        me: () => api.call('me'),
+        sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+        now: () => Date.now(),
+      },
+      phase.view.prepared,
+      retry,
+    )
+    sessionStore().update({ user: lifted })
     return { title: DONE, line: config ? liftedLimitsLine(config.limits) : undefined, announce: DONE }
   }
 
