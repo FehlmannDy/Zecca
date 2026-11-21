@@ -3,7 +3,7 @@
 // a clock while pending, the word "Failed" when it failed.
 import { Clock3, CreditCard, Gem, Plus, TrendingUp, Undo2, type LucideIcon } from 'lucide-react'
 import type { Activity } from '@zecca/contracts'
-import { activityLine, activityTitle } from '@/lib/activity'
+import { activityLineParts, activityTitle } from '@/lib/activity'
 import { cn } from '@/lib/cn'
 import { Amount } from './amount'
 import { Avatar, Skeleton } from './bits'
@@ -24,7 +24,7 @@ function RowAvatar({ activity, title }: { activity: Activity; title: string }) {
 
 export function ActivityRow({ activity, onOpen, className }: { activity: Activity; onOpen?: (a: Activity) => void; className?: string }) {
   const title = activityTitle(activity)
-  const line = activityLine(activity)
+  const line = activityLineParts(activity)
   const pending = activity.status === 'pending'
   const failed = activity.status === 'failed'
   const Tag = onOpen ? 'button' : 'div'
@@ -36,7 +36,13 @@ export function ActivityRow({ activity, onOpen, className }: { activity: Activit
       <RowAvatar activity={activity} title={title} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[15px] font-[660] text-ink">{title}</span>
-        <span className="mt-0.5 block truncate text-[13px] text-muted">{line}</span>
+        <span className="mt-0.5 flex min-w-0 text-[13px] text-muted">
+          {line.note && <span className="min-w-0 truncate">{line.note}</span>}
+          <span className={cn('whitespace-nowrap', line.note ? 'shrink-0' : 'truncate')}>
+            {line.note && '\u00a0·\u00a0'}
+            {line.when}
+          </span>
+        </span>
       </span>
       <span className={cn('flex shrink-0 items-center gap-1.5', failed && 'line-through decoration-muted')}>
         {pending && <Clock3 className="size-3.5 text-muted" aria-label="Pending" />}

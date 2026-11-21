@@ -28,12 +28,16 @@ export function activityWhen(iso: string, now = new Date()): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) })
 }
 
-export function activityLine(a: Activity, now = new Date()): string {
-  const parts: string[] = []
-  if (a.kind === 'welcome') parts.push('Welcome to Zecca')
-  else if (a.note) parts.push(a.note)
-  parts.push(activityWhen(a.at, now))
+/** The second line in two parts: the note (cut first on a narrow row) and when, with pending or failed. */
+export function activityLineParts(a: Activity, now = new Date()): { note?: string; when: string } {
+  const note = a.kind === 'welcome' ? 'Welcome to Zecca' : a.note || undefined
+  const parts = [activityWhen(a.at, now)]
   if (a.status === 'pending') parts.push(a.direction === 'in' ? 'Arriving' : 'Pending')
   if (a.status === 'failed') parts.push('Failed')
-  return parts.join(' · ')
+  return { ...(note ? { note } : {}), when: parts.join(' · ') }
+}
+
+export function activityLine(a: Activity, now = new Date()): string {
+  const { note, when } = activityLineParts(a, now)
+  return note ? `${note} · ${when}` : when
 }
