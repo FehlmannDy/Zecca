@@ -175,13 +175,13 @@ describe('submitAndWait: a submit whose answer was lost may still land, so it is
 
   it('at expiry a status that cannot be read is reported as unknown (SUBMIT_ERROR), never as tefMAX_LEDGER', async () => {
     const raw = fakeRaw({ submit: () => ({ engine_result: 'tesSUCCESS' }), tx: () => rippledError('tooBusy'), ledger: () => ({ ledger_index: 101 }) })
-    const r = await createClient('devnet', { raw, pollMs: 0 }).submitAndWait(blob(100))
+    const r = await createClient('devnet', { raw, pollMs: 0, retryMs: 0 }).submitAndWait(blob(100))
     expect(r).toMatchObject({ validated: false, engineResult: 'SUBMIT_ERROR' })
   })
 
   it('stops waiting after maxWaitMs when the ledger cannot be read at all, with an unknown outcome', async () => {
     const raw = fakeRaw({ submit: () => ({ engine_result: 'tesSUCCESS' }), tx: () => rippledError('tooBusy'), ledger: () => rippledError('tooBusy') })
-    const r = await createClient('devnet', { raw, pollMs: 1, maxWaitMs: 30 }).submitAndWait(blob(100))
+    const r = await createClient('devnet', { raw, pollMs: 1, maxWaitMs: 30, retryMs: 0 }).submitAndWait(blob(100))
     expect(r).toMatchObject({ validated: false, engineResult: 'SUBMIT_ERROR' })
   })
 })

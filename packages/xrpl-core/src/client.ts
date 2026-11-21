@@ -82,6 +82,9 @@ const errCode = (e: unknown) => (e as { data?: { error?: string } })?.data?.erro
 /** xrpl.js errors thrown when the socket is down or dropped mid-request. */
 const isConnectionError = (e: unknown) => ['NotConnectedError', 'DisconnectedError', 'ConnectionError'].includes(String((e as Error)?.name))
 const CONNECT_ATTEMPTS = 4
+/** rippled answers that say "this node cannot serve you right now"; nothing was applied, so another node may answer. */
+const UNHEALTHY_NODE = new Set(['amendmentBlocked', 'notSynced', 'noNetwork', 'noCurrent', 'noClosed', 'tooBusy'])
+const NODE_ATTEMPTS = 6
 
 export function createClient(network: Network, opts: CreateClientOptions = {}): XrplClient {
   const url = opts.url ?? NETWORK_URLS[network]
@@ -111,7 +114,7 @@ export function createClient(network: Network, opts: CreateClientOptions = {}): 
     return connecting
   }
   /** Connects first. A read whose socket dropped is retried once; a submit is not (see submitAndWait). */
-  const request = async (req: Record<string, unknown>) => {
+  const once = async (req: Record<string, unknown>) => {
     await connect()
     try {
       return await raw.request(req)
@@ -119,6 +122,21 @@ export function createClient(network: Network, opts: CreateClientOptions = {}): 
       if (!isConnectionError(e) || req.command === 'submit') throw e
       await connect()
       return raw.request(req)
+    }
+  }
+  /** One request. An unhealthy node (amendmentBlocked, notSynced, ...) is left: a new connection through the hub's
+   * load balancer reaches another node. Safe for a submit too: an unhealthy node applies nothing. */
+  const request = async (req: Record<string, unknown>) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await once(req)
+      } catch (e) {
+        const code = errCode(e)
+        if (!code || !UNHEALTHY_NODE.has(code) || attempt >= NODE_ATTEMPTS) throw e
+        log(`[xrpl ${network}] node answered ${code}; reconnecting to another node (try ${attempt})`)
+        await raw.disconnect().catch(() => {})
+        await sleep(retryMs * attempt)
+      }
     }
   }
   const ledgerIndex = async () => Number((await request({ command: 'ledger', ledger_index: 'validated' })).result.ledger_index)
