@@ -2,8 +2,8 @@
 // the issuance and the keys on Devnet + Testnet; the second run finds everything in place and creates nothing.
 import { afterAll, describe, expect, it } from 'vitest'
 import { createMemoryKeyStore } from '@zecca/keystore'
-import { createClient, fetchIssuance, fetchMPToken } from '@zecca/xrpl-core'
-import { bootstrapLedger, DEVNET_ROLES, RLUSD_CURRENCY_HEX, RLUSD_TESTNET_ISSUER } from './bootstrap-ledger'
+import { createClient, fetchIssuance, fetchMPToken, listTickets } from '@zecca/xrpl-core'
+import { bootstrapLedger, DEVNET_ROLES, ISSUER_TICKETS, RLUSD_CURRENCY_HEX, RLUSD_TESTNET_ISSUER } from './bootstrap-ledger'
 
 const keystore = createMemoryKeyStore()
 const devnet = createClient('devnet')
@@ -37,6 +37,8 @@ describe('scripts/bootstrap-ledger', () => {
     expect((await fetchMPToken(devnet, shop, id))?.HolderEncryptionKey).toBe(keystore.getElGamal({ user: shop }).publicKey)
     const tl = await testnet.request({ command: 'account_lines', account: keystore.getWallet('testnetTreasury').address, peer: RLUSD_TESTNET_ISSUER, ledger_index: 'validated' })
     expect(tl.result.lines.map((l: { currency: string }) => l.currency)).toContain(RLUSD_CURRENCY_HEX)
+    expect(r.created).toContain(`issuer tickets (${ISSUER_TICKETS})`)
+    expect(await listTickets(devnet, keystore.getWallet('issuer').address)).toHaveLength(ISSUER_TICKETS)
     // prints role names and addresses only
     expect(lines.join('\n')).not.toMatch(/\bs[1-9A-HJ-NP-Za-km-z]{25,34}\b/)
   })

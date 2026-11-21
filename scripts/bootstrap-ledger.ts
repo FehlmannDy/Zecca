@@ -3,6 +3,9 @@
 //   Testnet (faucet): testnetTreasury + RLUSD trust line to Ripple's testnet issuer
 //   CMPT issuance (Flags 32|128, TransferFee 0) + issuer encryption key; pool, demo shop and card settlement
 //   registered as confidential holders (authorize + key registered with a Convert of 0).
+//   ISSUER_TICKETS issuer Tickets, topped up on each run: the sign-up's welcome credit uses one, so a mint or another
+//   sign-up landing meanwhile cannot invalidate it. A TicketCreate moves the issuer's Sequence: run the top-up with the
+//   API and the pool worker stopped.
 // Checks the key store and the ledger first, so a second run creates nothing. Prints role names and addresses only.
 // Run from zecca/ (unsandboxed, the faucets need the network):
 //   node -r ./scripts/dev/dnsfix.cjs node_modules/tsx/dist/cli.mjs scripts/bootstrap-ledger.ts
@@ -13,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import xrpl from 'xrpl'
 import type { ElGamalKeyPair, ElGamalOwner, KeyStore, WalletRole } from '@zecca/contracts'
 import { openKeyStoreFromEnv } from '@zecca/keystore'
-import { buildConvert, createClient, fetchIssuance, fetchMPToken, fillTx, fund, generateWalletSecret, waitForAccount, walletFrom, type XrplClient } from '@zecca/xrpl-core'
+import { buildConvert, createClient, fetchIssuance, fetchMPToken, fillTx, fund, generateWalletSecret, listTickets, waitForAccount, walletFrom, type XrplClient } from '@zecca/xrpl-core'
 
 export const DEVNET_ROLES = ['sponsor', 'issuer', 'pool', 'relayer', 'cardSettlement', 'kycIssuer', 'marketIssuer', 'oracle', 'demoShop'] as const satisfies readonly WalletRole[]
 export const RLUSD_TESTNET_ISSUER = 'rQhWct2fv4Vc4KRjRgMrxa8xPN9Zx9iLKV'
@@ -21,6 +24,8 @@ export const RLUSD_TESTNET_ISSUER = 'rQhWct2fv4Vc4KRjRgMrxa8xPN9Zx9iLKV'
 export const RLUSD_CURRENCY_HEX = '524C555344000000000000000000000000000000'
 const CMPT_FLAGS = 32 | 128
 const CMPT_MAXIMUM = '1000000000'
+/** One per sign-up with a welcome credit; each holds 0.2 XRP of the issuer's reserve on Devnet (50: 10 XRP). */
+export const ISSUER_TICKETS = 50
 
 export type BootstrapOptions = { keystore: KeyStore; devnet?: XrplClient; testnet?: XrplClient; log?: (line: string) => void }
 
@@ -124,6 +129,13 @@ export async function bootstrapLedger(opts: BootstrapOptions): Promise<{ created
     await ensureHolder('pool', 'pool')
     await ensureHolder('demoShop', { user: keystore.getWallet('demoShop').address })
     await ensureHolder('cardSettlement', { user: keystore.getWallet('cardSettlement').address })
+
+    // ---- issuer tickets (sign-up welcome credit) ----
+    const tickets = (await listTickets(devnet, issuerAddress)).length
+    if (tickets < ISSUER_TICKETS) {
+      await submit(devnet, 'issuer', 'issuer tickets', { TransactionType: 'TicketCreate', TicketCount: ISSUER_TICKETS - tickets })
+      did(`issuer tickets (${ISSUER_TICKETS - tickets})`)
+    }
 
     for (const role of [...DEVNET_ROLES, 'testnetTreasury'] as const) log(`${role.padEnd(16)} ${keystore.getWallet(role).address}`)
     log(`${'cmptIssuanceId'.padEnd(16)} ${id}`)
