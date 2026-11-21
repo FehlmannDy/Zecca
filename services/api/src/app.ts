@@ -26,6 +26,7 @@ import { mountEarn, registerEarn } from './connectors/earn'
 import { mountMarket, registerMarket } from './connectors/market'
 import { mountIdentity, registerIdentity } from './connectors/identity'
 import { mountProofs, registerProofs } from './connectors/proofs'
+import { mountTill } from './connectors/till'
 import { registerSendHandler, wirePoolEvents } from './intents/flow'
 import { createJobs, type Jobs } from './jobs'
 import { recordCardActivity } from './books'
@@ -115,6 +116,7 @@ export function createApp(deps: AppDeps): ZeccaApp {
   mountEvents(app, core)
   mountDev(app, core)
   mountRamp(app, core, deps.ramp)
+  mountTill(app, core) // Zecca Till (apps/merchant-till): additive, always on
   // Phase 2: each connector stays dark (404 feature_off) until its FEATURE_* flag is on.
   if (deps.connectors !== false) {
     registerCard(core)
