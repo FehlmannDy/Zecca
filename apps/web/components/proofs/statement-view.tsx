@@ -1,16 +1,19 @@
 'use client'
 // The public statement page (/statement/[id]): each line with its ledger links, Zecca's signature and public key, and an
 // in-page "Check signature" that verifies it here, in the browser. Printable (print CSS hides the buttons).
+// On the mock ledger the hashes are simulated: no explorer links, and the page says so (statement-model.ts).
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Check, Download, Printer, ShieldCheck, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown, Download, Printer, RotateCw, ShieldCheck, X } from 'lucide-react'
 import * as rk from 'ripple-keypairs'
 import { formatUsd, type Network, type PublicConfig, type Statement } from '@zecca/contracts'
 import { useApp } from '@/lib/app'
 import { useResource } from '@/lib/hooks'
+import { useSession } from '@/lib/session'
 import { Button, HashChip, Skeleton } from '@/components/zecca/bits'
 import { Logo } from '@/components/zecca/wordmark'
 import { cn } from '@/lib/cn'
+import { ledgerCopy, missingAsNull } from './statement-model'
 import { checkSignature, signerStatus, statementFile, statementTotals, type SignatureCheck } from './statement-verify'
 
 type Line = Statement['lines'][number]
@@ -35,13 +38,23 @@ function saveJson(s: Statement) {
 
 export function StatementView({ id }: { id: string }) {
   const { api, config } = useApp()
-  const st = useResource(() => api.call('disclosureGet', { params: { id } }), [api, id])
+  const session = useSession()
+  const st = useResource(() => missingAsNull(api.call('disclosureGet', { params: { id } })), [api, id])
   const explorer = config?.explorer ?? FALLBACK_EXPLORER
+  // The holder who just created it gets a way back into the app (the logo goes to the landing page).
+  const owner = !!session?.user && !!st.data && st.data.holder.handle === session.user.handle
 
   return (
     <div className="min-h-dvh bg-paper text-ink print:bg-white">
       <style>{'@page { margin: 14mm } @media print { body { background: #fff !important } }'}</style>
       <div className="mx-auto w-full max-w-[880px] px-4 pb-16 pt-[max(20px,env(safe-area-inset-top))] print:px-0 print:pt-0">
+        {owner && (
+          <nav aria-label="Back" className="-ml-2 pb-2 print:hidden">
+            <Link href="/app/proofs" className="inline-flex min-h-11 items-center gap-1.5 rounded-[12px] px-2 text-[14px] font-[650] text-ink hover:bg-ink/[0.04]">
+              <ArrowLeft className="size-4" aria-hidden="true" /> Back to statements
+            </Link>
+          </nav>
+        )}
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
           <Link href="/" aria-label="Zecca" className="rounded-[10px]">
             <Logo />
@@ -64,22 +77,30 @@ export function StatementView({ id }: { id: string }) {
             <Skeleton className="h-4 w-72" />
             <Skeleton className="h-40 w-full" />
           </div>
-        ) : st.error || !st.data ? (
+        ) : st.error ? (
+          <div className="flex flex-col items-start gap-3 pt-12" role="alert">
+            <h1 className="text-[24px] font-[720]">This statement could not be loaded.</h1>
+            <p className="text-[15px] text-muted">{st.error}</p>
+            <Button variant="secondary" className="min-h-11 px-4 text-[14px]" onClick={st.reload}>
+              <RotateCw className="size-4" aria-hidden="true" /> Try again
+            </Button>
+          </div>
+        ) : !st.data ? (
           <div className="pt-12">
             <h1 className="text-[24px] font-[720]">This statement is not available.</h1>
             <p className="mt-2 text-[15px] text-muted">Check the link, or ask the person who shared it for a new one.</p>
           </div>
         ) : (
-          <StatementBody s={st.data} explorer={explorer} config={config} />
+          <StatementBody s={st.data} explorer={explorer} config={config} simulated={config?.ledgerMode === 'mock'} />
         )}
       </div>
     </div>
   )
 }
 
-function StatementBody({ s, explorer, config }: { s: Statement; explorer: PublicConfig['explorer']; config: PublicConfig | null | undefined }) {
+function StatementBody({ s, explorer, config, simulated }: { s: Statement; explorer: PublicConfig['explorer']; config: PublicConfig | null | undefined; simulated: boolean }) {
   const totals = useMemo(() => statementTotals(s), [s])
-  const proven = s.lines.filter((l) => l.amountProof).length
+  const copy = ledgerCopy(s, simulated)
   return (
     <article className="space-y-8 pt-6">
       <section className="flex flex-wrap items-end justify-between gap-4">
@@ -87,7 +108,6 @@ function StatementBody({ s, explorer, config }: { s: Statement; explorer: Public
           <p className="label-caps text-muted">Statement</p>
           <h1 className="mt-1 text-[28px] font-[720] leading-tight tracking-[-0.02em]">{s.holder.displayName}</h1>
           <p className="mt-1 text-[14.5px] text-muted">@{s.holder.handle}</p>
-          <p className="mt-1 break-all font-mono text-[12.5px] text-muted">{s.holder.address}</p>
         </div>
         <dl className="text-[13.5px] sm:text-right">
           <dt className="text-muted">Issued</dt>
@@ -108,20 +128,14 @@ function StatementBody({ s, explorer, config }: { s: Statement; explorer: Public
           <h2 id="lines-title" className="text-[18px] font-[700]">
             {totals.count} {totals.count === 1 ? 'payment' : 'payments'}
           </h2>
-          <p className="text-[14px] font-[620]">Anyone can check each line on the public ledger.</p>
+          <p className={cn('text-[14px]', simulated ? 'text-muted' : 'font-[620]')}>{copy.headline}</p>
         </div>
         <ol className="mt-3 divide-y divide-line rounded-[20px] border border-line bg-surface print:rounded-none">
           {s.lines.map((l) => (
-            <LineItem key={l.activityId} l={l} explorer={explorer} />
+            <LineItem key={l.activityId} l={l} explorer={copy.links ? explorer : null} />
           ))}
         </ol>
-        <p className="mt-3 text-[13.5px] text-muted">
-          {s.attestation === 'proof'
-            ? 'Amounts are hidden on the public ledger. Each amount here comes with a proof that the hidden amount in that transaction is exactly this one, so it can be checked without trusting Zecca.'
-            : proven > 0
-              ? `Amounts are hidden on the public ledger. ${proven} of ${totals.count} come with a proof that can be checked without trusting Zecca; the others are attested by Zecca.`
-              : 'Amounts are hidden on the public ledger, so they are attested by Zecca: its signature below covers every line. The links show that each payment happened.'}
-        </p>
+        <p className="mt-3 text-[13.5px] text-muted">{copy.amounts}</p>
       </section>
 
       <SignatureBlock s={s} config={config} />
@@ -138,7 +152,8 @@ function Total({ label, minor }: { label: string; minor: number }) {
   )
 }
 
-function LineItem({ l, explorer }: { l: Line; explorer: PublicConfig['explorer'] }) {
+/** `explorer` is null on the mock ledger: the hashes are simulated, so they are shown without a link. */
+function LineItem({ l, explorer }: { l: Line; explorer: PublicConfig['explorer'] | null }) {
   const hashes = [
     l.depositTxHash ? { label: l.direction === 'out' ? 'Your payment' : 'Payment in', hash: l.depositTxHash } : null,
     l.payoutTxHash ? { label: l.direction === 'out' ? 'Delivery' : 'Paid to you', hash: l.payoutTxHash } : null,
@@ -157,7 +172,7 @@ function LineItem({ l, explorer }: { l: Line; explorer: PublicConfig['explorer']
               <span key={h.hash} className="flex items-center gap-1.5 text-[12.5px] text-muted">
                 {h.label}
                 <span className="print:hidden">
-                  <HashChip value={h.hash} href={txHref(explorer, l.network, h.hash)} label="Copy transaction" />
+                  <HashChip value={h.hash} href={explorer ? txHref(explorer, l.network, h.hash) : undefined} label="Copy transaction" />
                 </span>
                 <span className="hidden font-mono text-[10px] print:inline">{h.hash}</span>
               </span>
@@ -218,26 +233,43 @@ function SignatureBlock({ s, config }: { s: Statement; config: PublicConfig | nu
             </p>
           ))}
       </div>
-      <dl className="mt-4 grid gap-x-4 gap-y-2 text-[13px] sm:grid-cols-[max-content_1fr]">
-        {signer && (
-          <>
-            <dt className="text-muted">{status === 'zecca' ? 'Zecca statement key' : 'Signing key'}</dt>
-            <dd className="break-all font-mono">{signer}</dd>
-          </>
-        )}
-        <dt className="text-muted">Public key</dt>
-        <dd className="break-all font-mono">{s.signature.publicKey}</dd>
-        <dt className="text-muted">Content fingerprint</dt>
-        <dd className="break-all font-mono">SHA-256 {s.signature.signedPayloadSha256}</dd>
-        <dt className="text-muted">Signature</dt>
-        <dd className="break-all font-mono text-[11.5px]">{s.signature.value}</dd>
-      </dl>
-      <p className="mt-4 text-[12px] leading-relaxed text-muted">
-        How to check it yourself: take this statement as JSON, remove the signature field, and write it as compact JSON with every object&apos;s keys sorted;
-        its SHA-256 is the fingerprint above, and the signature is an ECDSA {s.signature.alg} signature of that fingerprint, as made by ripple-keypairs. Amount proofs can be checked
-        against the public ledger with the open-source verifier in Zecca&apos;s repository (services/api/src/connectors/proofs/verify-cli.ts), with Zecca&apos;s statement key
-        pinned (--signer).
-      </p>
+      {/* The keys and the recipe are for whoever checks it by hand: folded on screen, printed in full. */}
+      <details className="group mt-3 print:hidden">
+        <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1.5 rounded-[12px] text-[14px] font-[650] text-ink [&::-webkit-details-marker]:hidden">
+          For developers <ChevronDown className="size-4 transition-transform duration-150 group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
+        </summary>
+        <TechnicalDetails s={s} signer={signer} status={status} />
+        <p className="mt-4 text-[12px] leading-relaxed text-muted">
+          How to check it yourself: take this statement as JSON, remove the signature field, and write it as compact JSON with every object&apos;s keys sorted;
+          its SHA-256 is the fingerprint above, and the signature is an ECDSA {s.signature.alg} signature of that fingerprint, as made by ripple-keypairs. Amount proofs can be checked
+          against the public ledger with the open-source verifier in Zecca&apos;s repository (services/api/src/connectors/proofs/verify-cli.ts), with Zecca&apos;s statement key
+          pinned (--signer).
+        </p>
+      </details>
+      <div className="mt-4 hidden print:block">
+        <TechnicalDetails s={s} signer={signer} status={status} />
+      </div>
     </section>
+  )
+}
+
+function TechnicalDetails({ s, signer, status }: { s: Statement; signer: string | undefined; status: ReturnType<typeof signerStatus> }) {
+  return (
+    <dl className="mt-2 grid gap-x-4 gap-y-2 text-[13px] sm:grid-cols-[max-content_1fr]">
+      <dt className="text-muted">Holder&apos;s ledger account</dt>
+      <dd className="break-all font-mono">{s.holder.address}</dd>
+      {signer && (
+        <>
+          <dt className="text-muted">{status === 'zecca' ? 'Zecca statement key' : 'Signing key'}</dt>
+          <dd className="break-all font-mono">{signer}</dd>
+        </>
+      )}
+      <dt className="text-muted">Public key</dt>
+      <dd className="break-all font-mono">{s.signature.publicKey}</dd>
+      <dt className="text-muted">Content fingerprint</dt>
+      <dd className="break-all font-mono">SHA-256 {s.signature.signedPayloadSha256}</dd>
+      <dt className="text-muted">Signature</dt>
+      <dd className="break-all font-mono text-[11.5px]">{s.signature.value}</dd>
+    </dl>
   )
 }
