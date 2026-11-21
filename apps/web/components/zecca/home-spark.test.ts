@@ -38,4 +38,8 @@ describe('balance sparkline label', () => {
     expect(sparkLabel([0, 5000, 7800], 'daily')).toBe('Balance by day, from $0.00 to $78.00')
     expect(sparkLabel([0, 5000], 'running')).toBe('Balance today, from $0.00 to $50.00')
   })
+  it('says when the end of the line includes money still arriving', () => {
+    expect(sparkLabel([0, 9000], 'running', 4000)).toBe('Balance today, from $0.00 to $90.00, including $40.00 arriving')
+    expect(sparkLabel([0, 5000], 'running', 0)).toBe('Balance today, from $0.00 to $50.00')
+  })
 })

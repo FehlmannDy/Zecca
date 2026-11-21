@@ -20,6 +20,8 @@ export function sparkGeometry(values: number[], { width = 100, height = 64, inse
   return { line, area: `${line}L${width} ${height}L0 ${height}Z`, end: { xPct: (last[0] / width) * 100, yPct: (last[1] / height) * 100 } }
 }
 
-export function sparkLabel(values: number[], mode: 'daily' | 'running'): string {
-  return `Balance ${mode === 'daily' ? 'by day' : 'today'}, from ${formatUsd(values[0])} to ${formatUsd(values[values.length - 1])}`
+/** The series ends at available + arriving (as the wide Peak Chart), so the label says when arriving money is in it. */
+export function sparkLabel(values: number[], mode: 'daily' | 'running', arrivingMinor = 0): string {
+  const base = `Balance ${mode === 'daily' ? 'by day' : 'today'}, from ${formatUsd(values[0])} to ${formatUsd(values[values.length - 1])}`
+  return arrivingMinor > 0 ? `${base}, including ${formatUsd(arrivingMinor)} arriving` : base
 }

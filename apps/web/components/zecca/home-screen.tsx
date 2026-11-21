@@ -96,7 +96,7 @@ export function HomeScreen() {
               Arriving: {formatUsd(b.pendingMinor)}
             </p>
           )}
-          {!wide && series && <BalanceSpark values={sparkValues} mode={series.mode} />}
+          {!wide && series && <BalanceSpark values={sparkValues} mode={series.mode} arrivingMinor={b.pendingMinor} account={session?.address} />}
           {tier0 && config && <p className="mt-4 border-t border-line pt-3 text-[13.5px] text-muted">{tierLine}</p>}
         </>
       )}

@@ -41,6 +41,9 @@ describe('count-up duration', () => {
     expect(countDuration(5000, 9000, false)).toBe(COUNT_CHANGE_MS)
     expect(COUNT_CHANGE_MS).toBeLessThan(COUNT_FIRST_MS)
   })
+  it('a first count that starts from a value seen before (back to Home) is a change, not a first load', () => {
+    expect(countDuration(5000, 4500, true)).toBe(COUNT_CHANGE_MS)
+  })
   it('does not animate when nothing changes, or under reduced motion', () => {
     expect(countDuration(5000, 5000, false)).toBe(0)
     expect(countDuration(0, 5000, true, true)).toBe(0)

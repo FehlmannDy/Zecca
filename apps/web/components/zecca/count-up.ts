@@ -15,9 +15,10 @@ export function countAt(from: number, to: number, elapsedMs: number, durationMs:
   return Math.round(from + (to - from) * easeOutCubic(elapsedMs / durationMs))
 }
 
+/** The first-load duration only for the first count up from zero; a first count from a value seen before is a change. */
 export function countDuration(from: number, to: number, first: boolean, reduced = false): number {
   if (reduced || from === to) return 0
-  return first ? COUNT_FIRST_MS : COUNT_CHANGE_MS
+  return first && from === 0 ? COUNT_FIRST_MS : COUNT_CHANGE_MS
 }
 
 /**
