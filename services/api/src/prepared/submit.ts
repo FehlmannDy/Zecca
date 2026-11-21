@@ -6,6 +6,7 @@ import type { Core } from '../core'
 import { Err } from '../errors'
 import { mount } from '../http'
 import type { Session } from '../auth/sessions'
+import { accountMaybeFree } from './account-gate'
 import { checkSubmission, markUsed, preparedUnknown, recordResult, settleRecorded, type PreparedRow, POLICY_COPY } from './store'
 
 export type SubmitHandler = {
@@ -63,6 +64,7 @@ export function mountSubmit(app: Hono, core: Core): void {
       throw Err.ledger(SUBMIT_UNCONFIRMED)
     }
     recordResult(core, p.id, r)
+    accountMaybeFree(core, p.address) // a merge postponed by this approval can run now
     const { ok, extra } = await finish(core, p, h, r, session!)
     return { status: ok ? ('validated' as const) : ('failed' as const), hash: r.hash, engineResult: r.engineResult, ...extra }
   })
@@ -101,6 +103,7 @@ export async function settleUnknownSubmits(core: Core): Promise<number> {
           : undefined
       if (!r || !settleRecorded(core, p.id, r)) continue
       core.log.info(`[submit] ${p.kind} ${p.id} settled from the ledger: ${r.engineResult}${r.hash ? ` tx=${r.hash}` : ''}`)
+      accountMaybeFree(core, p.address)
       await finish(core, p, h, r)
       n++
     } catch (err) {

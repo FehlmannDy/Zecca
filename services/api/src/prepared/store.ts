@@ -6,6 +6,7 @@ import { sha512Half } from '@zecca/xrpl-core/signer'
 import type { Core } from '../core'
 import { Err } from '../errors'
 import type { Session } from '../auth/sessions'
+import { preparing } from './account-gate'
 
 export type PreparedRow = {
   id: string
@@ -61,10 +62,18 @@ export function signingForm(tx: Record<string, unknown>, publicKey: string): { t
 /** Ledger close time is 3 to 4 s: the approval stays valid while LastLedgerSequence can still be met. */
 const MS_PER_LEDGER = 3_000
 
-export async function storePrepared(
+/**
+ * Stores a PreparedTx. Pass `tx` as its builder: it is then built inside the account gate, after the account's relayer merge in
+ * flight (so the Sequence is fresh), and no merge of that account starts until the row is stored (account-gate.ts).
+ */
+export function storePrepared(
   core: Core,
-  p: { address: string; publicKey: string; kind: TxKind; tx: UnsignedTx; intentId?: string },
+  p: { address: string; publicKey: string; kind: TxKind; tx: UnsignedTx | (() => Promise<UnsignedTx>); intentId?: string },
 ): Promise<PreparedTx> {
+  return preparing(core, p.address, async () => insertPrepared(core, { ...p, tx: typeof p.tx === 'function' ? await p.tx() : p.tx }))
+}
+
+async function insertPrepared(core: Core, p: { address: string; publicKey: string; kind: TxKind; tx: UnsignedTx; intentId?: string }): Promise<PreparedTx> {
   const { tx, unsignedBlob, signingHash } = signingForm(p.tx, p.publicKey)
   const lls = typeof tx.LastLedgerSequence === 'number' ? tx.LastLedgerSequence : undefined
   const now = core.now()

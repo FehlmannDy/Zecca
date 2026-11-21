@@ -143,10 +143,11 @@ export function mountIdentity(app: Hono, core: Core, o: { verifier?: IdentityVer
     if (p?.usedAt && !spent(core, p)) return undefined
     const live = p && !p.usedAt && Date.parse(p.expiresAt) > core.now() && (p.lastLedgerSequence === undefined || (await core.ledger.ledgerIndex()) <= p.lastLedgerSequence)
     if (p && live) return { prepareId: p.id, kind: p.kind, tx: p.tx as PreparedTx['tx'], expiresAt: p.expiresAt }
-    const tx = await core.ledger.prepareSponsored(
-      { TransactionType: 'CredentialAccept', Account: u.address, Issuer: kyc, CredentialType: CREDENTIAL_TYPE },
-      { reserve: true, publicKey: u.publicKey },
-    )
+    const tx = () =>
+      core.ledger.prepareSponsored(
+        { TransactionType: 'CredentialAccept', Account: u.address, Issuer: kyc, CredentialType: CREDENTIAL_TYPE },
+        { reserve: true, publicKey: u.publicKey },
+      )
     const prepared = await storePrepared(core, { address: u.address, publicKey: u.publicKey, kind: 'credential_accept', tx })
     setPrepareId(core, row.id, prepared.prepareId)
     return prepared

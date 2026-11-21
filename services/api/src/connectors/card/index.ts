@@ -69,14 +69,15 @@ async function createCardLoad(core: Core, user: UserRow, amountMinor: number): P
   const id = core.id('int')
   intents.insert(core, { id, kind: 'card_load', status: 'created', fromUserId: user.id, amountMinor, feeMinor: 0, note: 'Moved to your card' })
   try {
-    const tx = await core.ledger.buildSend({
-      from: user.address,
-      to: core.keystore.getWallet('pool').address,
-      amountMinor,
-      senderKey: core.keystore.getElGamal({ user: user.address }),
-      sponsored: true,
-      publicKey: user.publicKey,
-    })
+    const tx = () =>
+      core.ledger.buildSend({
+        from: user.address,
+        to: core.keystore.getWallet('pool').address,
+        amountMinor,
+        senderKey: core.keystore.getElGamal({ user: user.address }),
+        sponsored: true,
+        publicKey: user.publicKey,
+      })
     const prepared = await storePrepared(core, { address: user.address, publicKey: user.publicKey, kind: 'send', tx, intentId: id })
     intents.patch(core, id, { prepareId: prepared.prepareId, ciphertextPreview: ciphertextPreviewOf(prepared.tx) })
     return { intent: toIntent(intents.byId(core, id)!), prepared }

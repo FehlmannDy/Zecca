@@ -25,6 +25,7 @@ import { toUser, users, type UserRow } from '../../users'
 import { intents, toIntent, ZECCA } from '../../intents/repo'
 import { ciphertextPreviewOf, emitIntent } from '../../intents/flow'
 import { storePrepared } from '../../prepared/store'
+import { MergePostponed, mergeInbox, onAccountFree } from '../../prepared/account-gate'
 import { change24hPct, createFixtureFeed, createHttpFeed } from './feed'
 import { createOracleFeed } from './oracle'
 import { deliveryInvoiceId, ensureMetalIssuances, metalDelivery, METALS, metalIssuanceId, metalOf } from './metals'
@@ -200,7 +201,7 @@ async function placeBuy(core: Core, u: UserRow, symbol: MetalSymbol, issuanceId:
     // First purchase of this metal: the user opens their holding (reserve sponsored). The deposit comes after.
     let prepared: PreparedTx
     try {
-      const tx = await core.ledger.prepareSponsored({ TransactionType: 'MPTokenAuthorize', Account: u.address, MPTokenIssuanceID: issuanceId }, { reserve: true, publicKey: u.publicKey })
+      const tx = () => core.ledger.prepareSponsored({ TransactionType: 'MPTokenAuthorize', Account: u.address, MPTokenIssuanceID: issuanceId }, { reserve: true, publicKey: u.publicKey })
       prepared = await storePrepared(core, { address: u.address, publicKey: u.publicKey, kind: 'market_authorize', tx })
     } catch (e) {
       core.log.error(`[market] authorize for ${u.handle} ${symbol}: ${(e as Error).message}`)
@@ -215,14 +216,15 @@ async function placeBuy(core: Core, u: UserRow, symbol: MetalSymbol, issuanceId:
   orders.insert(core, { ...row, status: 'open', intentId })
   let prepared: PreparedTx
   try {
-    const tx = await core.ledger.buildSend({
-      from: u.address,
-      to: core.keystore.getWallet('pool').address,
-      amountMinor: q.amountMinor,
-      senderKey: core.keystore.getElGamal({ user: u.address }),
-      sponsored: true,
-      publicKey: u.publicKey,
-    })
+    const tx = () =>
+      core.ledger.buildSend({
+        from: u.address,
+        to: core.keystore.getWallet('pool').address,
+        amountMinor: q.amountMinor,
+        senderKey: core.keystore.getElGamal({ user: u.address }),
+        sponsored: true,
+        publicKey: u.publicKey,
+      })
     prepared = await storePrepared(core, { address: u.address, publicKey: u.publicKey, kind: 'send', tx, intentId })
     intents.patch(core, intentId, { prepareId: prepared.prepareId, ciphertextPreview: ciphertextPreviewOf(prepared.tx) })
     orders.setPrepare(core, orderId, prepared.prepareId)
@@ -252,10 +254,11 @@ async function placeSell(core: Core, u: UserRow, symbol: MetalSymbol, issuanceId
   orders.insert(core, { id: orderId, userId: u.id, symbol, side: 'sell', quantityMg: q.quantityMg, amountMinor: q.amountMinor, unitPriceMinor: q.unitPriceMinor, spreadMinor: q.spreadMinor, ...price, status: 'open', intentId })
   let prepared: PreparedTx
   try {
-    const tx = await core.ledger.prepareSponsored(
-      { TransactionType: 'Payment', Account: u.address, Destination: core.keystore.getWallet('marketIssuer').address, Amount: { mpt_issuance_id: issuanceId, value: String(q.quantityMg) } },
-      { publicKey: u.publicKey },
-    )
+    const tx = () =>
+      core.ledger.prepareSponsored(
+        { TransactionType: 'Payment', Account: u.address, Destination: core.keystore.getWallet('marketIssuer').address, Amount: { mpt_issuance_id: issuanceId, value: String(q.quantityMg) } },
+        { publicKey: u.publicKey },
+      )
     prepared = await storePrepared(core, { address: u.address, publicKey: u.publicKey, kind: 'market_sell', tx, intentId })
     intents.patch(core, intentId, { prepareId: prepared.prepareId })
     orders.setPrepare(core, orderId, prepared.prepareId)
@@ -274,6 +277,15 @@ export function registerMarket(core: Core, o: MarketOptions = {}): void {
   // Once per core: a second call only updates the options (it must not start a second issuance bootstrap).
   if (m.registered) return
   m.registered = true
+  // A sale's merge postponed by an open approval runs as soon as the seller's account is free.
+  onAccountFree(core, (address) => {
+    const u = users.byAddress(core, address)
+    if (!u) return
+    for (const o of orders.withStatus(core, 'done')) {
+      const i = o.side === 'sell' && o.userId === u.id && o.intentId ? intents.byId(core, o.intentId) : undefined
+      if (i?.status === 'paid_out' && !effectDone(core, `${i.id}:settled`)) core.track(runSale(core, i.id), 'market sale merge')
+    }
+  })
 
   core.submitHandlers.set('market_authorize', {
     before(core, p) {
@@ -461,8 +473,12 @@ async function paySale(core: Core, id: string): Promise<boolean> {
   }
   if (intents.byId(core, id)!.status !== 'paid_out' || effectDone(core, `${id}:settled`)) return true
   try {
-    await core.pool.mergeInboxFor(to.address)
+    await mergeInbox(core, to.address)
   } catch (e) {
+    if (e instanceof MergePostponed) {
+      core.log.info(`[market] merge for @${to.handle} after sale ${id} waits: an approval is open`)
+      return false
+    }
     core.log.warn(`[market] merge for @${to.handle} after sale ${id}: ${(e as Error).message}; the money stays pending and is merged later`)
     return false
   }

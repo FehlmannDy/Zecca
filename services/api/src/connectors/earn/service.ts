@@ -249,14 +249,15 @@ export function createEarn(core: Core, d: EarnDeps) {
     })()
     let prepared: PreparedTx
     try {
-      const tx = await core.ledger.buildSend({
-        from: user.address,
-        to: core.keystore.getWallet('pool').address,
-        amountMinor,
-        senderKey: core.keystore.getElGamal({ user: user.address }),
-        sponsored: true,
-        publicKey: user.publicKey,
-      })
+      const tx = () =>
+        core.ledger.buildSend({
+          from: user.address,
+          to: core.keystore.getWallet('pool').address,
+          amountMinor,
+          senderKey: core.keystore.getElGamal({ user: user.address }),
+          sponsored: true,
+          publicKey: user.publicKey,
+        })
       prepared = await storePrepared(core, { address: user.address, publicKey: user.publicKey, kind: 'send', tx, intentId: id })
       intents.patch(core, id, { prepareId: prepared.prepareId, ciphertextPreview: ciphertextPreviewOf(prepared.tx) })
     } catch (e) {

@@ -5,6 +5,7 @@ import { Err } from '../errors'
 import { addActivity, adjustBalance, claimEffect, emitActivity, emitBalance, getBalance } from '../books'
 import { checkIncoming, checkOutgoing } from '../limits'
 import { storePrepared, type PreparedRow } from '../prepared/store'
+import { MergePostponed, mergeInbox, onAccountFree } from '../prepared/account-gate'
 import { users, type UserRow } from '../users'
 import { intents, toIntent, ZECCA, type IntentRow } from './repo'
 import { claimRequest, markRequestPaid, releaseRequest } from '../paymentRequests/repo'
@@ -52,14 +53,15 @@ export async function createSendIntent(
   })
   let prepared: PreparedTx
   try {
-    const tx = await core.ledger.buildSend({
-      from: sender.address,
-      to: core.keystore.getWallet('pool').address,
-      amountMinor: o.amountMinor,
-      senderKey: core.keystore.getElGamal({ user: sender.address }),
-      sponsored: true,
-      publicKey: sender.publicKey,
-    })
+    const tx = () =>
+      core.ledger.buildSend({
+        from: sender.address,
+        to: core.keystore.getWallet('pool').address,
+        amountMinor: o.amountMinor,
+        senderKey: core.keystore.getElGamal({ user: sender.address }),
+        sponsored: true,
+        publicKey: sender.publicKey,
+      })
     prepared = await storePrepared(core, { address: sender.address, publicKey: sender.publicKey, kind: 'send', tx, intentId: id })
     intents.patch(core, id, { prepareId: prepared.prepareId, ciphertextPreview: ciphertextPreviewOf(prepared.tx) })
   } catch (e) {
@@ -150,6 +152,12 @@ export function wirePoolEvents(core: Core): void {
   core.pool.on('received', (e) => core.track(onReceived(core, e as Extract<PoolEvent, { type: 'received' }>), 'received'))
   core.pool.on('paidOut', (e) => core.track(onPaidOut(core, e as Extract<PoolEvent, { type: 'paidOut' }>), 'paidOut'))
   core.pool.on('failed', (e) => core.track(onFailed(core, e as Extract<PoolEvent, { type: 'failed' }>), 'failed'))
+  // A merge postponed by an open approval runs as soon as the account is free (one merge settles every payout in the inbox).
+  onAccountFree(core, (address) => {
+    const to = users.byAddress(core, address)
+    const first = to && intents.unsettled(core, to.id).find((x) => viaPayout(core, x))
+    if (first) core.track(settle(core, first.id), 'merge')
+  })
 }
 
 export async function onReceived(core: Core, e: Extract<PoolEvent, { type: 'received' }>): Promise<void> {
@@ -283,8 +291,12 @@ function settle(core: Core, id: string): Promise<void> {
     if (!batch.some((x) => x.id === id)) return true
     if (batch.some((x) => netOf(x) > 0)) {
       try {
-        await core.pool.mergeInboxFor(to.address)
+        await mergeInbox(core, to.address)
       } catch (err) {
+        if (err instanceof MergePostponed) {
+          core.log.info(`[intents] merge for ${to.handle} after ${id} waits: ${to.handle} has an approval open`)
+          return false
+        }
         core.log.warn(`[intents] merge for ${to.handle} after ${id} failed: ${(err as Error).message}; the money stays pending and is merged later`)
         return false
       }
