@@ -1,7 +1,7 @@
 'use client'
 // The till (UI.md §5.8): keypad, large amount, optional reference, "Charge". Then a full screen with the amount and
 // the QR code (and the NFC prompt on Android), the status from the request's public stream, and full-screen "Paid".
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Nfc, X } from 'lucide-react'
 import { formatUsd, spokenUsd, type PaymentRequest } from '@zecca/contracts'
 import { useApp } from '@/lib/app'
@@ -15,6 +15,8 @@ import { QrCode } from './qr-code'
 import { expiresIn, isAndroid, mergeRequest, nfcIntentUrl, tillPhase, tillStatusLine } from './till-model'
 import { useInterval, useRequestStream } from './use-request-stream'
 
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 const inputCls =
   'h-12 w-full rounded-[14px] border border-line bg-surface px-4 text-[16px] text-ink placeholder:text-muted/80 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--brass)]'
 
@@ -26,6 +28,7 @@ export function Till({ className }: { className?: string }) {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
   const [request, setRequest] = useState<PaymentRequest | null>(null)
+  const root = useRef<HTMLDivElement>(null)
   // Stable, so ChargeScreen's poll (and the effects that depend on it) do not change on every render.
   const onRequest = useCallback((r: PaymentRequest) => setRequest((c) => mergeRequest(c, r)), [])
 
@@ -47,18 +50,22 @@ export function Till({ className }: { className?: string }) {
     }
   }
 
-  function newCharge() {
+  /** Back to the keypad; from the keyboard, focus goes back to the amount (a tap would only pop the phone's keyboard). */
+  const newCharge = useCallback((fromKeyboard: boolean) => {
     setRequest(null)
     setText('')
     setMinor(null)
     setReference('')
     setError('')
-  }
+    if (fromKeyboard) requestAnimationFrame(() => root.current?.querySelector<HTMLInputElement>('input[inputmode="decimal"]')?.focus())
+  }, [])
 
   const phase = tillPhase(request, creating)
   return (
-    <div className={cn('mx-auto flex w-full max-w-[420px] flex-col items-center', className)}>
+    <div ref={root} className={cn('mx-auto flex w-full max-w-[420px] flex-col items-center', className)}>
       <AmountKeypad
+        // On a short phone (360x740) the keypad rows shrink so "Charge" clears the dock.
+        className="[@media(max-height:760px)]:[&_[role=group]>button]:h-12"
         value={text}
         onChange={(v, m) => {
           setText(v)
@@ -80,10 +87,34 @@ export function Till({ className }: { className?: string }) {
   )
 }
 
-function ChargeScreen({ request, onRequest, onNew }: { request: PaymentRequest; onRequest: (r: PaymentRequest) => void; onNew: () => void }) {
+function ChargeScreen({ request, onRequest, onNew }: { request: PaymentRequest; onRequest: (r: PaymentRequest) => void; onNew: (fromKeyboard: boolean) => void }) {
   const { api } = useApp()
   const phase = tillPhase(request, false)
   const open = phase === 'waiting' || phase === 'paying'
+  const dialog = useRef<HTMLDivElement>(null)
+  const paid = phase === 'paid'
+
+  // A modal over the till: focus moves into it (its "New charge" button autofocuses once settled) and Tab stays inside.
+  useEffect(() => {
+    const el = dialog.current
+    if (el && !el.contains(document.activeElement)) el.focus()
+  }, [paid, open])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = dialog.current
+      if (e.key !== 'Tab' || !el) return
+      const items = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((x) => x.offsetParent !== null)
+      if (items.length === 0) return e.preventDefault()
+      const [a, b] = [items[0], items[items.length - 1]]
+      const at = document.activeElement
+      if (!el.contains(at) || (e.shiftKey ? at === a || at === el : at === b)) {
+        e.preventDefault()
+        ;(e.shiftKey ? b : a).focus()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
   const [android, setAndroid] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const [cancelError, setCancelError] = useState('')
@@ -118,14 +149,21 @@ function ChargeScreen({ request, onRequest, onNew }: { request: PaymentRequest; 
   // Escape returns to the keypad only once nothing is pending.
   useEffect(() => {
     if (open) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onNew()
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onNew(true)
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open, onNew])
 
   if (phase === 'paid') {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[var(--in)] px-6 text-center motion-safe:animate-[z-fade-in_200ms_ease-out]" role="dialog" aria-modal="true" aria-label="Paid">
+      <div
+        ref={dialog}
+        tabIndex={-1}
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[var(--in)] px-6 text-center outline-none motion-safe:animate-[z-fade-in_200ms_ease-out]"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Paid"
+      >
         {/* Text in --paper on --in reads in both themes (white would not on the dark theme's light green). */}
         <div className="flex flex-col items-center text-[var(--paper)]" style={{ ['--in' as string]: 'var(--paper)', ['--line' as string]: 'color-mix(in srgb, var(--paper) 30%, transparent)' }}>
           <ArchesProgress state="done" className="h-14" label="Payment complete" />
@@ -137,7 +175,7 @@ function ChargeScreen({ request, onRequest, onNew }: { request: PaymentRequest; 
           </p>
           <button
             type="button"
-            onClick={onNew}
+            onClick={(e) => onNew(e.detail === 0)}
             autoFocus
             className="mt-10 inline-flex min-h-12 min-w-[220px] items-center justify-center rounded-[14px] bg-[var(--paper)] px-6 text-[15px] font-[700] text-[var(--ink)] hover:opacity-90"
           >
@@ -152,7 +190,14 @@ function ChargeScreen({ request, onRequest, onNew }: { request: PaymentRequest; 
   }
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-paper motion-safe:animate-[z-fade-in_200ms_ease-out]" role="dialog" aria-modal="true" aria-label={`Charge ${formatUsd(request.amountMinor)}`}>
+    <div
+      ref={dialog}
+      tabIndex={-1}
+      className="fixed inset-0 z-50 overflow-y-auto bg-paper outline-none motion-safe:animate-[z-fade-in_200ms_ease-out]"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Charge ${formatUsd(request.amountMinor)}`}
+    >
       <div className="mx-auto flex min-h-full w-full max-w-[440px] flex-col items-center px-5 pb-[max(24px,env(safe-area-inset-bottom))] pt-[max(16px,env(safe-area-inset-top))] text-center">
         <div className="flex w-full justify-end">
           {open ? (
@@ -202,7 +247,7 @@ function ChargeScreen({ request, onRequest, onNew }: { request: PaymentRequest; 
               {tillStatusLine(phase)}
             </p>
             {phase === 'expired' && <p className="mt-1.5 text-[15px] text-muted">The customer did not pay in time. Start a new charge.</p>}
-            <Button className="mt-8 min-w-[220px]" onClick={onNew} autoFocus>
+            <Button className="mt-8 min-w-[220px]" onClick={(e) => onNew(e.detail === 0)} autoFocus>
               New charge
             </Button>
           </div>

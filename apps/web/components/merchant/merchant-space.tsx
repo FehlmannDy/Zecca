@@ -93,7 +93,18 @@ function Space({ view }: { view: MerchantView }) {
               <p className="label-caps text-muted">{shown === 'charge' ? 'Till' : 'Sales'}</p>
               <h1 className="mt-2 text-[28px] font-[760] leading-tight tracking-[-0.035em] lg:text-[34px]">{name}</h1>
             </div>
-            {shown === 'charge' ? <Till className="pt-2" /> : <Sales wide={wide} />}
+            {shown === 'charge' ? (
+              wide ? (
+                // On a wide screen the keypad sits on a frosted panel, so the backdrop's lines do not cross the keys.
+                <Panel as="div" className="mx-auto max-w-[480px]" style={{ padding: 32 }}>
+                  <Till />
+                </Panel>
+              ) : (
+                <Till className="pt-2" />
+              )
+            ) : (
+              <Sales wide={wide} />
+            )}
           </main>
         )}
       </div>
