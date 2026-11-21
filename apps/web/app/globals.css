@@ -161,3 +161,43 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* The xrpl-connect web component (privy mode). Its launcher button would float on every page showing the account
+   address: Zecca has its own sign-in screens, so the host is hidden. Its sign-in window is portaled to <body> with
+   these variables forwarded, so it still opens, in Zecca's look (UI.md §2). */
+xrpl-wallet-connector {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  --xc-font-family: 'Manrope Variable', Manrope, system-ui, sans-serif;
+  --xc-border-radius: 14px;
+  --xc-modal-border-radius: 20px;
+  --xc-primary-color: var(--ink);
+  --xc-focus-color: var(--brass);
+  --xc-background-color: var(--surface);
+  --xc-background-secondary: var(--paper);
+  --xc-background-tertiary: var(--paper);
+  --xc-modal-background: var(--surface);
+  --xc-text-color: var(--ink);
+  --xc-text-muted-color: var(--muted);
+  --xc-danger-color: var(--alert);
+  --xc-overlay-background: rgb(12 12 13 / 0.45);
+  --xc-overlay-backdrop-filter: blur(6px);
+  --xc-modal-box-shadow: 0 24px 64px rgb(12 12 13 / 0.18);
+  --xc-primary-button-background: var(--ink);
+  --xc-primary-button-color: var(--paper);
+  --xc-primary-button-hover-background: var(--ink);
+  --xc-primary-button-border-radius: 14px;
+  --xc-primary-button-font-weight: 650;
+  --xc-secondary-button-background: var(--surface);
+  --xc-secondary-button-color: var(--ink);
+  --xc-secondary-button-hover-background: var(--paper);
+  --xc-secondary-button-border-radius: 14px;
+  --xc-secondary-button-font-weight: 650;
+  --xc-connect-button-background: var(--ink);
+  --xc-connect-button-color: var(--paper);
+  --xc-connect-button-border-radius: 14px;
+}

@@ -6,6 +6,9 @@ import type { WalletSigner } from './types'
 import { passkeyErrorMessage } from '../passkey/errors'
 import { patchPrivyIframeReady } from '../passkey/iframe-ready'
 
+/** Every manager.sign call follows an explicit Approve in Zecca's own sheet. */
+export const approvedInZecca = async () => true
+
 export type PrivyHandle = { manager: WalletManager; adapter: PrivyAdapter }
 
 let handle: Promise<PrivyHandle> | null = null
@@ -16,7 +19,10 @@ export function getPrivy(appId: string): Promise<PrivyHandle> {
   handle ??= (async () => {
     const [{ WalletManager }, { PrivyAdapter }] = await Promise.all([import('xrpl-connect'), import('@xrpl-commons/xrpl-connect-privy')])
     // timeoutMs: room for a Face ID check inside a signature (adapter default 15 s; the MFA handler gives up at 40 s).
-    const adapter = new PrivyAdapter({ appId, redirectUri: `${window.location.origin}/wallet/privy`, timeoutMs: 45_000 })
+    // transactionReview: Zecca's ApproveSheet is the review (amount, recipient, fee, then "Approve"), so the adapter's own
+    // generic dialog would only ask a second time. The user's Privy key still signs every transaction (raw_sign); only our
+    // code calls manager.sign, and only after that Approve. A Face ID check (passkey MFA) still prompts when enrolled.
+    const adapter = new PrivyAdapter({ appId, redirectUri: `${window.location.origin}/wallet/privy`, timeoutMs: 45_000, transactionReview: approvedInZecca })
     // Cold-cache sign-in race: the adapter pings Privy's iframe once, before it listens (lib/passkey/iframe-ready.ts).
     patchPrivyIframeReady(adapter)
     const manager = new WalletManager({ adapters: [adapter], network: 'devnet', autoConnect: false })
