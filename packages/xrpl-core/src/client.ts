@@ -84,7 +84,7 @@ const isConnectionError = (e: unknown) => ['NotConnectedError', 'DisconnectedErr
 const CONNECT_ATTEMPTS = 4
 /** rippled answers that say "this node cannot serve you right now"; nothing was applied, so another node may answer. */
 const UNHEALTHY_NODE = new Set(['amendmentBlocked', 'notSynced', 'noNetwork', 'noCurrent', 'noClosed', 'tooBusy'])
-const NODE_ATTEMPTS = 6
+const NODE_ATTEMPTS = 10
 
 export function createClient(network: Network, opts: CreateClientOptions = {}): XrplClient {
   const url = opts.url ?? NETWORK_URLS[network]
@@ -135,7 +135,8 @@ export function createClient(network: Network, opts: CreateClientOptions = {}): 
         if (!code || !UNHEALTHY_NODE.has(code) || attempt >= NODE_ATTEMPTS) throw e
         log(`[xrpl ${network}] node answered ${code}; reconnecting to another node (try ${attempt})`)
         await raw.disconnect().catch(() => {})
-        await sleep(retryMs * attempt)
+        // about 25 s in all at the default retryMs: during a network upgrade most nodes can be blocked at once
+        await sleep(Math.min(retryMs * attempt, 3 * retryMs))
       }
     }
   }
