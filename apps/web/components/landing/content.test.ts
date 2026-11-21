@@ -1,7 +1,11 @@
-// The landing and how-it-works copy: final strings from UI.md §5.1, Zecca's earnings from SPEC §4.13 (fees read from the
-// shared defaults), and SPEC §11 ("What Zecca must not claim") checked over every string the two pages show.
+// The landing and how-it-works copy: the product first (hero, the eight features), then privacy, the pool, the ledger
+// and Zecca's earnings (SPEC §4.13, fees read from the shared defaults). SPEC §11 ("What Zecca must not claim") is
+// checked over every string the two pages show, and no number on them is invented.
 import { describe, expect, it } from 'vitest'
-import { DEFAULTS } from '@zecca/contracts'
+import { DEFAULTS, FeatureName } from '@zecca/contracts'
+import { marketAssets, shopItems } from '@zecca/contracts/fixtures'
+import { formatUsd } from '@zecca/contracts'
+import { TOPUP_CHIPS } from '../topup/topup'
 import * as copy from './content'
 
 const strings = (v: unknown): string[] =>
@@ -22,21 +26,91 @@ describe('percentFromBps', () => {
   })
 })
 
-describe('landing copy (UI §5.1, final)', () => {
-  it('hero', () => {
-    expect(copy.HERO.title).toBe('Money that moves like a message. Private by default.')
-    expect(copy.HERO.sub).toBe('Sign in with an email. Pay with a tap. Your balance stays between you and the people you pay.')
+describe('hero: the product first', () => {
+  it('one money app on the XRP Ledger: pay, card, earn, metals', () => {
+    expect(copy.HERO.title).toBe('Pay, spend, earn and own gold. One app, on the XRP Ledger.')
+    expect(copy.HERO.sub).toMatch(/no seed phrase/i)
+    expect(copy.HERO.sub).toMatch(/no network fees/i)
+    expect(copy.HERO.sub).toMatch(/hidden on the public ledger/i)
     expect(copy.HERO.actions).toEqual([
       { label: 'Open the app', href: '/app' },
       { label: "I'm a merchant", href: '/merchant' },
     ])
   })
-  it('three facts', () => {
-    expect(copy.FACTS.map((f) => `${f.title} ${f.body}`)).toEqual([
-      'No seed phrase. Your key is created when you sign in, and only you can use it.',
-      'No network fees. Zecca sponsors every transaction.',
-      'Hidden amounts. The public ledger sees that a payment happened, not how much.',
+  it('the phone shows the welcome credit, one coffee and the balance they leave, nothing invented', () => {
+    const [coffee, credit] = copy.PHONE.activity
+    expect(credit.amountMinor).toBe(DEFAULTS.WELCOME_CREDIT_MINOR)
+    expect(credit.direction).toBe('in')
+    expect(coffee).toMatchObject({ name: copy.COFFEE.name, amountMinor: copy.COFFEE.amountMinor, direction: 'out' })
+    expect(copy.PHONE.balanceMinor).toBe(DEFAULTS.WELCOME_CREDIT_MINOR - copy.COFFEE.amountMinor)
+    expect(copy.PHONE.toast).toBe(`Paid. ${formatUsd(copy.COFFEE.amountMinor)} to ${copy.COFFEE.name}.`)
+    // Earn on the phone names the vault and that the rate moves, never a rate.
+    expect(strings(copy.PHONE.earn).join(' ')).not.toMatch(/\d/)
+  })
+})
+
+describe('features: the product, in the owner’s order', () => {
+  it('card, earn, metals, tap to pay, Face ID, identity, statements, add money', () => {
+    expect(copy.FEATURES.items.map((f) => f.title)).toEqual([
+      'Virtual card',
+      'Earn',
+      'Metals',
+      'Tap to pay',
+      'Face ID approvals',
+      'Verified identity',
+      'Statements with proofs',
+      'Add money',
     ])
+  })
+  it('each flagged feature reads a real flag of GET /v1/config, so the page can mark what is switched off', () => {
+    const flags = Object.fromEntries(copy.FEATURES.items.map((f) => [f.key, f.flag]))
+    expect(flags).toEqual({ card: 'card', earn: 'earn', metals: 'market', tap: undefined, faceid: 'passkey', identity: 'identity', proofs: 'proofs', topup: 'ramp' })
+    for (const f of copy.FEATURES.items) if (f.flag) expect(FeatureName.options).toContain(f.flag)
+  })
+  it('one line of benefit each, with no number in it (no rate, no invented figure)', () => {
+    for (const f of copy.FEATURES.items) {
+      expect(f.body.length).toBeLessThan(150)
+      expect(f.body).not.toMatch(/\d/)
+    }
+  })
+  it('says what each feature really is', () => {
+    const body = (k: string) => copy.FEATURES.items.find((f) => f.key === k)!.body
+    expect(body('card')).toMatch(/load it from your balance/i)
+    expect(body('card')).toMatch(/demo shop/i)
+    expect(body('card')).toMatch(/milliseconds/i)
+    expect(body('earn')).toMatch(/Firelight/)
+    expect(body('earn')).toMatch(/Flare/)
+    expect(body('earn')).toMatch(/paid in XRP/)
+    expect(body('earn')).toMatch(/varies/)
+    expect(body('earn')).toMatch(/one approval/i)
+    expect(body('metals')).toMatch(/gold, silver and palladium/i)
+    expect(body('metals')).toMatch(/published on the ledger/i)
+    expect(body('tap')).toMatch(/QR code/)
+    expect(body('faceid')).toMatch(/passkey/i)
+    expect(body('identity')).toMatch(/EU Digital Identity Wallet/)
+    expect(body('identity')).toMatch(/credential/i)
+    expect(body('proofs')).toMatch(/anyone can check each line on the public ledger/i)
+    expect(body('topup')).toMatch(/MoonPay/)
+  })
+  it('the small pictures use the demo’s own data: the shop’s first item, the three metals’ history, the top-up chips', () => {
+    expect(copy.FEATURE_ART.receipt).toEqual({ shop: 'Sette Archi', item: shopItems[0].name, amountMinor: shopItems[0].priceMinor, status: 'Approved' })
+    expect(copy.FEATURE_ART.metals.map((m) => m.symbol)).toEqual(['XAU', 'XAG', 'XPD'])
+    for (const m of copy.FEATURE_ART.metals) expect(m.history).toEqual(marketAssets.find((a) => a.symbol === m.symbol)!.history)
+    expect(copy.FEATURE_ART.topupChips).toEqual([...TOPUP_CHIPS])
+  })
+})
+
+describe('privacy, the pool, the ledger, the earnings', () => {
+  it('one coffee seen from both sides: you see the shop and the amount, everyone else an address, the pool and a sealed amount', () => {
+    expect(copy.PRIVACY.you).toMatchObject({ label: 'You see', name: 'Caffè Bruno', amountMinor: 450, status: 'Paid' })
+    expect(copy.PRIVACY.others).toEqual({ label: 'Everyone else sees', from: 'An address', to: 'Zecca pool', amount: 'Sealed' })
+  })
+  it('the sealed amount is drawn as the same hex block on the server and in the browser', () => {
+    const a = copy.sealedHex(450, 4, 8)
+    expect(a).toEqual(copy.sealedHex(450, 4, 8))
+    expect(a).toHaveLength(4)
+    for (const line of a) expect(line).toMatch(/^([0-9A-F]{4} ){7}[0-9A-F]{4}$/)
+    expect(copy.sealedHex(451, 4, 8)).not.toEqual(a)
   })
   it('the payment goes you -> Zecca pool -> merchant, and every hop shows the address and seals the amount', () => {
     expect(copy.PAYMENT.nodes.map((n) => n.label)).toEqual(['You', 'Zecca pool', 'Merchant'])
@@ -64,12 +138,12 @@ describe('landing copy (UI §5.1, final)', () => {
     expect(live).toContain(copy.percentFromBps(DEFAULTS.EARN_FEE_BPS))
     expect(copy.EARNINGS.note).toMatch(/free/i)
   })
-  it('footer', () => {
+  it('footer: the plain facts of where it runs', () => {
     expect(copy.FOOTER_LINE).toBe('Running on XRPL Devnet and Testnet. Built at the Italian XRPL Hackathon 2026.')
   })
 })
 
-describe('how it works (SPEC §2.1, §2.6, §11)', () => {
+describe('how it works (SPEC §2.1, §2.6)', () => {
   it('names the network of every step', () => {
     const steps = copy.NETWORK_ROWS.map((r) => r.step)
     for (const s of ['Sign up', 'Send and pay', 'Top up', 'Earn']) expect(steps).toContain(s)
@@ -77,15 +151,6 @@ describe('how it works (SPEC §2.1, §2.6, §11)', () => {
     expect(copy.NETWORK_ROWS.find((r) => r.step === 'Top up')!.network).toMatch(/Testnet/)
     expect(copy.NETWORK_ROWS.find((r) => r.step === 'Send and pay')!.network).toMatch(/Devnet/)
     expect(copy.NETWORK_ROWS.find((r) => r.step === 'Earn')!.network).toMatch(/Flare/)
-  })
-  it('states every honest limit of SPEC §11, including the timing one word for word', () => {
-    const limits = strings(copy.LIMITS).join(' ')
-    expect(limits).toContain('Timing can link a deposit to its payout.')
-    expect(limits).toMatch(/not non-custodial/i)
-    expect(limits).toMatch(/not anonymous/i)
-    expect(limits).toMatch(/Devnet and Testnet only/i)
-    expect(limits).toMatch(/not authorised under MiCA/i)
-    expect(limits).toMatch(/paid in XRP and (it )?varies/i)
   })
   it('links each proof to the explorer of its network', () => {
     expect(copy.PROOFS.length).toBeGreaterThanOrEqual(3)
@@ -96,10 +161,8 @@ describe('how it works (SPEC §2.1, §2.6, §11)', () => {
   })
 })
 
-describe('SPEC §11: no claim beyond what is true today', () => {
-  // The limits section states these on purpose, as negations; everything else must not make the claim at all.
-  const { LIMITS, ...rest } = copy
-  const shown = strings(rest).join('\n')
+describe('SPEC §11: no claim beyond what is true today, and no list of negatives', () => {
+  const shown = strings(copy).join('\n')
   it.each([
     ['non-custodial', /non-?custodial/i],
     ['anonymous', /anonym/i],
@@ -109,12 +172,19 @@ describe('SPEC §11: no claim beyond what is true today', () => {
   ])('never claims %s', (_, re) => {
     expect(shown).not.toMatch(re)
   })
+  it('has no "what we do not claim" section: the pages say what Zecca does', () => {
+    expect('LIMITS' in copy).toBe(false)
+    expect(shown).not.toMatch(/(does not|don.t|do not) claim|honest limits/i)
+  })
   it('uses no blockchain words outside the ledger explanations', () => {
-    const { BUILDING_BLOCKS, NETWORK_ROWS, PROOFS, POOL_MODEL, FACTS, ...plain } = rest
-    const text = strings(plain).join('\n') + '\n' + strings(FACTS.map((f) => f.body)).join('\n')
-    // "XRP Ledger" names the network (UI §5.1); XRP the coin is not mentioned.
+    const { BUILDING_BLOCKS, NETWORK_ROWS, PROOFS, POOL_MODEL, FEATURES, HERO, ...plain } = copy
+    // Two places say them on purpose: the hero's "no seed phrase" (the point is that there is none), and Earn, whose
+    // yield is paid in XRP (SPEC §11 asks for exactly that to be said).
+    const features = FEATURES.items.filter((f) => f.key !== 'earn')
+    const text = [...strings(plain), ...strings(features), FEATURES.title, HERO.title, HERO.sub.replace(/no seed phrase/i, '')].join('\n')
+    // "XRP Ledger" names the network (UI §5.1); XRP the coin is named only for Earn.
     expect(text).not.toMatch(/\b(seed|gas|trust ?line|wallet address)\b|\bXRP\b(?! Ledger)/i)
-    expect(LIMITS).toBeDefined()
+    expect(strings(BUILDING_BLOCKS).length + strings(NETWORK_ROWS).length + strings(PROOFS).length + strings(POOL_MODEL).length).toBeGreaterThan(0)
   })
   it('scopes "no smart contracts" to payments (Earn uses a Flare smart account) and keeps the building blocks plain', () => {
     expect(copy.LEDGER.intro).toMatch(/^Payments use no sidechain and no smart contracts/)

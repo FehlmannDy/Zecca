@@ -1,7 +1,10 @@
-// Copy for the landing page (/) and /how-it-works. UI.md §5.1 is final copy; the earnings come from SPEC §4.13 with the
-// fees read from the shared defaults; the limits are SPEC §11, word for word where it gives the words.
-// content.test.ts checks every string here against SPEC §11 ("What Zecca must not claim").
-import { DEFAULTS } from '@zecca/contracts'
+// Copy for the landing page (/) and /how-it-works. The landing leads with the product (hero, then the eight features),
+// then privacy, the pool, the ledger and the earnings (SPEC §4.13, fees read from the shared defaults).
+// Every number shown comes from the defaults or the demo's own data. content.test.ts checks every string here against
+// SPEC §11 ("What Zecca must not claim").
+import { DEFAULTS, formatUsd, type FeatureName } from '@zecca/contracts'
+import { marketAssets, shopItems } from '@zecca/contracts/fixtures'
+import { TOPUP_CHIPS } from '../topup/topup'
 
 /** 50 -> "0.5%". Integer arithmetic only. */
 export function percentFromBps(bps: number): string {
@@ -20,25 +23,110 @@ export const REPO_URL = 'https://github.com/FehlmannDy/Zecca'
 export const POOL_ADDRESS = 'rNwvGErbykbsfcRnmq6fXhqmrrL94WcZSZ'
 
 export const HERO = {
-  title: 'Money that moves like a message. Private by default.',
-  sub: 'Sign in with an email. Pay with a tap. Your balance stays between you and the people you pay.',
+  title: 'Pay, spend, earn and own gold. One app, on the XRP Ledger.',
+  sub: 'Sign in with an email and you are ready. No seed phrase, no network fees, and the amounts you move stay hidden on the public ledger.',
   actions: [
     { label: 'Open the app', href: '/app' },
     { label: "I'm a merchant", href: '/merchant' },
   ],
-  /** The two views of one payment, beside the hero. */
-  views: {
-    you: { label: 'You see', name: 'Caffè Bruno', note: 'Flat white and a cornetto', amountMinor: 450, status: 'Paid' },
-    others: { label: 'Everyone else sees', from: 'An address', to: 'Zecca pool', amount: 'Sealed' },
-  },
 } as const
 
-export type FactIcon = 'key' | 'sponsor' | 'sealed'
-export const FACTS: readonly { icon: FactIcon; title: string; body: string }[] = [
-  { icon: 'key', title: 'No seed phrase.', body: 'Your key is created when you sign in, and only you can use it.' },
-  { icon: 'sponsor', title: 'No network fees.', body: 'Zecca sponsors every transaction.' },
-  { icon: 'sealed', title: 'Hidden amounts.', body: 'The public ledger sees that a payment happened, not how much.' },
+/** The coffee of UI.md's voice line ("Paid. $4.50 to Caffè Bruno."), used by the phone and the privacy section. */
+export const COFFEE = { name: 'Caffè Bruno', initials: 'CB', note: 'Flat white and a cornetto', amountMinor: 450 } as const
+
+/** The Zecca home drawn in the hero: the welcome credit, one coffee, and the balance they leave. */
+export const PHONE = {
+  holder: 'Ana Ferri',
+  initials: 'AF',
+  balanceMinor: DEFAULTS.WELCOME_CREDIT_MINOR - COFFEE.amountMinor,
+  actions: ['Send', 'Pay', 'Top up', 'Request'],
+  /** UI.md §5.10's card ending. */
+  card: { title: 'Card', last4: '4417', action: 'Load' },
+  earn: { title: 'Earn', note: 'Firelight vault on Flare', rate: 'Variable rate' },
+  activity: [
+    { name: COFFEE.name, note: COFFEE.note, amountMinor: COFFEE.amountMinor, direction: 'out' },
+    { name: 'Demo credit', note: 'Welcome to Zecca', amountMinor: DEFAULTS.WELCOME_CREDIT_MINOR, direction: 'in' },
+  ],
+  dock: ['Home', 'Pay', 'Card', 'More'],
+  toast: `Paid. ${formatUsd(COFFEE.amountMinor)} to ${COFFEE.name}.`,
+} as const
+
+/** A flag of GET /v1/config. The pages mark a feature whose flag is off. */
+export type Feature = FeatureName
+export type FeatureKey = 'card' | 'earn' | 'metals' | 'tap' | 'faceid' | 'identity' | 'proofs' | 'topup'
+export type FeatureItem = { key: FeatureKey; flag?: Feature; title: string; body: string }
+const FEATURE_ITEMS: readonly FeatureItem[] = [
+  {
+    key: 'card',
+    flag: 'card',
+    title: 'Virtual card',
+    body: 'Load it from your balance, then check out by card in the demo shop. Every purchase is answered in milliseconds.',
+  },
+  {
+    key: 'earn',
+    flag: 'earn',
+    title: 'Earn',
+    body: 'Put dollars to work in the Firelight vault on Flare with one approval. The yield is paid in XRP and the rate varies.',
+  },
+  { key: 'metals', flag: 'market', title: 'Metals', body: 'Gold, silver and palladium by the gram, at a price published on the ledger.' },
+  { key: 'tap', title: 'Tap to pay', body: 'Hold your phone to the shop’s phone, or scan its QR code. Approve, and the shop sees "Paid".' },
+  { key: 'faceid', flag: 'passkey', title: 'Face ID approvals', body: 'Approve payments with Face ID or your fingerprint, through a passkey.' },
+  {
+    key: 'identity',
+    flag: 'identity',
+    title: 'Verified identity',
+    body: 'Share your name and date of birth from an EU Digital Identity Wallet. A credential on your account raises your limits.',
+  },
+  { key: 'proofs', flag: 'proofs', title: 'Statements with proofs', body: 'Pick payments for a signed statement. Anyone can check each line on the public ledger.' },
+  { key: 'topup', flag: 'ramp', title: 'Add money', body: 'Top up with MoonPay, by card or bank transfer. The money lands in your balance.' },
 ]
+export const FEATURES = {
+  title: 'One balance for everything you do with money.',
+  intro: 'Everything runs from the same balance, and nothing moves until you approve it.',
+  items: FEATURE_ITEMS,
+} as const
+
+const metal = (symbol: 'XAU' | 'XAG' | 'XPD', short: string) => {
+  const a = marketAssets.find((m) => m.symbol === symbol)!
+  return { symbol, short, name: a.name, history: a.history ?? [] }
+}
+/** What the small pictures show, from the demo's own data. */
+export const FEATURE_ART = {
+  receipt: { shop: 'Sette Archi', item: shopItems[0].name, amountMinor: shopItems[0].priceMinor, status: 'Approved' },
+  earn: { source: 'Firelight on Flare', rate: 'Variable rate' },
+  metals: [metal('XAU', 'Au'), metal('XAG', 'Ag'), metal('XPD', 'Pd')],
+  metalsNote: { unit: 'Per gram', source: 'Price on the ledger' },
+  tap: { done: 'Paid', or: 'Or scan the QR code' },
+  faceid: { action: 'Approve with Face ID' },
+  identity: { source: 'EU Digital Identity Wallet', status: 'Verified', fields: ['Name', 'Date of birth'], result: 'Limits raised' },
+  statement: { title: 'Statement', check: 'Checked on the ledger' },
+  topupChips: [...TOPUP_CHIPS] as number[],
+  topup: { action: 'Continue with MoonPay', methods: ['Card', 'Bank transfer'] },
+} as const
+
+export const PRIVACY = {
+  title: 'Private by default.',
+  intro: 'The ledger is public. Your amounts are not. Here is one coffee, seen from both sides.',
+  you: { label: 'You see', from: 'You', ...COFFEE, status: 'Paid' },
+  others: { label: 'Everyone else sees', from: 'An address', to: 'Zecca pool', amount: 'Sealed' },
+} as const
+
+/** A sealed amount drawn as a block of hex: `lines` lines of `groups` groups of four. Deterministic (same on the
+ *  server and in the browser), and only a picture: it is not the real ciphertext of anything. */
+export function sealedHex(seed: number, lines: number, groups: number): string[] {
+  let x = (seed * 2654435761) >>> 0 || 1
+  const next = () => {
+    x ^= x << 13
+    x >>>= 0
+    x ^= x >>> 17
+    x ^= x << 5
+    x >>>= 0
+    return x
+  }
+  return Array.from({ length: lines }, () =>
+    Array.from({ length: groups }, () => (next() & 0xffff).toString(16).toUpperCase().padStart(4, '0')).join(' '),
+  )
+}
 
 export const PAYMENT = {
   title: 'How a payment works',
@@ -63,7 +151,6 @@ export const PAYMENT = {
     },
   ],
   outcome: 'Someone watching sees two separate payments, one into the pool and one out of it. Never one from you to the merchant, and never an amount.',
-  caveat: 'Close timing can still link the two.',
 } as const
 
 export type BlockIcon = 'sponsor' | 'sealed' | 'batch' | 'credential'
@@ -126,7 +213,6 @@ export const HOW = {
     'Zecca is a payment account on the XRP Ledger. The public ledger sees that an account exists and that it pays; it does not see how much it holds or how much moves. Zecca does see amounts, like any payment company sees its customers’ payments.',
 } as const
 
-export type Feature = 'card' | 'earn' | 'market' | 'identity'
 /** SPEC §2.1: which network each step runs on. `feature` rows show whether that feature is switched on right now. */
 export const NETWORK_ROWS: readonly { step: string; network: string; what: string; feature?: Feature }[] = [
   {
@@ -178,19 +264,6 @@ export const POOL_MODEL = {
     'The pool opens each deposit with its own key and checks the amount before anything is credited. A deposit is credited once.',
     `"Paid" shows as soon as the deposit is validated, about 10 seconds. The payout follows in the background, minus any fee, which Zecca keeps in its own books (${percentFromBps(DEFAULTS.MERCHANT_FEE_BPS)} for merchants, nothing between people).`,
     'You sign every payment with your own key. Zecca’s sponsor co-signs only transactions Zecca prepared itself, once each.',
-  ],
-} as const
-
-/** SPEC §11. */
-export const LIMITS = {
-  title: 'What Zecca does not claim',
-  items: [
-    { title: 'Not non-custodial.', body: 'The key that signs your payments is yours, through Privy. The key that reads your amounts is held by Zecca.' },
-    { title: 'Not anonymous.', body: 'Addresses are public, amounts are hidden, and Zecca knows its customers.' },
-    { title: 'Devnet and Testnet only.', body: 'Sponsored accounts and confidential transfers are not on the XRP Ledger Mainnet yet.' },
-    { title: 'RLUSD is not authorised under MiCA in the EU today.', body: 'MoonPay’s widget says so itself.' },
-    { title: 'Earn has no fixed rate.', body: 'The yield comes from Firelight on Flare, is paid in XRP and varies.' },
-    { title: 'Timing can link a deposit to its payout.', body: 'A payout that follows its deposit by seconds can be guessed from timing.' },
   ],
 } as const
 

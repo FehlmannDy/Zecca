@@ -5,8 +5,8 @@ import { Logo } from '@/components/zecca/wordmark'
 import { FOOTER_LINE, REPO_URL } from './content'
 import { LinkButton } from './parts'
 
-/** `brand={false}` on the landing page, whose hero carries the wordmark. */
-export function SiteHeader({ brand = true }: { brand?: boolean }) {
+/** `sections`: in-page links (the landing's), shown from tablet width. `brand={false}` hides the logo. */
+export function SiteHeader({ brand = true, sections = [] }: { brand?: boolean; sections?: readonly { href: string; label: string }[] }) {
   return (
     <header className="sticky top-0 z-20 border-b border-line/70 backdrop-blur-md" style={{ background: 'color-mix(in srgb, var(--paper) 82%, transparent)' }}>
       <div className={`mx-auto flex h-16 w-full max-w-[1120px] items-center gap-3 px-4 sm:px-6 ${brand ? 'justify-between' : 'justify-end'}`}>
@@ -16,6 +16,11 @@ export function SiteHeader({ brand = true }: { brand?: boolean }) {
           </Link>
         )}
         <nav aria-label="Main" className="flex items-center gap-1 whitespace-nowrap sm:gap-2">
+          {sections.map((l) => (
+            <a key={l.href} href={l.href} className="hidden min-h-11 items-center rounded-[12px] px-3 text-[14.5px] font-[620] text-muted hover:text-ink md:inline-flex">
+              {l.label}
+            </a>
+          ))}
           {/* Below 380 px with the logo there is no room for both links: the logo leads home, "Open the app" stays. */}
           <Link href="/how-it-works" className={`${brand ? 'hidden min-[380px]:inline-flex' : 'inline-flex'} min-h-11 items-center rounded-[12px] px-2.5 text-[14.5px] font-[620] text-muted hover:text-ink sm:px-3`}>
             How it works
@@ -41,9 +46,6 @@ export function SiteFooter() {
         <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-2 text-[14px] font-[600]">
           <Link href="/how-it-works" className="text-muted hover:text-ink">
             How it works
-          </Link>
-          <Link href="/how-it-works#limits" className="text-muted hover:text-ink">
-            What we don’t claim
           </Link>
           <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-muted hover:text-ink">
             Source code (MIT)

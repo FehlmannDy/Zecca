@@ -1,6 +1,5 @@
 // "How a payment works" (UI §5.1): you -> Zecca pool -> merchant in line art, with what an outside observer sees under
 // each arrow. One DOM in reading order: a column on a phone, a row of five cells on wide screens.
-import Link from 'next/link'
 import { Eye } from 'lucide-react'
 import { LogoMark } from '@/components/zecca/wordmark'
 import { cn } from '@/lib/cn'
@@ -110,12 +109,6 @@ export function PoolDiagram() {
         <Node {...merchant} id="merchant" className="lg:col-start-5 lg:row-start-1" />
       </div>
       <p className="mx-auto mt-12 max-w-[62ch] text-center text-[17px] leading-[1.6] text-ink">{PAYMENT.outcome}</p>
-      <p className="mt-3 text-center text-[14px] text-muted">
-        {PAYMENT.caveat}{' '}
-        <Link href="/how-it-works#limits" className="font-[620] text-ink underline decoration-line underline-offset-4 hover:decoration-ink">
-          Read the limits
-        </Link>
-      </p>
     </div>
   )
 }

@@ -1,14 +1,13 @@
 // Small pieces shared by the landing page and /how-it-works. Line icons only: lucide at one weight, round caps.
 import Link from 'next/link'
 import type { ReactNode } from 'react'
-import { BadgeCheck, EyeOff, HandCoins, KeyRound, Layers, Lock, type LucideIcon } from 'lucide-react'
+import { BadgeCheck, HandCoins, Layers, Lock, type LucideIcon } from 'lucide-react'
 import { Arches } from '@/components/zecca/arches'
 import { cn } from '@/lib/cn'
-import type { BlockIcon, FactIcon } from './content'
+import type { BlockIcon } from './content'
 
 export const ICON_STROKE = 1.5
 
-export const FACT_ICONS: Record<FactIcon, LucideIcon> = { key: KeyRound, sponsor: HandCoins, sealed: EyeOff }
 export const BLOCK_ICONS: Record<BlockIcon, LucideIcon> = { sponsor: HandCoins, sealed: Lock, batch: Layers, credential: BadgeCheck }
 
 /** A line icon in a hairline circle. */
@@ -38,7 +37,7 @@ export function Section({ id, label, title, intro, children, className }: { id?:
       <h2 id={headingId} className="max-w-[24ch] text-[30px] font-[720] leading-[1.1] tracking-[-0.03em] text-ink md:text-[40px]">
         {title}
       </h2>
-      {intro && <p className="mt-4 max-w-[60ch] text-[16px] leading-[1.6] text-muted md:text-[17px]">{intro}</p>}
+      {intro && <p className="mt-4 max-w-[60ch] text-pretty text-[16px] leading-[1.6] text-muted md:text-[17px]">{intro}</p>}
       <div className="mt-10 md:mt-12">{children}</div>
     </section>
   )

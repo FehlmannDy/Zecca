@@ -1,26 +1,19 @@
-// The landing page (/), UI §5.1. Desktop first, one column on a phone. The arches divide the sections.
+// The landing page (/). The product first: the hero with the app on a phone, then the eight features. Then privacy
+// (one coffee seen from both sides), how a payment goes through the pool, the ledger underneath, and where Zecca
+// earns. Desktop first, one column on a phone. The arches divide the sections.
 import { Check, Clock } from 'lucide-react'
-import { BUILDING_BLOCKS, EARNINGS, FACTS, LEDGER, PAYMENT } from './content'
+import { BUILDING_BLOCKS, EARNINGS, LEDGER, PAYMENT } from './content'
+import { Features } from './features'
 import { Hero } from './hero'
-import { BLOCK_ICONS, Divider, FACT_ICONS, IconBadge, NetworkChip, Section } from './parts'
+import { BLOCK_ICONS, Divider, IconBadge, NetworkChip, Section } from './parts'
 import { PoolDiagram } from './pool-diagram'
+import { Privacy } from './privacy'
 import { SiteFooter, SiteHeader } from './site-chrome'
 
-function Facts() {
-  return (
-    <section aria-label="Why Zecca" className="mx-auto w-full max-w-[1120px] px-4 pb-16 sm:px-6 md:pb-24">
-      <ul className="grid gap-4 md:grid-cols-3 md:gap-5">
-        {FACTS.map((f) => (
-          <li key={f.icon} className="rounded-[20px] border border-line bg-surface p-6">
-            <IconBadge icon={FACT_ICONS[f.icon]} />
-            <p className="mt-5 text-[17px] font-[720] tracking-[-0.01em] text-ink">{f.title}</p>
-            <p className="mt-1.5 text-[15px] leading-[1.6] text-muted">{f.body}</p>
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
-}
+const SECTIONS = [
+  { href: '#features', label: 'Features' },
+  { href: '#privacy', label: 'Privacy' },
+] as const
 
 function BuildingBlocks() {
   return (
@@ -75,12 +68,13 @@ function Earnings() {
 export function Landing() {
   return (
     <>
-      <SiteHeader brand={false} />
+      <SiteHeader sections={SECTIONS} />
       <main>
         <Hero />
-        <Facts />
+        <Features />
         <Divider />
-        <Section id="how" title={PAYMENT.title} intro={PAYMENT.intro}>
+        <Privacy />
+        <Section id="how" title={PAYMENT.title} intro={PAYMENT.intro} className="pt-4 md:pt-8">
           <PoolDiagram />
         </Section>
         <Divider />

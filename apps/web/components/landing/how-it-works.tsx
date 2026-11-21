@@ -1,6 +1,6 @@
-// /how-it-works: which network each step runs on (SPEC §2.1), the pool model (SPEC §2.6) and the honest limits (SPEC §11).
+// /how-it-works: which network each step runs on (SPEC §2.1), the pool model (SPEC §2.6) and the public proofs.
 import { ExternalLink } from 'lucide-react'
-import { HOW, LIMITS, NETWORK_ROWS, PAYMENT, POOL_ADDRESS, POOL_MODEL, PROOFS, explorerAccount, explorerTx } from './content'
+import { HOW, NETWORK_ROWS, PAYMENT, POOL_ADDRESS, POOL_MODEL, PROOFS, explorerAccount, explorerTx } from './content'
 import { FeatureStatus } from './feature-status'
 import { Divider, NetworkChip, Section } from './parts'
 import { PoolDiagram } from './pool-diagram'
@@ -51,21 +51,6 @@ function Pool() {
   )
 }
 
-function Limits() {
-  return (
-    <Section id="limits" label="Honest limits" title={LIMITS.title}>
-      <ul className="grid gap-4 md:grid-cols-2 md:gap-5">
-        {LIMITS.items.map((l) => (
-          <li key={l.title} className="rounded-[20px] border border-line bg-surface p-6">
-            <p className="text-[16px] font-[720] text-ink">{l.title}</p>
-            <p className="mt-1.5 text-[14.5px] leading-[1.6] text-muted">{l.body}</p>
-          </li>
-        ))}
-      </ul>
-    </Section>
-  )
-}
-
 function Proofs() {
   return (
     <Section id="proofs" label="On the public ledger" title="See it for yourself" intro="Transactions from our test runs on 20 November 2026. Devnet is reset from time to time, so older links can stop working.">
@@ -103,8 +88,6 @@ export function HowItWorks() {
         <Networks />
         <Divider />
         <Pool />
-        <Divider />
-        <Limits />
         <Divider />
         <Proofs />
       </main>

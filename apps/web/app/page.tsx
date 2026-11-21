@@ -1,9 +1,10 @@
 import type { Metadata } from 'next'
+import { HERO } from '@/components/landing/content'
 import { Landing } from '@/components/landing/landing'
 
 export const metadata: Metadata = {
-  title: { absolute: 'Zecca · Money that moves like a message' },
-  description: 'Sign in with an email. Pay with a tap. Your balance stays between you and the people you pay.',
+  title: { absolute: 'Zecca · Pay, spend, earn and own gold' },
+  description: HERO.sub,
 }
 
 export default function Home() {
