@@ -27,13 +27,16 @@ export function Amount({
   const p = amountParts(minor, { direction })
   const s = SIZES[size]
   const color = tone === 'muted' ? 'text-muted' : tone === 'in' || direction === 'in' ? 'text-in' : 'text-ink'
+  // Lighter cents on ink only. On a coloured amount (--in, or a forced colour such as white on a green panel) 60% would
+  // fall under 4.5:1, so the cents keep the full colour there.
+  const dimCents = color === 'text-ink' && !/(^|\s)!text-/.test(className ?? '')
   return (
     <span className={cn('tabular inline-flex items-baseline whitespace-nowrap', color, className)}>
       <span className="sr-only">{p.text}</span>
       <span aria-hidden="true" className={s.d}>
         {p.sign}${p.dollars}
       </span>
-      <span aria-hidden="true" className={cn(s.c, 'font-[560] opacity-60')}>
+      <span aria-hidden="true" className={cn(s.c, 'font-[560]', dimCents && 'opacity-60')}>
         .{p.cents}
       </span>
     </span>

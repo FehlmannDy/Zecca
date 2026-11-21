@@ -39,7 +39,8 @@ export function GlassBackdrop() {
         className="absolute inset-0"
         style={{
           background:
-            'radial-gradient(55% 45% at 68% 18%, color-mix(in srgb, var(--brass) 16%, transparent), transparent 70%),' +
+            // The warm glow sits below the header band, so muted subtitles at the top stay on near-flat paper (4.5:1).
+            'radial-gradient(55% 45% at 68% 40%, color-mix(in srgb, var(--brass) 12%, transparent), transparent 70%),' +
             'radial-gradient(45% 40% at 12% 88%, color-mix(in srgb, var(--sealed) 9%, transparent), transparent 70%),' +
             'radial-gradient(120% 90% at 50% 40%, transparent 55%, color-mix(in srgb, var(--paper) 70%, var(--ink) 6%) 100%)',
         }}

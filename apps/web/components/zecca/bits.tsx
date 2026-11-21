@@ -46,13 +46,13 @@ export function HashChip({ value, href, label = 'Copy', className }: { value: st
   return (
     <span className={cn('inline-flex max-w-full items-center gap-1 rounded-full border border-line bg-surface py-0.5 pl-3 pr-1 font-mono text-[12.5px] text-ink', className)} title={value}>
       {href ? (
-        <a href={href} target="_blank" rel="noreferrer" className="underline decoration-line underline-offset-2 hover:decoration-ink">
+        <a href={href} target="_blank" rel="noreferrer" className="-my-3 inline-flex min-h-11 items-center whitespace-nowrap underline decoration-line underline-offset-2 hover:decoration-ink">
           {text}
         </a>
       ) : (
-        <span>{text}</span>
+        <span className="whitespace-nowrap">{text}</span>
       )}
-      <button type="button" onClick={copy} className="grid size-9 place-items-center rounded-full text-muted hover:bg-paper hover:text-ink" aria-label={`${label} ${value}`}>
+      <button type="button" onClick={copy} className="-my-1 grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-paper hover:text-ink" aria-label={`${label} ${value}`}>
         {copied ? <Check className="size-4 text-in" aria-hidden="true" /> : <Copy className="size-4" aria-hidden="true" />}
       </button>
       <span className="sr-only" aria-live="polite">

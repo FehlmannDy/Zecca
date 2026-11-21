@@ -6,7 +6,17 @@ const ARCHES = Array.from({ length: 7 }, (_, i) => 205 + i * 131)
 /** Dome, pediment and arches: the mint, without the letters. Single weight, round caps, nothing filled. */
 export function LogoMark({ className, title = 'Zecca' }: { className?: string; title?: string }) {
   return (
-    <svg viewBox="170 80 945 1080" className={cn('h-8 w-auto', className)} fill="none" stroke="currentColor" strokeWidth="26" strokeLinecap="round" strokeLinejoin="round" role="img" aria-label={title}>
+    <svg
+      viewBox="170 80 945 1080"
+      className={cn('h-8 w-auto', className)}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="26"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      // title="" is decoration next to a name: hidden from screen readers rather than an unnamed image.
+      {...(title ? { role: 'img', 'aria-label': title } : { 'aria-hidden': true })}
+    >
       <path d="M643 103 V 128" />
       <path d="M593 185 A 50 50 0 0 1 693 185" />
       <path d="M578 185 H 708" />

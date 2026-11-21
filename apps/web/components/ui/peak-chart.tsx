@@ -1,5 +1,7 @@
 // Source: 21st.dev "Peak Chart" by Louis Studios (docs/ui/21st-peak-chart-prompt.txt), copied unchanged except:
 // - valuePrefix prop (UI.md §3.2): text drawn right before the headline number, for the "$".
+// - theming (Zecca M4 audit): the suffix keeps its leading space (" XRP" read "10.92XRP"), and the period chip text is
+//   weight 400 in a brighter blue so it passes 4.5:1 on the translucent chip.
 "use client"
 
 // Peak Chart by Louis Studios.
@@ -864,7 +866,7 @@ export function PeakChart({
           display: "flex", alignItems: "flex-start", gap: px(6.72), background: "rgba(255,255,255,0.13)", cursor: "pointer", color: "#b9cdf2", fontFamily: font, outlineOffset: 2,
         }}
       >
-        <span data-part="period" style={{ ...textBase, position: "relative", display: "block", marginTop: px(10.6), fontSize: px(17.2), fontStretch: "115%", fontWeight: 200, color: "#acc1e7" }}>{current}</span>
+        <span data-part="period" style={{ ...textBase, position: "relative", display: "block", marginTop: px(10.6), fontSize: px(17.2), fontStretch: "115%", fontWeight: 400, color: "#d3e0f7" }}>{current}</span>
         <svg viewBox="0 0 12 7" aria-hidden style={{ flex: "none", marginTop: px(15.9), width: px(12), height: px(7), overflow: "visible", transition: "transform .2s ease", transform: open ? "rotate(180deg)" : "none" }}>
           <path d="M0.8 0.8 L6 6 L11.2 0.8" fill="none" stroke="#9fb7e0" strokeWidth={1.25} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         </svg>
@@ -930,7 +932,7 @@ export function PeakChart({
             <span style={{ visibility: "hidden" }}>{finalDigits}</span>
             <span ref={digitsRef} style={{ position: "absolute", right: 0, top: 0 }}>{finalDigits}</span>
           </span>
-          <span data-part="suffix" style={{ display: "inline-block", fontStretch: "76%", marginLeft: px(1.5), marginRight: px(-4), transform: "scaleX(0.93)", transformOrigin: "0 50%" }}>{valueSuffix}</span>
+          <span data-part="suffix" style={{ display: "inline-block", whiteSpace: "pre", fontStretch: "76%", marginLeft: px(1.5), marginRight: px(-4), transform: "scaleX(0.93)", transformOrigin: "0 50%" }}>{valueSuffix}</span>
           {trend !== "none" && (
             <svg
               ref={arrowRef}
