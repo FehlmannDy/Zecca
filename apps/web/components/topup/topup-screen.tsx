@@ -2,8 +2,9 @@
 // Top up (UI.md §5.7): "Add money", amount chips, "Continue" opens MoonPay's widget as an overlay (session and signature
 // from our API). After the purchase the screen follows the credit live. In demo mode, "Add demo credit" (POST /v1/dev/credit)
 // goes through the same path without the widget. MoonPay is hidden when features.ramp is off.
-import { useCallback, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { formatUsd, type ZeccaEvent } from '@zecca/contracts'
 import { Amount } from '@/components/zecca/amount'
 import { ArchesProgress, type ArchesState } from '@/components/zecca/arches'
@@ -16,11 +17,13 @@ import { cn } from '@/lib/cn'
 import { useLiveEvents, useResource } from '@/lib/hooks'
 import { useSession } from '@/lib/session'
 import { loadMoonPaySdk, type MoonPayWidget } from './moonpay-sdk'
-import { TOPUP_CHIPS, chipsFor, initialTopup, sdkEnvironment, topupReducer } from './topup'
+import { TOPUP_CHIPS, chipsFor, initialTopup, nextAfterTopup, sdkEnvironment, topupReducer } from './topup'
 
 const REGION = "Top-up isn't available in your country yet."
 const SANDBOX_NOTE = 'Sandbox purchase. No real money moved.'
 const whole = (minor: number) => (minor % 100 === 0 ? `$${minor / 100}` : formatUsd(minor))
+/** How long "Added $X." stays before the screen goes back to ?next=. */
+const BACK_AFTER_MS = 1500
 
 export function TopupScreen() {
   const { api, config } = useApp()
@@ -39,6 +42,15 @@ export function TopupScreen() {
   phase.current = state
   /** Activity rows already there when the purchase started: polling (no live stream) only looks at newer ones. */
   const before = useRef<Set<string> | null>(null)
+  const router = useRouter()
+  /** ?next= (e.g. the pay page): where to go once the money is in. Read after mount (no Suspense needed). */
+  const [next, setNext] = useState<string | null>(null)
+  useEffect(() => setNext(nextAfterTopup(window.location.search)), [])
+  useEffect(() => {
+    if (state.phase !== 'done' || !next) return
+    const t = setTimeout(() => router.replace(next), BACK_AFTER_MS)
+    return () => clearTimeout(t)
+  }, [state.phase, next, router])
 
   const onEvent = useCallback(
     (e: ZeccaEvent) => {
@@ -198,8 +210,8 @@ export function TopupScreen() {
           </div>
           {(state.phase === 'done' || state.phase === 'failed') && (
             <div className="mt-7 flex w-full flex-col gap-2 sm:flex-row">
-              <Link href="/app" className="inline-flex min-h-12 flex-1 items-center justify-center rounded-[14px] bg-ink px-5 text-[15px] font-[680] text-paper hover:opacity-90">
-                Done
+              <Link href={next ?? '/app'} className="inline-flex min-h-12 flex-1 items-center justify-center rounded-[14px] bg-ink px-5 text-[15px] font-[680] text-paper hover:opacity-90">
+                {next && state.phase === 'done' ? 'Continue' : 'Done'}
               </Link>
               <Button variant="secondary" className="flex-1" onClick={() => dispatch({ type: 'reset' })}>
                 {state.phase === 'failed' ? 'Try again' : 'Add more'}

@@ -1,6 +1,7 @@
 // Top up (UI.md §5.7): the amount chips within the tier 0 room, and what the screen says after a purchase, from live events.
 // The credit is the amount delivered on the ledger (D5), so the screen reports the amount from the events, not the chip.
 import type { Activity, Intent, Limits, Tier, ZeccaEvent } from '@zecca/contracts'
+import { safeNextPath } from '../../lib/next-path'
 
 /** $25, $50, $100. MoonPay's minimum is about €21.60, so the smallest chip clears it. */
 export const TOPUP_CHIPS = [2500, 5000, 10000] as const
@@ -10,6 +11,12 @@ export function chipsFor(o: { tier: Tier; availableMinor: number | null; pending
   const known = o.availableMinor !== null && o.pendingMinor !== null
   const roomMinor = o.tier === 0 && known ? Math.max(0, o.limits.tier0.balanceCapMinor - o.availableMinor! - o.pendingMinor!) : null
   return { roomMinor, chips: TOPUP_CHIPS.map((minor) => ({ minor, allowed: roomMinor === null || minor <= roomMinor })) }
+}
+
+/** Where the screen goes once the top-up is in: back to ?next= (the pay page's "Top up" link), else null (it stays). */
+export function nextAfterTopup(search: string): string | null {
+  const n = new URLSearchParams(search).get('next')
+  return n ? safeNextPath(n) : null
 }
 
 /** The web SDK's environment for the URL the API signed. */

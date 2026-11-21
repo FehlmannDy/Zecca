@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULTS, type Activity, type Intent, type Limits, type ZeccaEvent } from '@zecca/contracts'
-import { TOPUP_CHIPS, chipsFor, initialTopup, sdkEnvironment, topupReducer, type TopupState } from './topup'
+import { TOPUP_CHIPS, chipsFor, initialTopup, nextAfterTopup, sdkEnvironment, topupReducer, type TopupState } from './topup'
 
 const limits: Limits = {
   txCapMinor: DEFAULTS.TX_CAP_MINOR,
@@ -108,5 +108,18 @@ describe('after the purchase: live events', () => {
 
   it('reset goes back to choosing an amount', () => {
     expect(topupReducer(run(waiting, ev.activity({})), { type: 'reset' })).toEqual(initialTopup)
+  })
+})
+
+describe('nextAfterTopup', () => {
+  it('goes back to ?next= (the pay page sends people here to top up first)', () => {
+    expect(nextAfterTopup('?next=%2Fpay%2Fpr_1')).toBe('/pay/pr_1')
+    expect(nextAfterTopup('?next=' + encodeURIComponent('/pay/pr_1?back=%2Fshop%2Fo1'))).toBe('/pay/pr_1?back=%2Fshop%2Fo1')
+  })
+  it('stays on the screen without ?next=, and never leaves the site', () => {
+    expect(nextAfterTopup('')).toBeNull()
+    expect(nextAfterTopup('?other=1')).toBeNull()
+    expect(nextAfterTopup('?next=https%3A%2F%2Fevil.example')).toBe('/app')
+    expect(nextAfterTopup('?next=%2F%2Fevil.example')).toBe('/app')
   })
 })
