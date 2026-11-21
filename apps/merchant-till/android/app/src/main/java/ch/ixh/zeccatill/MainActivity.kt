@@ -94,6 +94,8 @@ class MainActivity : Activity() {
     private var polling = false
 
     private var backCallback: Any? = null
+    /** Between onResume and onPause: the pay link is only served then. */
+    private var resumed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -118,14 +120,19 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        resumed = true
         preferThisApp(true)
         if (screen == Screen.CHARGING) {
+            ServedLink.url = ServedLink.of(Session.charge, onScreen = true, allowHttp = BuildConfig.DEBUG)
             refreshNfcLine()
             startPolling()
         }
     }
 
     override fun onPause() {
+        // In the background the till cannot see the charge end, so it stops serving the link until it is back.
+        resumed = false
+        ServedLink.url = null
         preferThisApp(false)
         stopPolling()
         stopScan()
@@ -149,7 +156,7 @@ class MainActivity : Activity() {
             c.status.open || c.status == ChargeStatus.UNKNOWN -> Screen.CHARGING
             else -> Screen.ENDED
         }
-        ServedLink.url = c?.takeIf { it.status.open && next == Screen.CHARGING && servable(it.url) }?.url
+        ServedLink.url = ServedLink.of(c, onScreen = resumed && next == Screen.CHARGING, allowHttp = BuildConfig.DEBUG)
         if (next == Screen.CHARGING) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (next == screen) {
@@ -220,7 +227,7 @@ class MainActivity : Activity() {
             header(this)
             title(this, "Zecca Till", "Pair this till")
             addView(ui.text("Scan the code shown in your Zecca merchant space.", 16f, ui.semibold), ui.lp(top = 12, gravity = Gravity.START))
-            addView(ui.text("On a computer or another phone, open your business account, then Tills.", 15f, ui.regular, ui.muted), ui.lp(top = 6, gravity = Gravity.START))
+            addView(ui.text("On a computer or another phone, open your business account, then Tills (on a computer: Pair a till).", 15f, ui.regular, ui.muted), ui.lp(top = 6, gravity = Gravity.START))
 
             if (packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
                 addView(ui.button("Scan the code", Ui.Kind.PRIMARY, R.drawable.ic_scan).apply { setOnClickListener { startScan() } }, ui.lp(top = 24))
@@ -786,10 +793,6 @@ class MainActivity : Activity() {
     }
 
     // ---------- NFC ----------
-
-    /** Only links on the paired API's web: https, or http to the emulator's host in a debug build. */
-    private fun servable(url: String): Boolean =
-        NdefUri.checkUrl(url) == null && (url.startsWith("https://") || (BuildConfig.DEBUG && url.startsWith("http://")))
 
     /** While the till is on screen, taps go to it rather than to NFC PayLink (same AID). */
     private fun preferThisApp(on: Boolean) {

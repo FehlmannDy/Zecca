@@ -37,11 +37,11 @@ Type the amount, add a reference if you like, tap **Charge $x.xx**. The full scr
 
 Zecca Till and NFC PayLink both answer as an NFC Forum Type 4 tag on the same AID (`D2760000850101`). On a phone with both installed, only one should be the preferred service: Zecca Till makes itself the preferred service while it is on screen (`CardEmulation.setPreferredService` in `onResume`) and lets go in `onPause`, like NFC PayLink does. If a tap opens Android's app picker or the other app's link, keep Zecca Till on screen during the charge, or uninstall NFC PayLink from the till phone.
 
-The link is served from this process only while a charge is open on screen (`ServedLink`); with no open charge a reader finds no tag. APDUs are logged without the link: `adb logcat -s ZeccaTillHCE`.
+The link is served from this process only while a charge is open on screen with the app in the foreground (`ServedLink`): `onPause` clears it, since in the background the till stops polling and cannot see the charge end, and `onResume` serves it again. With no open charge, or with the app in the background, a reader finds no tag. APDUs are logged without the link: `adb logcat -s ZeccaTillHCE`.
 
 ## What the till can and cannot do
 
-- The till token is random, stored hashed by the API and in this app's private SharedPreferences (backups are off).
+- The till token is random, stored hashed by the API and in this app's private SharedPreferences, which never leave the phone: `android:allowBackup="false"` up to Android 11, and on Android 12+ `res/xml/data_extraction_rules.xml` excludes everything from cloud backup and device-to-device transfer (some manufacturers' transfer tools ignore `allowBackup`).
 - A till token can create, read and cancel its own charges (`/v1/till/charges`), nothing else: no balance, no transfers, no activity, no sales.
 - The pairing link must point at Zecca's API over https. Only a debug build accepts http, and only to `localhost` and the emulator's host `10.0.2.2`.
 
@@ -53,7 +53,7 @@ cd android
 cp app/build/outputs/apk/release/app-release.apk ../release/zecca-till.apk
 ```
 
-JVM tests (72): keypad and money, the pairing link parser and host allowlist, JSON and the API's answers, charge status and merging, QR codes read back, and the Type 4 tag and NDEF tests copied from NFC PayLink.
+JVM tests (76): keypad and money, the pairing link parser and host allowlist, JSON and the API's answers, charge status and merging, when the pay link is served over NFC, QR codes read back, and the Type 4 tag and NDEF tests copied from NFC PayLink.
 
 ## Try it on an emulator against a local mock API
 
