@@ -129,6 +129,23 @@ describe('mock ledger: confidential sends', () => {
   })
 })
 
+describe('mock ledger: MPT issuances (metals)', () => {
+  it('MPTokenIssuanceCreate registers the issuer, returns mpt_issuance_id, and the issuer can pay an authorized holder', async () => {
+    const env = createMockEnvironment()
+    const issuer = env.keystore.getWallet('marketIssuer').address
+    const r = await env.ledger.submitAs('marketIssuer', { TransactionType: 'MPTokenIssuanceCreate', Account: issuer, AssetScale: 0, Flags: 0x20 })
+    expect(r.engineResult).toBe('tesSUCCESS')
+    const id = String((r.meta as Record<string, unknown>).mpt_issuance_id)
+    expect(id).toMatch(/^[0-9A-F]{48}$/)
+    const { user } = await onboard(env, 0)
+    const auth = await env.ledger.submitUserSigned((await user.sign(await env.ledger.prepareSponsored({ TransactionType: 'MPTokenAuthorize', Account: user.address, MPTokenIssuanceID: id }, { reserve: true, publicKey: user.publicKey }))).tx_blob)
+    expect(auth.engineResult).toBe('tesSUCCESS')
+    const pay = await env.ledger.submitAs('marketIssuer', { TransactionType: 'Payment', Account: issuer, Destination: user.address, Amount: { mpt_issuance_id: id, value: '1500' } })
+    expect(pay.engineResult).toBe('tesSUCCESS')
+    expect(await env.ledger.mptBalance(user.address, id)).toBe(1500)
+  })
+})
+
 describe('mock ledger: seeded demo shop', () => {
   it('the demo shop merchant lets the relayer merge its inbox, like a merchant signed up through the app', async () => {
     const env = createMockEnvironment()

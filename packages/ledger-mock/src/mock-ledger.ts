@@ -69,6 +69,7 @@ export function createMockLedger(opts: MockLedgerOptions): MockLedger {
   const issuanceId = (opts.issuanceId ?? keystore.getMeta('cmptIssuanceId') ?? hex(24)).toUpperCase()
   let index = opts.startLedger ?? 1000
   let failNextResult: string | null = null
+  let createdIssuance: string | undefined
   const accounts = new Map<string, Account>()
   const log: LedgerTxEvent[] = []
   const watchers = new Map<string, Set<(e: LedgerTxEvent) => void>>()
@@ -207,6 +208,13 @@ export function createMockLedger(opts: MockLedgerOptions): MockLedger {
         dh.inboxMinor += amt
         return
       }
+      case 'MPTokenIssuanceCreate': {
+        // MPTokenIssuanceID = 4-byte sequence + issuer AccountID, as on the real ledger.
+        const id = (Number(tx.Sequence).toString(16).padStart(8, '0') + Buffer.from(decodeAccountID(acct.address)).toString('hex')).toUpperCase()
+        issuers.set(id, acct.address)
+        createdIssuance = id
+        return
+      }
       case 'DelegateSet': {
         const to = String(tx.Authorize)
         const perms = (tx.Permissions as { Permission: { PermissionValue: string } }[] | undefined) ?? []
@@ -260,6 +268,7 @@ export function createMockLedger(opts: MockLedgerOptions): MockLedger {
     }
     const backup = snapshot()
     const touched = new Set<string>()
+    createdIssuance = undefined
     try {
       if (signedTx.TransactionType === 'Batch') {
         const inners = (signedTx.RawTransactions as { RawTransaction: Record<string, unknown> }[]).map((r) => r.RawTransaction)
@@ -289,7 +298,7 @@ export function createMockLedger(opts: MockLedgerOptions): MockLedger {
       validated: true,
       engineResult: 'tesSUCCESS',
       tx: { ...signedTx, hash },
-      meta: { TransactionResult: 'tesSUCCESS' },
+      meta: { TransactionResult: 'tesSUCCESS', ...(createdIssuance ? { mpt_issuance_id: createdIssuance } : {}) },
       closeTime: new Date().toISOString(),
     }
     log.push(ev)
