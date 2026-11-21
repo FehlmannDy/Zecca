@@ -5,6 +5,8 @@ You never see a seed phrase and never hold XRP: Zecca opens your account and pay
 
 Built at the Italian XRPL Hackathon 2026 (Bari), Track 2. Running on XRPL Devnet and Testnet.
 
+**Try it:** https://zecca-beta.vercel.app — sign up with an email (you get $50 of demo credit), send money to someone, open a payment and switch "What the ledger shows" to *Everyone else*. The click path a judge needs, and what each screen proves on the ledger, is in [DEMO.md](DEMO.md).
+
 ## Run it locally
 
 Node 22.12 or later and npm. No network is needed: the default mode is an in-memory ledger with a local test signer.
