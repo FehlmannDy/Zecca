@@ -8,15 +8,15 @@ import { useRouter } from 'next/navigation'
 import { formatUsd, type PaymentRequest, type Receipt } from '@zecca/contracts'
 import { useApp } from '@/lib/app'
 import { isApiError } from '@/lib/api'
-import { useResource } from '@/lib/hooks'
 import { useMediaQuery } from '@/lib/use-media'
 import { QrCode } from '@/components/merchant/qr-code'
 import { mergeRequest } from '@/components/merchant/till-model'
 import { useInterval, useRequestStream } from '@/components/merchant/use-request-stream'
 import { ShopReceipt } from './receipt'
 import { SERIF, ShopButton } from './shop-frame'
-import { Closed } from './shop-home'
+import { ShopUnavailable } from './shop-home'
 import { useBasket } from './use-basket'
+import { useShopResource } from './use-shop-resource'
 
 const field =
   'h-12 w-full rounded-[4px] border border-[var(--s-line)] bg-white px-3 text-[16px] text-[var(--s-ink)] placeholder:text-[var(--s-muted)]/70 disabled:bg-[var(--s-bg)] disabled:text-[var(--s-muted)]'
@@ -24,7 +24,7 @@ const field =
 export function Checkout({ id }: { id: string }) {
   const { api, config } = useApp()
   const router = useRouter()
-  const order = useResource(() => api.call('shopOrderGet', { params: { id } }), [api, id])
+  const order = useShopResource(() => api.call('shopOrderGet', { params: { id } }), [api, id])
   const [request, setRequest] = useState<PaymentRequest | null>(null)
   const [cardReceipt, setCardReceipt] = useState<Receipt | null>(null)
   const [restartError, setRestartError] = useState('')
@@ -61,7 +61,7 @@ export function Checkout({ id }: { id: string }) {
     }
   }
 
-  if (order.error && !o) return <Closed message={order.error} />
+  if (order.error && !o) return <ShopUnavailable trouble={order.trouble} onRetry={order.reload} />
   if (!o) return <div className="h-96 animate-pulse rounded-[6px] bg-[var(--s-line)]/40" aria-busy="true" aria-label="Loading your order" />
 
   if (receipt) {

@@ -7,22 +7,22 @@ import { Minus, Plus, Trash2 } from 'lucide-react'
 import { formatUsd } from '@zecca/contracts'
 import { useApp } from '@/lib/app'
 import { isApiError } from '@/lib/api'
-import { useResource } from '@/lib/hooks'
 import { basketLines, toOrderItems } from './basket'
 import { ItemDrawing } from './drawings'
 import { SERIF, ShopButton } from './shop-frame'
-import { Closed } from './shop-home'
+import { ShopUnavailable } from './shop-home'
 import { useBasket } from './use-basket'
+import { useShopResource } from './use-shop-resource'
 
 export function BasketPage() {
   const { api } = useApp()
   const router = useRouter()
-  const items = useResource(() => api.call('shopItems'), [api])
+  const items = useShopResource(() => api.call('shopItems'), [api])
   const { basket, set } = useBasket()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
-  if (items.error) return <Closed message={items.error} />
+  if (items.error) return <ShopUnavailable trouble={items.trouble} onRetry={items.reload} />
   if (!items.data) return <div className="h-64 animate-pulse rounded-[6px] bg-[var(--s-line)]/40" aria-busy="true" aria-label="Loading your basket" />
   const { lines, totalMinor } = basketLines(basket, items.data)
 

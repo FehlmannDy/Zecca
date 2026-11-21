@@ -4,6 +4,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import Link from 'next/link'
 import { ShoppingBag } from 'lucide-react'
+import { basketCountLabel } from './shop-error'
 import { useBasket } from './use-basket'
 
 export const SERIF = '"Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif'
@@ -39,13 +40,13 @@ export function ShopFrame({ children }: { children: ReactNode }) {
           <Link href="/demo/shop/basket" className="relative inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--s-line)] bg-[var(--s-card)] px-4 text-[14px] font-[600] print:hidden">
             <ShoppingBag className="size-[18px]" aria-hidden="true" />
             Basket
-            <span className="tabular min-w-5 rounded-full bg-[var(--s-accent)] px-1.5 text-center text-[12px] font-[700] text-white" aria-label={`${count} items`}>
+            <span className="tabular min-w-5 rounded-full bg-[var(--s-accent)] px-1.5 text-center text-[12px] font-[700] text-white" aria-label={basketCountLabel(count)}>
               {count}
             </span>
           </Link>
         </div>
       </header>
-      <div className="mx-auto max-w-[1080px] px-4 pb-20 pt-8 sm:px-6">{children}</div>
+      <main className="mx-auto max-w-[1080px] px-4 pb-20 pt-8 sm:px-6">{children}</main>
       <footer className="border-t border-[var(--s-line)] py-8 text-center text-[13px] text-[var(--s-muted)] print:hidden">
         Sette Archi is an invented roaster, made to show paying with Zecca from a website.
       </footer>

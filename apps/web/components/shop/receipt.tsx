@@ -41,10 +41,6 @@ export function ShopReceipt({ receipt }: { receipt: Receipt }) {
             {when.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}, {when.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
           </dd>
         </div>
-        <div className="flex justify-between gap-4 text-[var(--s-muted)]">
-          <dt>Reference</dt>
-          <dd className="truncate font-mono text-[13px]">{receipt.reference}</dd>
-        </div>
       </dl>
       <ShopButton variant="outline" className="mt-6 print:hidden" onClick={() => window.print()}>
         <Printer className="size-4" aria-hidden="true" />

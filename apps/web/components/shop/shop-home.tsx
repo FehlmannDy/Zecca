@@ -5,14 +5,15 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { formatUsd as usd } from '@zecca/contracts'
 import { useApp } from '@/lib/app'
-import { useResource } from '@/lib/hooks'
 import { ItemDrawing } from './drawings'
+import type { ShopTrouble } from './shop-error'
 import { SERIF, ShopButton } from './shop-frame'
 import { useBasket } from './use-basket'
+import { useShopResource } from './use-shop-resource'
 
 export function ShopHome() {
   const { api } = useApp()
-  const items = useResource(() => api.call('shopItems'), [api])
+  const items = useShopResource(() => api.call('shopItems'), [api])
   const { add } = useBasket()
   const [added, setAdded] = useState<string | null>(null)
   const put = (sku: string) => {
@@ -21,7 +22,7 @@ export function ShopHome() {
     setTimeout(() => setAdded((a) => (a === sku ? null : a)), 1600)
   }
 
-  if (items.error) return <Closed message={items.error} />
+  if (items.error) return <ShopUnavailable trouble={items.trouble} onRetry={items.reload} />
   if (!items.data) return <div className="h-[520px] animate-pulse rounded-[6px] bg-[var(--s-line)]/40" aria-busy="true" aria-label="Loading the shop" />
 
   const [hero, ...rest] = items.data
@@ -82,13 +83,33 @@ export function ShopHome() {
   )
 }
 
-export function Closed({ message }: { message?: string }) {
+/** A page that could not load. Closed only when the shop is switched off; a hiccup gets a retry. */
+export function ShopUnavailable({ trouble, onRetry }: { trouble: ShopTrouble; onRetry: () => void }) {
+  const [title, line] =
+    trouble.kind === 'closed'
+      ? ['The shop is closed', 'Come back a little later.']
+      : trouble.kind === 'missing'
+        ? ["We couldn't find this order", 'Start again from the shop.']
+        : ["We couldn't load the shop", 'Check your connection and try again.']
   return (
     <div className="mx-auto max-w-[520px] py-16 text-center">
       <h1 className="text-[32px]" style={{ fontFamily: SERIF }}>
-        The shop is closed
+        {title}
       </h1>
-      <p className="mt-3 text-[16px] text-[var(--s-muted)]">{message ?? 'Try again later.'}</p>
+      <p className="mt-3 text-[16px] text-[var(--s-muted)]" role="alert">
+        {line}
+      </p>
+      {trouble.kind === 'retry' ? (
+        <ShopButton className="mt-6" onClick={onRetry}>
+          Try again
+        </ShopButton>
+      ) : (
+        trouble.kind === 'missing' && (
+          <Link href="/demo/shop" className="mt-6 inline-flex min-h-12 items-center text-[15px] font-[600] underline decoration-[var(--s-line)] underline-offset-4">
+            Back to the shop
+          </Link>
+        )
+      )}
     </div>
   )
 }
