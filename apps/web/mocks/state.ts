@@ -46,12 +46,14 @@ export class MockApiError extends Error {
   }
 }
 
-export type MockDelays = { submitMs: number; receiveMs: number; payoutMs: number; networkMs: number }
+/** identityMs: how long an identity check stays 'pending' before the wallet "answers". */
+export type MockDelays = { submitMs: number; receiveMs: number; payoutMs: number; networkMs: number; identityMs: number }
 export type MockStorage = { getItem(k: string): string | null; setItem(k: string, v: string): void }
 
 type Pending =
   | { kind: 'onboarding'; address: string; publicKey: string; handle: string; displayName: string; role: Role; businessName?: string; email?: string }
   | { kind: 'send'; intentId: string }
+  | { kind: 'credential_accept'; sessionId: string }
 type PreparedRow = { prepared: PreparedTx; token: string; pending: Pending; used?: boolean }
 
 type Data = {
@@ -65,10 +67,14 @@ type Data = {
   nonces: Record<string, { address: string; publicKey: string; message: string; expiresAt: string }>
   prepared: Record<string, PreparedRow>
   card: { state: 'OPEN' | 'PAUSED' | 'CLOSED' } | null
+  /** Identity checks: who started them, when, the CredentialAccept to approve, and whether it was. */
+  identity?: Record<string, { userId: string; startedAt: number; prepareId?: string; accepted?: boolean }>
   seq: number
 }
 
 const STORAGE_KEY = 'zecca.mockapi.v1'
+/** Hex of "ZeccaKYC", the API's credential type. */
+const CREDENTIAL_TYPE = '5A656363614B5943'
 const now = () => new Date().toISOString()
 const hex = (bytes: number) => {
   const a = new Uint8Array(bytes)
@@ -106,7 +112,7 @@ function seedData(): Data {
 export type MockState = ReturnType<typeof createMockState>
 
 export function createMockState(opts: { features?: Partial<Features>; delays?: Partial<MockDelays>; storage?: MockStorage | null; config?: Partial<PublicConfig> } = {}) {
-  const delays: MockDelays = { submitMs: 2500, receiveMs: 3000, payoutMs: 4000, networkMs: 250, ...opts.delays }
+  const delays: MockDelays = { submitMs: 2500, receiveMs: 3000, payoutMs: 4000, networkMs: 250, identityMs: 3000, ...opts.delays }
   const config: PublicConfig = {
     ...(fx.config as PublicConfig),
     ledgerMode: 'mock',
@@ -420,6 +426,15 @@ export function createMockState(opts: { features?: Partial<Features>; delays?: P
         save()
         return { status: 'validated' as const, hash, engineResult: 'tesSUCCESS', user }
       }
+      if (row.pending.kind === 'credential_accept') {
+        // The credential is accepted: the account is verified (tier 1), as the API does after the ledger confirms it.
+        const u = userOf(token)
+        u.tier = 1
+        const check = data.identity?.[row.pending.sessionId]
+        if (check) check.accepted = true
+        save()
+        return { status: 'validated' as const, hash, engineResult: 'tesSUCCESS', user: { ...u } }
+      }
       const i = data.intents[row.pending.intentId]
       setIntent(i, { status: 'submitted', depositTxHash: hash })
       afterDeposit(i)
@@ -534,6 +549,41 @@ export function createMockState(opts: { features?: Partial<Features>; delays?: P
       return i
     },
     later,
+    // ---------- identity (mock wallet: answers after delays.identityMs) ----------
+    createIdentitySession(token: string) {
+      const u = userOf(token)
+      const id = randomId('idv')
+      ;(data.identity ??= {})[id] = { userId: u.id, startedAt: Date.now() }
+      save()
+      return { ...fx.identitySession, id, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(), mode: 'mock' as const }
+    },
+    identitySession(token: string, id: string) {
+      const u = userOf(token)
+      const check = data.identity?.[id]
+      if (!check || check.userId !== u.id) return fail(404, 'not_found', 'This check has expired. Start again.')
+      if (Date.now() - check.startedAt < delays.identityMs) return { status: 'pending' as const }
+      const identity = fx.identityVerified.identity!
+      if (check.accepted || u.tier === 1) return { status: 'verified' as const, identity, message: 'Your identity is already verified.' }
+      const held = check.prepareId ? data.prepared[check.prepareId] : undefined
+      if (held?.used) return { status: 'verified' as const, identity, message: 'Your approval is being confirmed.' }
+      if (held && Date.parse(held.prepared.expiresAt) > Date.now()) return { status: 'verified' as const, identity, prepared: held.prepared }
+      const s = sessionOf(token)
+      data.seq += 1
+      const tx = {
+        TransactionType: 'CredentialAccept',
+        Account: u.address,
+        Issuer: fx.ADDR.issuer,
+        CredentialType: CREDENTIAL_TYPE,
+        Fee: '12',
+        Sequence: data.seq,
+        LastLedgerSequence: data.seq + DEFAULTS.LLS_WINDOW,
+        SigningPubKey: s.publicKey,
+      }
+      const prepared = prepare(token, 'credential_accept', tx, { kind: 'credential_accept', sessionId: id })
+      check.prepareId = prepared.prepareId
+      save()
+      return { status: 'verified' as const, identity, prepared }
+    },
     card: () => data.card,
     setCard(state: 'OPEN' | 'PAUSED' | 'CLOSED') {
       data.card = { state }

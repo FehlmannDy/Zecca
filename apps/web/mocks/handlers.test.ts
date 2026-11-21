@@ -141,8 +141,8 @@ describe('mock API handlers vs the contracts', () => {
     await h.call('earnPosition', { token: t })
     await h.call('earnDeposit', { token: t, body: { amountMinor: 1000 } })
     await h.call('earnWithdraw', { token: t, body: { amountDrops: 1_000_000 } })
-    await h.call('identitySessionCreate', { token: t })
-    await h.call('identitySessionGet', { token: t, params: { id: 'idv_01' } })
+    const idv = await h.call('identitySessionCreate', { token: t })
+    await h.call('identitySessionGet', { token: t, params: { id: idv.data.id } })
     await h.call('marketAssets', { token: t })
     await h.call('marketHoldings', { token: t })
     await h.call('marketOrder', { token: t, body: { symbol: 'XAU', side: 'buy', amountMinor: 1000 } })
@@ -205,6 +205,36 @@ describe('mock API handlers vs the contracts', () => {
     const r = await h.call('onboardingPrepare', { token, body: { address: signer.address, publicKey: signer.publicKey, handle: 'hana', displayName: 'Hana', role: 'user' } })
     expect(r.status).toBe(409)
     expect(r.data.error.code).toBe('handle_taken')
+  })
+
+  it('identity: pending for a moment, then verified with a CredentialAccept to approve; approving it lifts the tier', async () => {
+    const h = harness({ features: { identity: true }, delays: { submitMs: 0, receiveMs: 0, payoutMs: 0, networkMs: 0, identityMs: 40 } })
+    const u = await signUp(h, 'jana')
+    expect(u.user.tier).toBe(0)
+    const s = await h.call('identitySessionCreate', { token: u.token })
+    expect(s.status).toBe(200)
+    expect((await h.call('identitySessionGet', { token: u.token, params: { id: s.data.id } })).data).toEqual({ status: 'pending' })
+    await new Promise((r) => setTimeout(r, 60))
+    const v = await h.call('identitySessionGet', { token: u.token, params: { id: s.data.id } })
+    expect(v.data).toMatchObject({ status: 'verified', identity: { over18: true }, prepared: { kind: 'credential_accept', tx: { TransactionType: 'CredentialAccept', Account: u.signer.address } } })
+    // The same approval until it is used.
+    expect((await h.call('identitySessionGet', { token: u.token, params: { id: s.data.id } })).data.prepared.prepareId).toBe(v.data.prepared.prepareId)
+    const signed = await u.signer.sign(v.data.prepared.tx)
+    const sub = await h.call('txSubmit', { token: u.token, body: { prepareId: v.data.prepared.prepareId, txBlob: signed.tx_blob } })
+    expect(sub.data).toMatchObject({ status: 'validated', user: { tier: 1 } })
+    expect((await h.call('me', { token: u.token })).data.tier).toBe(1)
+    const after = await h.call('identitySessionGet', { token: u.token, params: { id: s.data.id } })
+    expect(after.data.status).toBe('verified')
+    expect(after.data.prepared).toBeUndefined()
+  })
+
+  it('identity: another person\'s session, or an unknown one, is not found', async () => {
+    const h = harness({ features: { identity: true } })
+    const a = await signUp(h, 'kira')
+    const b = await signUp(h, 'luca')
+    const s = await h.call('identitySessionCreate', { token: a.token })
+    expect((await h.call('identitySessionGet', { token: b.token, params: { id: s.data.id } })).status).toBe(404)
+    expect((await h.call('identitySessionGet', { token: a.token, params: { id: 'idv_nope' } })).status).toBe(404)
   })
 
   it('restores the same user when the same key signs in again', async () => {
