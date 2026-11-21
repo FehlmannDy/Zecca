@@ -151,7 +151,7 @@ describe('market connector (SPEC §4.9, §6.3)', () => {
     expect(r.body.map((a: { symbol: string }) => a.symbol)).toEqual(['XAU', 'XAG', 'XPD'])
     const gold = r.body[0]
     expect(gold).toMatchObject({ name: 'Gold', unit: 'g', priceMinor: 11378, buyPriceMinor: 11435, sellPriceMinor: 11321, priceAt: '2026-11-20T21:59:57.000Z' })
-    expect(gold.priceSource).toMatch(/Fixture/)
+    expect(gold.priceSource).toMatch(/^Saved COMEX close/)
     expect(gold.history.at(-1)).toBe(11378)
     expect(gold.history.length).toBeGreaterThanOrEqual(2)
     expect(typeof gold.change24hPct).toBe('number')

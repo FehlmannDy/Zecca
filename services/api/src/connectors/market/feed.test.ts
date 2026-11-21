@@ -33,7 +33,9 @@ describe('market price feed', () => {
   it('the fixture is dated and per gram, in integer cents', async () => {
     const f = createFixtureFeed()
     const gold = await f.price('XAU')
-    expect(gold).toEqual({ priceMinor: 11378, at: FIXTURE.at, source: expect.stringMatching(/2026-11-20/) })
+    expect(gold).toEqual({ priceMinor: 11378, at: FIXTURE.at, source: FIXTURE.source })
+    // Product words next to "Price at Nov 20, 22:59": says it is saved and that live prices are offline, no 'Fixture' or ISO date.
+    expect(FIXTURE.source).toBe('Saved COMEX close (live prices are offline)')
     const h = await f.history('XAU', 5)
     expect(h).toHaveLength(5)
     expect(h.at(-1)).toBe(11378)
@@ -92,6 +94,6 @@ describe('market price feed', () => {
     expect((await feed.price('XAU')).priceMinor).toBe(11574) // last good value, still dated
     // nothing ever loaded: the fixture, which says it is one
     const cold = createHttpFeed({ fetch: fakeFetch({}), now: () => now })
-    expect((await cold.price('XPD')).source).toMatch(/Fixture/)
+    expect((await cold.price('XPD')).source).toBe(FIXTURE.source)
   })
 })

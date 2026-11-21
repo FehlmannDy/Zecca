@@ -44,6 +44,7 @@ describe('XRP/USD price feed', () => {
   it('never calls the network when not live (tests, EARN_MODE=mock)', async () => {
     const feed = createXrpPriceFeed({ live: false, fetch: async () => { throw new Error('no network') } })
     expect(await feed.rate()).toEqual(FIXTURE_RATE)
-    expect(FIXTURE_RATE.source).toMatch(/^Saved rate/)
+    // Shown mid-sentence ("Rate: $0.9126 per XRP, saved rate from CoinGecko, Nov 20, 11:28 PM"): lower case.
+    expect(FIXTURE_RATE.source).toBe('saved rate from CoinGecko')
   })
 })
