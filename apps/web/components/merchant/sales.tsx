@@ -90,7 +90,8 @@ export function Sales({ wide }: { wide: boolean }) {
           aria-checked={p === period}
           tabIndex={p === period ? 0 : -1}
           onClick={() => setPeriod(p)}
-          className={cn('min-h-10 rounded-full px-4 text-[13.5px] font-[650] transition-colors duration-150', p === period ? 'bg-ink text-paper' : 'text-muted hover:text-ink')}
+          // A 40 px pill with a 44 px touch target: the ::before reaches into the group's padding, so the look stays.
+          className={cn('relative min-h-10 rounded-full px-4 text-[13.5px] font-[650] transition-colors duration-150 before:absolute before:inset-x-0 before:-inset-y-0.5', p === period ? 'bg-ink text-paper' : 'text-muted hover:text-ink')}
         >
           {p}
         </button>
