@@ -5,11 +5,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mockRawSigner, type MockRawSigner } from './signer'
 import { createLiveLedger, type LiveLedger } from './ledger'
 import { createDevnetSystem, type DevnetSystem } from './test-devnet'
+import { buildOnboarding } from './confidential'
+import { listTickets } from './tickets'
 import type { LedgerTxEvent } from '@zecca/contracts'
 
 let sys: DevnetSystem
 let ledger: LiveLedger
 let U1: MockRawSigner, U2: MockRawSigner
+/** Signed up with an issuer ticket (the race test). */
+let ticketUser: MockRawSigner | undefined
 const evidence: Record<string, string> = {}
 const record = (label: string, r: { engineResult: string; hash: string }) => (evidence[label] = `${r.engineResult} ${r.hash}`)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -29,7 +33,7 @@ async function signUp(user: MockRawSigner, credit: number, delegate: boolean) {
 }
 
 beforeAll(async () => {
-  sys = await createDevnetSystem()
+  sys = await createDevnetSystem([], { issuerTickets: 6 })
   await sys.client.close()
   ledger = createLiveLedger({ network: 'devnet', keystore: sys.keystore })
   U1 = mockRawSigner()
@@ -106,13 +110,15 @@ describe('createLiveLedger on Devnet', () => {
     expect((await ledger.client.accountInfo(U2.address))?.Balance).toBe('1')
   })
 
-  it('a sign-up whose reserved issuer sequence was used meanwhile is reported failed (outer validates, inners do not); preparing again works', async () => {
+  it('sequence fallback (no free ticket): a sign-up whose issuer sequence was used meanwhile is reported failed (outer validates, inners do not); preparing again works', async () => {
     const U3 = mockRawSigner()
     await ledger.ensureAccount(U3.address)
     sys.keystore.createUserElGamal(U3.address)
     const key = sys.keystore.getElGamal({ user: U3.address })
     const p = { address: U3.address, publicKey: U3.publicKey, holderKey: key, welcomeCreditMinor: 100 }
-    const stale = await ledger.buildOnboarding(p)
+    // No ticket allocator: the issuer's next Sequence, as when every ticket is held or used.
+    const stale = await buildOnboarding({ client: ledger.client, keystore: sys.keystore, issuanceId: sys.issuanceId }, p)
+    expect((stale.RawTransactions as { RawTransaction: Record<string, unknown> }[])[1].RawTransaction.TicketSequence).toBeUndefined()
     const issuer = sys.wallets.issuer.classicAddress
     expect((await ledger.submitAs('issuer', { TransactionType: 'AccountSet', Account: issuer })).engineResult).toBe('tesSUCCESS')
     const r = await ledger.submitUserSigned((await U3.sign(stale)).tx_blob)
@@ -123,6 +129,40 @@ describe('createLiveLedger on Devnet', () => {
     record('signup U3 prepared again', again)
     expect(again.engineResult).toBe('tesSUCCESS')
     expect(await ledger.confidentialBalance(U3.address, key)).toEqual({ spendableMinor: 100, inboxMinor: 0 })
+  })
+
+  it('issuer tickets: two sign-ups prepared together, then an issuer tx lands before either is approved; both validate', async () => {
+    const issuer = sys.wallets.issuer.classicAddress
+    const users = [mockRawSigner(), mockRawSigner()]
+    const ticketsBefore = await listTickets(ledger.client, issuer)
+    const prepared = await Promise.all(
+      users.map(async (u) => {
+        await ledger.ensureAccount(u.address)
+        sys.keystore.createUserElGamal(u.address)
+        return ledger.buildOnboarding({ address: u.address, publicKey: u.publicKey, holderKey: sys.keystore.getElGamal({ user: u.address }), welcomeCreditMinor: 100 })
+      }),
+    )
+    const pays = prepared.map((t) => (t.RawTransactions as { RawTransaction: Record<string, any> }[])[1].RawTransaction)
+    expect(pays.map((p) => p.Sequence)).toEqual([0, 0])
+    expect(new Set(pays.map((p) => p.TicketSequence)).size).toBe(2)
+    for (const p of pays) expect(ticketsBefore).toContain(p.TicketSequence)
+    const between = await ledger.submitAs('issuer', { TransactionType: 'AccountSet', Account: issuer })
+    record('issuer AccountSet between prepare and approve', between)
+    expect(between.engineResult).toBe('tesSUCCESS')
+    const results = await Promise.all(users.map(async (u, i) => ledger.submitUserSigned((await u.sign(prepared[i])).tx_blob)))
+    results.forEach((r, i) => record(`signup with issuer ticket ${String(pays[i].TicketSequence)}`, r))
+    expect(results.map((r) => r.engineResult)).toEqual(['tesSUCCESS', 'tesSUCCESS'])
+    for (const u of users) expect(await ledger.confidentialBalance(u.address, sys.keystore.getElGamal({ user: u.address }))).toEqual({ spendableMinor: 100, inboxMinor: 0 })
+    const ticketsAfter = await listTickets(ledger.client, issuer)
+    for (const p of pays) expect(ticketsAfter).not.toContain(p.TicketSequence)
+    ticketUser = users[0]
+  })
+
+  it('an account already signed up is refused with ALREADY_ONBOARDED instead of a Batch bound to fail', async () => {
+    const u = ticketUser!
+    await expect(
+      ledger.buildOnboarding({ address: u.address, publicKey: u.publicKey, holderKey: sys.keystore.getElGamal({ user: u.address }), welcomeCreditMinor: 100 }),
+    ).rejects.toMatchObject({ code: 'ALREADY_ONBOARDED' })
   })
 
   it('a delegated merge for a user who granted nothing is refused', async () => {

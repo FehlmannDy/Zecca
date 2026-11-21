@@ -41,8 +41,8 @@ export type DevnetSystem = {
   poolKey: ElGamalKeyPair
 }
 
-/** Fresh sponsor, issuer, pool and relayer; CMPT issuance (Flags 32|128) with issuer key; pool key registered (Convert 0). */
-export async function createDevnetSystem(extra: string[] = []): Promise<DevnetSystem> {
+/** Fresh sponsor, issuer, pool and relayer; CMPT issuance (Flags 32|128) with issuer key; pool key registered (Convert 0); optional issuer tickets. */
+export async function createDevnetSystem(extra: string[] = [], opts: { issuerTickets?: number } = {}): Promise<DevnetSystem> {
   const client = createClient('devnet')
   const keystore = createMemoryKeyStore()
   const roles = ['sponsor', 'issuer', 'pool', 'relayer'] as const
@@ -62,6 +62,7 @@ export async function createDevnetSystem(extra: string[] = []): Promise<DevnetSy
   expectOk('pool authorize', await run(client, P, { TransactionType: 'MPTokenAuthorize', Account: wallets.pool.classicAddress, MPTokenIssuanceID: issuanceId }))
   const ctx = { client, keystore, issuanceId }
   expectOk('pool key', await run(client, P, await buildConvert(ctx, { account: wallets.pool.classicAddress, amountMinor: 0, holderKey: poolKey })))
+  if (opts.issuerTickets) expectOk('issuer tickets', await run(client, I, { TransactionType: 'TicketCreate', Account: wallets.issuer.classicAddress, TicketCount: opts.issuerTickets }))
   return { client, keystore, issuanceId, wallets, issuerKey, poolKey }
 }
 
