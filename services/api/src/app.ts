@@ -110,11 +110,11 @@ export function createApp(deps: AppDeps): ZeccaApp {
   mountSubmit(app, core)
   mountActivity(app, core)
   mountTransfers(app, core)
+  mountDemoShop(app, core) // before the payment requests: it refuses paying an order already paid by card
   mountPaymentRequests(app, core)
   mountEvents(app, core)
   mountDev(app, core)
   mountRamp(app, core, deps.ramp)
-  mountDemoShop(app, core)
   // Phase 2: each connector stays dark (404 feature_off) until its FEATURE_* flag is on.
   if (deps.connectors !== false) {
     registerCard(core)

@@ -1,10 +1,13 @@
 // Demo shop "Sette Archi" (SPEC §4.14, §6.3): catalogue, orders paid through a normal payment request of the seeded
 // shop merchant (src/seed.ts), order status from that request, and the receipt on the buyer's activity once paid.
 // Public, only with DEMO_MODE=1 and the demoShop flag (enforced by mount() from the route table).
+// An order can also be paid by card (connectors/card, "Pay by card"): then it reads as paid by card, and its Zecca payment
+// request refuses to be paid as well.
 import type { Hono } from 'hono'
 import type { Receipt } from '@zecca/contracts'
 import type { Core } from '../core'
-import { Err } from '../errors'
+import { ApiErr, Err } from '../errors'
+import { cardChargeForOrder } from '../connectors/card'
 import { mount } from '../http'
 import { emitActivity } from '../books'
 import { seedDemoShop } from '../seed'
@@ -38,6 +41,9 @@ const orders = {
   nextSeq(core: Core): number {
     return (core.db.prepare('SELECT COALESCE(MAX(seq), ?) + 1 AS n FROM demo_shop_orders').get(FIRST_ORDER - 1) as { n: number }).n
   },
+  idOfRequest(core: Core, paymentRequestId: string): string | undefined {
+    return (core.db.prepare('SELECT id FROM demo_shop_orders WHERE payment_request_id = ?').get(paymentRequestId) as { id: string } | undefined)?.id
+  },
   insert(core: Core, o: Omit<OrderRow, 'createdAt'>): OrderRow {
     core.db
       .prepare('INSERT INTO demo_shop_orders (id, seq, lines_json, amount_minor, payment_request_id, created_at) VALUES (?, ?, ?, ?, ?, ?)')
@@ -47,6 +53,10 @@ const orders = {
 }
 
 const orderNumber = (o: OrderRow) => `SA-${o.seq}`
+
+/** The order's card payment while it stands (approved or cleared, not voided). */
+const cardCharge = (core: Core, orderId: string) => (core.settings.features.card ? cardChargeForOrder(core, orderId) : undefined)
+const PAID_BY_CARD = 'This order was already paid by card.'
 
 function receiptOf(o: OrderRow, pr: RequestRow): Receipt {
   return {
@@ -84,8 +94,15 @@ function watchOrder(core: Core, o: OrderRow): void {
   })
 }
 
+/** Mount before the payment-request routes: the guard on "Pay with Zecca" must run first. */
 export function mountDemoShop(app: Hono, core: Core): void {
   ensureTable(core)
+
+  app.use('/v1/payment-requests/:id/pay', async (c, next) => {
+    const orderId = c.req.method === 'POST' ? orders.idOfRequest(core, c.req.param('id')) : undefined
+    if (orderId && cardCharge(core, orderId)) throw new ApiErr(409, 'already_paid', PAID_BY_CARD)
+    await next()
+  })
 
   mount(app, core, 'shopItems', () => catalog())
 
@@ -122,13 +139,15 @@ export function mountDemoShop(app: Hono, core: Core): void {
     if (pr?.status === 'expired' && before !== 'expired') emitRequest(core, pr.id)
     const paid = pr?.status === 'paid'
     if (paid) attachReceipt(core, o, pr)
+    const card = paid ? undefined : cardCharge(core, o.id)
     return {
       id: o.id,
       items: o.lines,
       amountMinor: o.amountMinor,
-      status: paid ? ('paid' as const) : ('pending' as const),
-      ...(paid ? { method: 'zecca' as const, receipt: receiptOf(o, pr) } : {}),
+      status: paid || card ? ('paid' as const) : ('pending' as const),
+      ...(paid ? { method: 'zecca' as const, receipt: receiptOf(o, pr) } : card ? { method: 'card' as const, receipt: card.receipt } : {}),
       paymentRequestId: o.paymentRequestId,
+      ...(pr ? { paymentStatus: pr.status, expiresAt: pr.expiresAt } : {}),
       createdAt: o.createdAt,
     }
   })

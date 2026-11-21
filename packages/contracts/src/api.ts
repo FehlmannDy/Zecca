@@ -11,6 +11,7 @@ import {
   MarketAsset,
   MetalSymbol,
   PaymentRequest,
+  PaymentRequestStatus,
   PreparedTx,
   PublicProfile,
   Receipt,
@@ -135,6 +136,9 @@ export const ShopOrder = z.object({
   status: z.enum(['pending', 'paid', 'declined']),
   method: z.enum(['zecca', 'card']).optional(),
   paymentRequestId: Id.optional(),
+  /** The order's Zecca payment request: its status and expiry (an 'expired' request on a pending order means "Start again"). */
+  paymentStatus: PaymentRequestStatus.optional(),
+  expiresAt: IsoTime.optional(),
   receipt: Receipt.optional(),
   createdAt: IsoTime,
 })

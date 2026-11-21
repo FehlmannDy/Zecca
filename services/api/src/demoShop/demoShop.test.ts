@@ -7,6 +7,7 @@ import { createFakePool, type FakeLedger, type FakePool } from '../testing/fakes
 import { eventually, makeHarness } from '../testing/harness'
 import { seedDemoShop } from '../seed'
 import { priceOrder } from './catalog'
+import { cardCtx } from '../connectors/card/context'
 
 async function world(o: { env?: Record<string, string>; pool?: FakePool; seed?: boolean } = {}) {
   const h = makeHarness<FakeLedger, FakePool>({ env: o.env, pool: o.pool })
@@ -186,5 +187,60 @@ describe('demo shop: orders', () => {
     const r = await h.json('GET', '/v1/demo/shop/orders/ord_nope')
     expect(r.status).toBe(404)
     expect(r.body.error.message).toBe("We couldn't find this order.")
+  })
+})
+
+describe('demo shop: orders paid by card, and the payment request state', () => {
+  /** A card payment of the order as the card connector records it (its sub-ledger), without Lithic. */
+  function payByCard(h: Awaited<ReturnType<typeof world>>['h'], userId: string, orderId: string, amountMinor: number) {
+    const store = cardCtx(h.app.core).store
+    if (!store.cardOf(userId)) store.linkCard(userId, { id: 'card_1', token: 'lc_1', last4: '4417', expMonth: 11, expYear: 2029, state: 'OPEN', holderName: 'Ana Ferri' })
+    store.creditDeposit({ intentId: `int_load_${orderId}`, userId, amountMinor })
+    const authToken = `auth_${orderId}`
+    expect(store.authorize({ authToken, userId, cardToken: 'lc_1', amountMinor, merchant: 'Sette Archi', orderId }).approved).toBe(true)
+    const receipt = { orderNumber: 'SA-1001', shopName: 'Sette Archi', items: [{ name: 'Etiopia Guji, 250 g', qty: 1, unitMinor: 1450 }], amountMinor, method: 'card' as const, cardLast4: '4417', status: 'authorised' as const, at: h.app.core.iso(), reference: authToken }
+    store.saveCharge(orderId, authToken, receipt)
+    return { authToken, receipt }
+  }
+
+  it('GET /orders/:id carries the payment request status and expiry (pending, then expired)', async () => {
+    const { h } = await world()
+    const created = ShopOrderCreated.parse((await order(h, [{ sku: 'guji-250', qty: 1 }])).body)
+    let o = ShopOrder.parse((await h.json('GET', `/v1/demo/shop/orders/${created.orderId}`)).body)
+    expect(o).toMatchObject({ status: 'pending', paymentStatus: 'created', expiresAt: created.paymentRequest.expiresAt })
+    h.clock.advance(h.app.core.settings.paymentRequestTtlMs + 1000)
+    o = ShopOrder.parse((await h.json('GET', `/v1/demo/shop/orders/${created.orderId}`)).body)
+    expect(o).toMatchObject({ status: 'pending', paymentStatus: 'expired' })
+  })
+
+  it('paid by card: status paid, method card, the card receipt', async () => {
+    const { h } = await world({ env: { FEATURE_CARD: '1' } })
+    const ana = await h.signUp('ana')
+    const created = ShopOrderCreated.parse((await order(h, [{ sku: 'guji-250', qty: 1 }])).body)
+    const { receipt } = payByCard(h, ana.user.id, created.orderId, 1450)
+    const o = ShopOrder.parse((await h.json('GET', `/v1/demo/shop/orders/${created.orderId}`)).body)
+    expect(o).toMatchObject({ status: 'paid', method: 'card', receipt, paymentRequestId: created.paymentRequest.id })
+  })
+
+  it('"Pay with Zecca" refuses an order already paid by card (409 already_paid)', async () => {
+    const { h } = await world({ env: { FEATURE_CARD: '1' } })
+    const ana = await h.signUp('ana')
+    const created = ShopOrderCreated.parse((await order(h, [{ sku: 'guji-250', qty: 1 }])).body)
+    payByCard(h, ana.user.id, created.orderId, 1450)
+    const pay = await h.json('POST', `/v1/payment-requests/${created.paymentRequest.id}/pay`, { token: ana.token })
+    expect([pay.status, pay.body.error.code]).toEqual([409, 'already_paid'])
+    expect(pay.body.error.message).toBe('This order was already paid by card.')
+    // A voided card purchase no longer stands: the order can be paid with Zecca again.
+    cardCtx(h.app.core).store.voidHold(`auth_${created.orderId}`)
+    expect(ShopOrder.parse((await h.json('GET', `/v1/demo/shop/orders/${created.orderId}`)).body).status).toBe('pending')
+    expect((await h.json('POST', `/v1/payment-requests/${created.paymentRequest.id}/pay`, { token: ana.token })).status).toBe(200)
+  })
+
+  it('leaves other payment requests alone', async () => {
+    const { h } = await world({ env: { FEATURE_CARD: '1' } })
+    const ana = await h.signUp('ana')
+    const bruno = await h.signUp('bruno', { role: 'merchant', businessName: 'Bar Bruno' })
+    const pr = await h.json('POST', '/v1/payment-requests', { token: bruno.token, body: { amountMinor: 300 } })
+    expect((await h.json('POST', `/v1/payment-requests/${pr.body.id}/pay`, { token: ana.token })).status).toBe(200)
   })
 })

@@ -117,7 +117,13 @@ export function createHandlers(state: MockState, origin: string): HttpHandler[] 
       const pr = state.createRequest(shopToken, amountMinor, 'Sette Archi order')
       return { orderId: pr.id.replace(/^pr_/, 'ord_'), amountMinor, paymentRequest: pr }
     },
-    shopOrderGet: ({ params }) => ({ id: params.id, items: [{ sku: 'guji-250', name: 'Etiopia Guji, 250 g', qty: 1, unitMinor: 1450 }], amountMinor: 1450, status: 'pending', createdAt: new Date().toISOString() }),
+    shopOrderGet: ({ params }) => {
+      state.expireRequests()
+      const pr = state.data().paymentRequests[params.id.replace(/^ord_/, 'pr_')]
+      const order = { id: params.id, items: [{ sku: 'guji-250', name: 'Etiopia Guji, 250 g', qty: 1, unitMinor: 1450 }], amountMinor: 1450, status: 'pending', createdAt: new Date().toISOString() }
+      if (!pr) return order
+      return { ...order, status: pr.status === 'paid' ? 'paid' : 'pending', ...(pr.status === 'paid' ? { method: 'zecca' } : {}), paymentRequestId: pr.id, paymentStatus: pr.status, expiresAt: pr.expiresAt }
+    },
     shopCharge: ({ body }) => ({ approved: true, receipt: { ...fx.receipts.shopCard, reference: body.orderId } }),
     earnPosition: ({ token }) => (state.userOf(token), fx.earnPosition),
     earnDeposit: ({ token, body }) => (state.userOf(token), { intent: { ...fx.intents.p2pCreated, id: randomId('int'), kind: 'earn_deposit', amountMinor: body.amountMinor, toUserId: undefined, note: undefined }, prepared: fx.preparedSend, quote: { xrpDrops: Math.round((body.amountMinor / 220) * 1_000_000), rateMinorPerXrp: 220, swapFeeMinor: Math.floor((body.amountMinor * 30) / 10_000) } }),
