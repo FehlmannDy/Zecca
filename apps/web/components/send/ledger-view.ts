@@ -32,6 +32,9 @@ export function explorerHref(explorer: PublicConfig['explorer'], network: Networ
   return `${base.replace(/\/+$/, '')}/${hash}`
 }
 
+/** A refund (back to the card balance) and a declined or cancelled card purchase: nothing moves on the ledger. */
+const cardOffLedger = (a: Activity) => a.kind === 'card_purchase' && (a.direction === 'in' || a.status === 'failed')
+
 export function ledgerRows(a: Activity, mode: LedgerMode, opts: { explorer: PublicConfig['explorer'] }): LedgerRow[] {
   const partyLabel = a.direction === 'in' ? 'From' : 'To'
   if (mode === 'you') {
@@ -52,6 +55,7 @@ export function ledgerRows(a: Activity, mode: LedgerMode, opts: { explorer: Publ
       : { key, label, kind: 'waiting', text: failed ? 'Not sent' : waiting }
 
   // A card purchase shows on the ledger as one payment out of the pool to the card network, once the purchase clears.
+  if (cardOffLedger(a)) return []
   const card = a.kind === 'card_purchase'
   const rows: LedgerRow[] = [
     { key: 'amount', label: 'Amount', kind: 'sealed', ...(a.ledger.ciphertextPreview ? { preview: a.ledger.ciphertextPreview } : {}) },
@@ -59,8 +63,7 @@ export function ledgerRows(a: Activity, mode: LedgerMode, opts: { explorer: Publ
     { key: 'fee', label: 'Fee', kind: 'text', text: 'Not visible' },
   ]
   if (card) {
-    // A refund goes back to the card balance only: nothing moves on the ledger.
-    if (a.direction === 'out') rows.push(tx('payout', 'Out of the pool', a.ledger.payoutTxHash, 'When the purchase clears'))
+    rows.push(tx('payout', 'Out of the pool', a.ledger.payoutTxHash, 'When the purchase clears'))
     return rows
   }
   if (a.kind === 'welcome') {
@@ -78,6 +81,7 @@ export function ledgerRows(a: Activity, mode: LedgerMode, opts: { explorer: Publ
  */
 export function ledgerCaption(a: Activity, mode: LedgerMode): string {
   if (mode === 'you') return a.counterparty ? `What you and ${recipientShortName(a.counterparty)} see.` : 'What you see.'
+  if (cardOffLedger(a)) return 'What anyone reading the public ledger sees: nothing. This stays on your card.'
   const seen =
     a.kind === 'welcome'
       ? 'a payment happened'

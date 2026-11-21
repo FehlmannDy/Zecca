@@ -135,10 +135,12 @@ describe('a card purchase', () => {
     expect(ledgerCaption(purchase, 'everyone')).toBe('What anyone reading the public ledger sees: a payment out of the Zecca pool, not how much.')
   })
 
-  it('waits for the settlement until the purchase clears, and says nothing was sent when it was declined', () => {
+  it('waits for the settlement until the purchase clears; a declined or cancelled one never reaches the ledger', () => {
     const open = { ...purchase, status: 'pending' as const, ledger: { network: 'devnet' as const } }
     expect(ledgerRows(open, 'everyone', { explorer }).at(-1)).toEqual({ key: 'payout', label: 'Out of the pool', kind: 'waiting', text: 'When the purchase clears' })
-    expect(ledgerRows({ ...open, status: 'failed' }, 'everyone', { explorer }).at(-1)).toEqual({ key: 'payout', label: 'Out of the pool', kind: 'waiting', text: 'Not sent' })
+    const failed = { ...open, status: 'failed' as const }
+    expect(ledgerRows(failed, 'everyone', { explorer })).toEqual([])
+    expect(ledgerCaption(failed, 'everyone')).toBe('What anyone reading the public ledger sees: nothing. This stays on your card.')
   })
 
   it('says Paid', () => {
@@ -148,7 +150,9 @@ describe('a card purchase', () => {
   it('a refund comes back to the card, with no ledger payment', () => {
     const refund: Activity = { ...purchase, direction: 'in', receipt: undefined, ledger: { network: 'devnet' } }
     expect(ledgerRows(refund, 'you', { explorer })[1]).toEqual({ key: 'party', label: 'From', kind: 'party', text: 'Your card' })
-    expect(ledgerRows(refund, 'everyone', { explorer }).some((r) => r.key === 'payout' || r.key === 'deposit')).toBe(false)
+    // Nothing moves on the public ledger: no pool party, no payment.
+    expect(ledgerRows(refund, 'everyone', { explorer })).toEqual([])
+    expect(ledgerCaption(refund, 'everyone')).toBe('What anyone reading the public ledger sees: nothing. This stays on your card.')
   })
 })
 
