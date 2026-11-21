@@ -9,6 +9,7 @@ import { browserStorage, type WalletSigner } from './wallet/types'
 import { mockSignerForEmail, signInMock } from './wallet/mock'
 import { getPrivy, privyAccessToken, privySigner } from './wallet/privy'
 import { installPasskeyMfa } from './passkey/install'
+import { reconnectOnce } from './wallet/reconnect'
 
 export const API_ORIGIN = process.env.NEXT_PUBLIC_API_ORIGIN || DEFAULT_API_ORIGIN
 export const API_MOCK = process.env.NEXT_PUBLIC_API_MOCK === '1'
@@ -112,7 +113,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const cfg = configRef.current
     if (!cfg?.privyAppId) return {}
     const { manager, adapter } = await getPrivy(cfg.privyAppId)
-    const account = manager.account ?? (await manager.reconnect())
+    const account = manager.account ?? (await reconnectOnce(manager))
     if (!account?.publicKey) throw new Error("We couldn't finish signing you in. Try again.")
     return openSession(account.address, account.publicKey, await privyAccessToken(adapter))
   }, [openSession])
@@ -130,7 +131,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!cfg?.privyAppId) throw new Error('Sign-in is not configured.')
     if (!connectorEl) throw new Error('Approvals are still loading. Try again in a moment.')
     const { manager, adapter } = await getPrivy(cfg.privyAppId)
-    if (!manager.account) await manager.reconnect()
+    if (!manager.account) await reconnectOnce(manager)
     // Answers Privy's passkey check (Face ID) when the user enrolled one; does nothing otherwise.
     installPasskeyMfa(adapter)
     const signer = privySigner(manager)
@@ -172,7 +173,7 @@ function PrivyConnector({ appId }: { appId: string }) {
       if (!live || !el) return
       el.setWalletManager(manager)
       connectorEl = el
-      await manager.reconnect().catch(() => null)
+      await reconnectOnce(manager).catch(() => null)
     })()
     return () => {
       live = false
