@@ -229,6 +229,7 @@ describe('POST /v1/ramp/sign for the sell widget', () => {
     const s = await w.session(token)
     const u = new URL('https://sell-sandbox.moonpay.com/')
     for (const [k, v] of Object.entries(s.body.params as Record<string, string>)) u.searchParams.set(k, v)
+    u.searchParams.set('mpSdk', 'eyJ2ZXJzaW9uIjoiMS4wIn0') // the web SDK adds its own marker (seen live, 2026-11-21)
     edit(u.searchParams)
     return u
   }
