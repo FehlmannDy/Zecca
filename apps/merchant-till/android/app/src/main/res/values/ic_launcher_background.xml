@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- --paper from docs/UI.md: the launcher icon's background layer. -->
+    <!-- The paper token from docs/UI.md: the background layer of the launcher icon. -->
     <color name="ic_launcher_background">#F5F2EB</color>
 </resources>
