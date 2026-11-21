@@ -22,9 +22,9 @@ describe('ledgerRows: You', () => {
     ])
   })
 
-  it('says "From" for money received, and names Zecca for credits', () => {
+  it('says "From" for money received, and names the sign-up credit as the statement does', () => {
     const rows = ledgerRows(fx.activity.welcome, 'you', { explorer })
-    expect(rows[1]).toEqual({ key: 'party', label: 'From', kind: 'party', text: 'Zecca' })
+    expect(rows[1]).toEqual({ key: 'party', label: 'From', kind: 'party', text: 'Zecca demo credit' })
   })
 
   it('names where a top-up came from, as the statement does', () => {

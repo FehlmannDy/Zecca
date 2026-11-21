@@ -18,7 +18,7 @@ export type LedgerRow =
 const POOL_PAYOUT_KINDS: ReadonlySet<string> = new Set(['p2p', 'merchant', 'topup'])
 
 const PARTY_WITHOUT_PROFILE: Record<string, string> = {
-  welcome: 'Zecca',
+  welcome: 'Zecca demo credit',
   topup: 'Top up',
   card_load: 'Your card',
   card_purchase: 'Your card',
