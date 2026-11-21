@@ -64,7 +64,8 @@ function AssetRow({ asset, holding }: { asset: MarketAsset; holding?: Holding })
           <span className="block truncate text-[16px] font-[680]">{asset.name}</span>
           <span className="block truncate text-[13px] text-muted">{holding && holding.quantityMg > 0 ? `You hold ${gramsText(holding.quantityMg)}` : 'Per gram'}</span>
         </span>
-        <Sparkline values={asset.history} className="w-16 shrink-0" />
+        {/* Narrow phones: a shorter sparkline, none under 380 px, so the name and the holding are never cut (the change badge carries the trend). */}
+        <Sparkline values={asset.history} className="hidden w-10 shrink-0 min-[380px]:block min-[420px]:w-16" />
         <span className="flex shrink-0 flex-col items-end">
           <span className="tabular text-[16px] font-[700]">
             {formatUsd(asset.priceMinor)}
@@ -78,10 +79,11 @@ function AssetRow({ asset, holding }: { asset: MarketAsset; holding?: Holding })
   )
 }
 
+/** The metal's symbol in ink (readable in both themes), inside a ring in the metal's tone. */
 export function MetalMark({ symbol, size = 40 }: { symbol: string; size?: number }) {
-  const tone = symbol === 'XAU' ? '#A8842F' : symbol === 'XAG' ? '#8C9096' : '#6E7B86'
+  const tone = symbol === 'XAU' ? 'var(--brass)' : symbol === 'XAG' ? '#8C9096' : '#6E7B86'
   return (
-    <span className="inline-grid shrink-0 place-items-center rounded-full border border-line bg-surface text-[11px] font-[760] tracking-[0.04em]" style={{ width: size, height: size, color: tone }} aria-hidden="true">
+    <span className="inline-grid shrink-0 place-items-center rounded-full border-[1.5px] bg-surface text-[11px] font-[760] tracking-[0.04em] text-ink" style={{ width: size, height: size, borderColor: tone }} aria-hidden="true">
       {symbol === 'XAU' ? 'Au' : symbol === 'XAG' ? 'Ag' : 'Pd'}
     </span>
   )

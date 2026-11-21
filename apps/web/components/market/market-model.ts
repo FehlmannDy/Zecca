@@ -61,9 +61,9 @@ export function symbolOf(param: string): MetalSymbol | null {
   return p.success ? p.data : null
 }
 
-/** "Nov 20, 21:59" in the reader's time zone (or the one given). */
+/** "Nov 20, 9:59 PM" in the reader's time zone (or the one given): 12-hour, like every other screen. */
 export function priceTime(iso: string, timeZone?: string): string {
-  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', ...(timeZone ? { timeZone } : {}) })
+  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', ...(timeZone ? { timeZone } : {}) })
 }
 
 /** Hover labels for the daily closes of the chart, oldest first. */

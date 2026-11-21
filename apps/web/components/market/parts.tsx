@@ -31,7 +31,7 @@ export function Change({ pct, className }: { pct?: number; className?: string })
   )
 }
 
-/** "Price at Nov 20, 21:59 · COMEX via Yahoo Finance". The source says when it is a fixture. */
+/** "Price at Nov 20, 9:59 PM · COMEX via Yahoo Finance". The source says when it is a fixture. */
 export function PriceDate({ asset, className }: { asset: Pick<MarketAsset, 'priceAt' | 'priceSource'>; className?: string }) {
   return (
     <p className={cn('text-[12.5px] text-muted', className)}>
