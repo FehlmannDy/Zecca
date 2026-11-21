@@ -16,6 +16,7 @@ import { signAndSubmit } from '@/lib/wallet/sign-and-submit'
 import { Amount } from '@/components/zecca/amount'
 import { ArchesProgress } from '@/components/zecca/arches'
 import { Avatar, Button, Skeleton } from '@/components/zecca/bits'
+import { usePasskeyApproval } from '@/components/passkey/use-passkey'
 import { GlassBackdrop } from '@/components/zecca/glass'
 import { LimitSheet } from '@/components/zecca/limit-sheet'
 import { useHydrated } from '@/components/zecca/user-shell'
@@ -50,6 +51,9 @@ export function PayScreen({ id }: { id: string }) {
   const [status, setStatus] = useState('')
   const [returnTo, setReturnTo] = useState<string | null>(null)
   const [slow, setSlow] = useState(false)
+  // Like ApproveSheet: installs the passkey MFA handler next to Privy (a tap opens this page fresh, and without the
+  // handler a signature that needs Face ID would wait forever) and says "Approve with Face ID" when it applies.
+  const passkey = usePasskeyApproval()
 
   useEffect(() => {
     const r = new URLSearchParams(window.location.search).get('return')
@@ -170,7 +174,7 @@ export function PayScreen({ id }: { id: string }) {
                       <p className="text-[19px] font-[720] tracking-[-0.02em]">{payTitle(request)}</p>
                       <p className="mt-1 text-[14px] text-muted">No fee for you · from @{session?.user?.handle}</p>
                       <Button className="mt-5 w-full" onClick={approve} autoFocus>
-                        Approve
+                        {passkey.label}
                       </Button>
                     </>
                   )}
