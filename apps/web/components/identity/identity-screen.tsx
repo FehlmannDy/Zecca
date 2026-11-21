@@ -80,7 +80,8 @@ export function IdentityScreen() {
   }, [api, waiting, sessionId, expiresAt])
 
   // A new step replaces the control that had focus: focus moves to the step's heading instead of falling to <body>.
-  const step = phase.kind === 'session' ? phase.view.kind : user?.tier === 1 && !approveOpen ? 'done' : 'intro'
+  // Same order as the render below: once verified with the sheet closed, the DONE panel shows whatever the phase is.
+  const step = user?.tier === 1 && !approveOpen ? 'done' : phase.kind === 'session' ? phase.view.kind : 'intro'
   const shownStep = useRef(step)
   useEffect(() => {
     if (shownStep.current === step) return
