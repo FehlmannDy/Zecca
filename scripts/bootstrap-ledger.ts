@@ -130,6 +130,22 @@ export async function bootstrapLedger(opts: BootstrapOptions): Promise<{ created
     await ensureHolder('demoShop', { user: keystore.getWallet('demoShop').address })
     await ensureHolder('cardSettlement', { user: keystore.getWallet('cardSettlement').address })
 
+    // ---- the demo shop lets the relayer merge its inbox, like every merchant who signs up in the app (SPEC §2.5) ----
+    const shopAddress = keystore.getWallet('demoShop').address
+    const relayerAddress = keystore.getWallet('relayer').address
+    const delegations = (
+      (await devnet.request({ command: 'account_objects', account: shopAddress, type: 'delegate', ledger_index: 'validated' })).result
+        .account_objects as { Authorize?: string; Permissions?: { Permission: { PermissionValue: string } }[] }[]
+    ).filter((d) => d.Authorize === relayerAddress && d.Permissions?.some((p) => p.Permission.PermissionValue === 'ConfidentialMPTMergeInbox'))
+    if (!delegations.length) {
+      await submit(devnet, 'demoShop', 'demo shop delegation', {
+        TransactionType: 'DelegateSet',
+        Authorize: relayerAddress,
+        Permissions: [{ Permission: { PermissionValue: 'ConfidentialMPTMergeInbox' } }],
+      })
+      did('demoShop lets the relayer merge its inbox')
+    }
+
     // ---- issuer tickets (sign-up welcome credit) ----
     const tickets = (await listTickets(devnet, issuerAddress)).length
     if (tickets < ISSUER_TICKETS) {
