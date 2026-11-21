@@ -1,6 +1,7 @@
 'use client'
 // Home (UI.md §5.3): balance, "Available", "Arriving" when not zero, the tier 0 line, four actions, activity.
-// Phone: plain large number. Wide: the Peak Chart of the daily balance (real points from the activity list).
+// Phone: the large number counts to each new value, with a sparkline of the same series under it.
+// Wide: the Peak Chart of the daily balance (real points from the activity list).
 import { useCallback, useMemo, type ReactNode } from 'react'
 import Link from 'next/link'
 import { ArrowDownLeft, ArrowUpRight, Clock3, Plus, RotateCw, ScanLine } from 'lucide-react'
@@ -15,6 +16,7 @@ import { useWide } from '@/lib/use-media'
 import { ActivityRow, ActivityRowSkeleton } from './activity-row'
 import { Amount } from './amount'
 import { Button, EmptyState, Skeleton } from './bits'
+import { BalanceAmount, BalanceSpark } from './home-balance'
 import { Metric, Panel } from './glass'
 import { homeLinks, liveLabel, tierText as tierTextOf } from './home-model'
 
@@ -50,6 +52,7 @@ export function HomeScreen() {
   const b = balance.data
   const totalMinor = b ? b.availableMinor + b.pendingMinor : 0
   const series = useMemo(() => (b ? balanceSeries(items, totalMinor) : null), [items, b, totalMinor])
+  const sparkValues = useMemo(() => series?.points.map((p) => p.minor) ?? [], [series])
   const tier0 = session?.user?.tier === 0
   const links = homeLinks(config)
   const tierText = tierTextOf(config)
@@ -84,7 +87,7 @@ export function HomeScreen() {
       ) : (
         <>
           <div className="mt-2" aria-live="polite">
-            <Amount minor={b.availableMinor} size="hero" />
+            <BalanceAmount minor={b.availableMinor} account={session?.address} />
           </div>
           <p className="mt-2 text-[14px] text-muted">Available</p>
           {b.pendingMinor > 0 && (
@@ -93,6 +96,7 @@ export function HomeScreen() {
               Arriving: {formatUsd(b.pendingMinor)}
             </p>
           )}
+          {!wide && series && <BalanceSpark values={sparkValues} mode={series.mode} />}
           {tier0 && config && <p className="mt-4 border-t border-line pt-3 text-[13.5px] text-muted">{tierLine}</p>}
         </>
       )}
