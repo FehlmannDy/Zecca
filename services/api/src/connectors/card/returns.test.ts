@@ -9,7 +9,7 @@ import { users } from '../../users'
 import { createFakeLithic, type FakeLithic } from './fake-lithic'
 import { signHeaders } from './lithic-sig'
 import { cardBalanceOf, cardSync, mountCard, registerCard, stopCard } from './index'
-import { MAX_RETURN_TRIES } from './returns'
+import { LOOKUP_LIMIT, MAX_RETURN_TRIES } from './returns'
 import { cardCtx } from './context'
 
 async function world(o: { settlementKey?: boolean } = {}) {
@@ -166,6 +166,47 @@ describe('a refund on the ledger: card settlement account -> pool', () => {
     await pass(w)
     expect(w.sends(w.settlement, w.poolAddress)).toHaveLength(1)
     expect(row(w, key)?.status).toBe('sent')
+    await w.done()
+  })
+
+  it('a landed send whose answer was lost, pushed out of the lookup by incoming payments: stopped for a person, never sent twice', async () => {
+    const w = await world()
+    w.env.ledger.mock.credit(w.settlement, 1000)
+    w.env.ledger.mock.credit(w.poolAddress, LOOKUP_LIMIT)
+    loseNextSend(w.env.ledger, { applied: true })
+    const key = await shopRefunds(w, 300)
+    expect(row(w, key)?.status).toBe('reserved')
+    // As many payments into the settlement account as the lookup reads (pool settlements, or anyone paying its public address).
+    const poolKey = w.env.keystore.getElGamal('pool')
+    for (let i = 0; i < LOOKUP_LIMIT; i++) {
+      const r = await w.env.ledger.submitAs('pool', await w.env.ledger.buildSend({ from: w.poolAddress, to: w.settlement, amountMinor: 1, senderKey: poolKey, sponsored: false }))
+      expect(r.engineResult).toBe('tesSUCCESS')
+    }
+    await pass(w)
+    expect(w.sends(w.settlement, w.poolAddress)).toHaveLength(1)
+    expect(row(w, key)).toMatchObject({ status: 'stopped', error: expect.stringMatching(/check the card settlement account by hand/) })
+    await pass(w)
+    expect(w.sends(w.settlement, w.poolAddress)).toHaveLength(1)
+    await w.done()
+  })
+
+  it('the reserved sequence went to another transaction of the account: the return is sent fresh, once', async () => {
+    const w = await world()
+    w.env.ledger.mock.credit(w.settlement, 1000)
+    loseNextSend(w.env.ledger, { applied: false })
+    const key = await shopRefunds(w, 300)
+    const reserved = row(w, key)?.sequence
+    expect(row(w, key)?.status).toBe('reserved')
+    // Something else signed by the account takes that sequence (here: merging its inbox).
+    const m = await w.env.ledger.submitAs('cardSettlement', await w.env.ledger.buildMergeInbox({ account: w.settlement, sponsored: false }))
+    expect(m.engineResult).toBe('tesSUCCESS')
+    const merge = w.env.ledger.mock.txs().find((e) => e.hash === m.hash)
+    expect(Number(merge?.tx.Sequence)).toBe(reserved)
+    await pass(w)
+    expect(w.sends(w.settlement, w.poolAddress)).toHaveLength(1)
+    expect(row(w, key)).toMatchObject({ status: 'sent', txHash: w.sends(w.settlement, w.poolAddress)[0].hash })
+    await pass(w)
+    expect(w.sends(w.settlement, w.poolAddress)).toHaveLength(1)
     await w.done()
   })
 

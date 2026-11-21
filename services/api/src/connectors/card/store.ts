@@ -56,6 +56,8 @@ export type ReturnRow = {
   status: ReturnStatus
   sequence?: number
   lastLedger?: number
+  /** The validated ledger when the send was reserved: it can only have landed after it. */
+  fromLedger?: number
   fingerprint?: string
   txHash?: string
   error?: string
@@ -123,6 +125,7 @@ export function ensureCardTables(db: Db): void {
       status TEXT NOT NULL CHECK (status IN ('pending', 'reserved', 'sent', 'stopped')),
       sequence INTEGER,
       last_ledger INTEGER,
+      from_ledger INTEGER,
       fingerprint TEXT,
       tx_hash TEXT,
       error TEXT,
@@ -140,6 +143,8 @@ export function ensureCardTables(db: Db): void {
   // Added after the first version of the table: older databases get the column here.
   if (!(db.prepare('PRAGMA table_info(card_holds)').all() as Array<{ name: string }>).some((c) => c.name === 'clear_tries'))
     db.exec('ALTER TABLE card_holds ADD COLUMN clear_tries INTEGER')
+  if (!(db.prepare('PRAGMA table_info(card_returns)').all() as Array<{ name: string }>).some((c) => c.name === 'from_ledger'))
+    db.exec('ALTER TABLE card_returns ADD COLUMN from_ledger INTEGER')
 }
 
 function assertAmount(n: number): void {
@@ -221,6 +226,7 @@ type ReturnRaw = {
   status: ReturnStatus
   sequence: number | null
   last_ledger: number | null
+  from_ledger: number | null
   fingerprint: string | null
   tx_hash: string | null
   error: string | null
@@ -233,6 +239,7 @@ const returnFrom = (r: ReturnRaw | undefined): ReturnRow | undefined =>
     status: r.status,
     ...(r.sequence !== null ? { sequence: r.sequence } : {}),
     ...(r.last_ledger !== null ? { lastLedger: r.last_ledger } : {}),
+    ...(r.from_ledger !== null ? { fromLedger: r.from_ledger } : {}),
     ...(r.fingerprint ? { fingerprint: r.fingerprint } : {}),
     ...(r.tx_hash ? { txHash: r.tx_hash } : {}),
     ...(r.error ? { error: r.error } : {}),
@@ -388,10 +395,13 @@ export function cardStore(ctx: Ctx) {
       return returnFrom(db.prepare('SELECT * FROM card_returns WHERE key = ?').get(key) as ReturnRaw | undefined)?.tries ?? 0
     },
     /** Before the submit: a later pass looks this sequence up on the ledger before ever sending again. */
-    reserveReturn(key: string, r: { sequence: number; lastLedger: number; fingerprint?: string }): void {
-      db.prepare("UPDATE card_returns SET status = 'reserved', sequence = ?, last_ledger = ?, fingerprint = ?, updated_at = ? WHERE key = ? AND status IN ('pending', 'reserved')").run(
+    reserveReturn(key: string, r: { sequence: number; lastLedger: number; fromLedger: number; fingerprint?: string }): void {
+      db.prepare(
+        "UPDATE card_returns SET status = 'reserved', sequence = ?, last_ledger = ?, from_ledger = ?, fingerprint = ?, updated_at = ? WHERE key = ? AND status IN ('pending', 'reserved')",
+      ).run(
         r.sequence,
         r.lastLedger,
+        r.fromLedger,
         r.fingerprint ?? null,
         ctx.iso(),
         key,
@@ -415,7 +425,7 @@ export function cardStore(ctx: Ctx) {
         const e = error.slice(0, 300)
         if (o.stop) db.prepare("UPDATE card_returns SET status = 'stopped', error = ?, updated_at = ? WHERE key = ?").run(e, at, key)
         else if (o.release)
-          db.prepare("UPDATE card_returns SET status = 'pending', sequence = NULL, last_ledger = NULL, fingerprint = NULL, error = ?, updated_at = ? WHERE key = ?").run(e, at, key)
+          db.prepare("UPDATE card_returns SET status = 'pending', sequence = NULL, last_ledger = NULL, from_ledger = NULL, fingerprint = NULL, error = ?, updated_at = ? WHERE key = ?").run(e, at, key)
         else db.prepare('UPDATE card_returns SET error = ?, updated_at = ? WHERE key = ?').run(e, at, key)
         db.prepare('UPDATE card_holds SET settle_error = ?, updated_at = ? WHERE auth_token = ?').run(e, at, key)
       })()

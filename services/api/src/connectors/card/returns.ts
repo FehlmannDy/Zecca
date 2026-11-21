@@ -15,7 +15,7 @@ export const MAX_RETURN_TRIES = 20
 /** Ledgers the send may take before it can no longer validate (the builder sets none for our own accounts' sends). */
 const LLS_WINDOW = 20
 /** How far back the settlement account's transactions are read to find a reserved sequence. */
-const LOOKUP_LIMIT = 200
+export const LOOKUP_LIMIT = 200
 
 /** The fresh ciphertext of the send (ElGamal randomness): tells our tx from any other on the same sequence. */
 const fingerprintOf = (tx: Record<string, unknown>): string | undefined =>
@@ -32,13 +32,18 @@ type Lookup = { kind: 'found'; hash: string } | { kind: 'free' } | { kind: 'wait
 async function lookUp(core: Core, from: string, r: ReturnRow): Promise<Lookup> {
   if (r.sequence === undefined || r.lastLedger === undefined || !r.fingerprint) return { kind: 'unknown', why: `the reserved send of ${r.key} has no sequence, last ledger or fingerprint recorded` }
   const idx = await core.ledger.ledgerIndex()
-  const own = (await core.ledger.accountTx(from, LOOKUP_LIMIT)).filter((e) => e.validated && e.tx.Account === from)
+  const all = await core.ledger.accountTx(from, LOOKUP_LIMIT)
+  const own = all.filter((e) => e.validated && e.tx.Account === from)
   const hit = own.find((e) => Number(e.tx.Sequence) === r.sequence)
   if (hit) {
     if (hit.engineResult !== 'tesSUCCESS') return { kind: 'free' }
     return fingerprintOf(hit.tx) === r.fingerprint ? { kind: 'found', hash: hit.hash.toUpperCase() } : { kind: 'free' }
   }
   if (own.some((e) => Number(e.tx.Sequence) > r.sequence!)) return { kind: 'unknown', why: `sequence ${r.sequence} is older than the last ${own.length} transactions of the card settlement account` }
+  // Not there and nothing of ours after it: it never landed, or payments into the account pushed it out of what was read.
+  // Only a read that reaches back before the reserve (or holds the account's whole history) tells them apart.
+  const reachesBack = all.length < LOOKUP_LIMIT || (r.fromLedger !== undefined && all.some((e) => e.ledgerIndex > 0 && e.ledgerIndex < r.fromLedger!))
+  if (!reachesBack) return { kind: 'unknown', why: `the last ${all.length} transactions of the card settlement account do not reach back to the send at sequence ${r.sequence}` }
   return idx > r.lastLedger + 1 ? { kind: 'free' } : { kind: 'wait' }
 }
 
@@ -73,6 +78,7 @@ async function sendReturn(core: Core, ctx: CardCtx, r: ReturnRow): Promise<void>
 
   const tries = ctx.store.returnTry(r.key)
   let tx: UnsignedTx
+  let fromLedger: number
   try {
     const senderKey = keystore.getElGamal({ user: from })
     const b = await ledger.confidentialBalance(from, senderKey)
@@ -83,11 +89,12 @@ async function sendReturn(core: Core, ctx: CardCtx, r: ReturnRow): Promise<void>
       if (m.engineResult !== 'tesSUCCESS') return failed(core, ctx, r.key, tries, `card settlement MergeInbox: ${m.engineResult} tx=${m.hash}`)
     }
     tx = await ledger.buildSend({ from, to: keystore.getWallet('pool').address, amountMinor: r.amountMinor, senderKey, sponsored: false })
-    if (tx.LastLedgerSequence === undefined || tx.LastLedgerSequence === null) tx.LastLedgerSequence = (await ledger.ledgerIndex()) + LLS_WINDOW
+    fromLedger = await ledger.ledgerIndex()
+    if (tx.LastLedgerSequence === undefined || tx.LastLedgerSequence === null) tx.LastLedgerSequence = fromLedger + LLS_WINDOW
   } catch (e) {
     return failed(core, ctx, r.key, tries, `preparing the send failed: ${msg(e)}`)
   }
-  ctx.store.reserveReturn(r.key, { sequence: Number(tx.Sequence), lastLedger: Number(tx.LastLedgerSequence), fingerprint: fingerprintOf(tx) })
+  ctx.store.reserveReturn(r.key, { sequence: Number(tx.Sequence), lastLedger: Number(tx.LastLedgerSequence), fromLedger, fingerprint: fingerprintOf(tx) })
   let res: SubmitResult | undefined
   let thrown: unknown
   try {

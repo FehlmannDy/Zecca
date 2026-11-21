@@ -131,13 +131,14 @@ describe('card sub-ledger', () => {
     const { store } = fresh()
     store.refund({ key: 'ret_1', userId: 'u_ana', cardToken: 'card_tok', amountMinor: 250, merchant: 'Sette Archi' })
     expect(store.returnTry('ret_1')).toBe(1)
-    store.reserveReturn('ret_1', { sequence: 7, lastLedger: 1020, fingerprint: 'ConfidentialMPTSend:AA' })
-    expect(store.returnOf('ret_1')).toMatchObject({ status: 'reserved', sequence: 7, lastLedger: 1020, fingerprint: 'ConfidentialMPTSend:AA', tries: 1 })
+    store.reserveReturn('ret_1', { sequence: 7, lastLedger: 1020, fromLedger: 1000, fingerprint: 'ConfidentialMPTSend:AA' })
+    expect(store.returnOf('ret_1')).toMatchObject({ status: 'reserved', sequence: 7, lastLedger: 1020, fromLedger: 1000, fingerprint: 'ConfidentialMPTSend:AA', tries: 1 })
     store.returnFailed('ret_1', 'tecNO_PERMISSION', { release: true })
     expect(store.returnOf('ret_1')).toMatchObject({ status: 'pending', error: 'tecNO_PERMISSION' })
     expect(store.returnOf('ret_1')?.sequence).toBeUndefined()
+    expect(store.returnOf('ret_1')?.fromLedger).toBeUndefined()
     expect(store.hold('ret_1')?.settleError).toBe('tecNO_PERMISSION')
-    store.reserveReturn('ret_1', { sequence: 8, lastLedger: 1030, fingerprint: 'ConfidentialMPTSend:BB' })
+    store.reserveReturn('ret_1', { sequence: 8, lastLedger: 1030, fromLedger: 1010, fingerprint: 'ConfidentialMPTSend:BB' })
     store.returnSent('ret_1', 'CD'.repeat(32))
     expect(store.returnOf('ret_1')).toMatchObject({ status: 'sent', txHash: 'CD'.repeat(32) })
     expect(store.returnOf('ret_1')?.error).toBeUndefined()
@@ -155,6 +156,16 @@ describe('card sub-ledger', () => {
     store.refund({ key: 'ret_1', userId: 'u_ana', cardToken: 'card_tok', amountMinor: 250, merchant: 'Sette Archi' })
     db.exec('DELETE FROM card_returns')
     expect(cardStore(ctx).openReturns().map((r) => [r.key, r.amountMinor])).toEqual([['ret_1', 250]])
+  })
+
+  it('a card_returns table from before the reserve kept its ledger gets the column on start', () => {
+    const db = openDb(':memory:')
+    db.exec(`CREATE TABLE card_returns (key TEXT PRIMARY KEY, amount_minor INTEGER NOT NULL, status TEXT NOT NULL, sequence INTEGER, last_ledger INTEGER,
+      fingerprint TEXT, tx_hash TEXT, error TEXT, tries INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+    const store = cardStore({ db, iso: () => '2026-11-21T09:00:00.000Z' })
+    store.refund({ key: 'ret_1', userId: 'u_ana', cardToken: 'card_tok', amountMinor: 250, merchant: 'Sette Archi' })
+    store.reserveReturn('ret_1', { sequence: 7, lastLedger: 1020, fromLedger: 1000, fingerprint: 'ConfidentialMPTSend:AA' })
+    expect(store.returnOf('ret_1')).toMatchObject({ status: 'reserved', fromLedger: 1000 })
   })
 
   it('lists recent authorizations newest first, in the contract shape', () => {
