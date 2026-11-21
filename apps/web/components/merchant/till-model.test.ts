@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PaymentRequest } from '@zecca/contracts'
-import { expiresIn, isAndroid, mergeRequest, nfcIntentUrl, tillPhase, tillStatusLine } from './till-model'
+import { expiresIn, isAndroid, mergeRequest, nfcAppUrl, tillPhase, tillStatusLine } from './till-model'
 
 const pr = (status: PaymentRequest['status'], extra: Partial<PaymentRequest> = {}): PaymentRequest => ({
   id: 'pr_1',
@@ -48,10 +48,10 @@ describe('till view model', () => {
     expect(mergeRequest(pr('opened'), paid)).toBe(paid)
   })
 
-  it('NFC: an intent: link for the Zecca NFC app with the encoded request url', () => {
-    expect(nfcIntentUrl('https://zecca.example/pay/pr_1')).toBe(
-      'intent:#Intent;action=android.intent.action.VIEW;package=ch.ixh.nfcpaylink;S.url=https%3A%2F%2Fzecca.example%2Fpay%2Fpr_1;end',
-    )
+  it('NFC: the zecca-nfc:// deep link carries the encoded request url in its data (Firefox drops a data-less intent: link)', () => {
+    expect(nfcAppUrl('https://zecca.example/pay/pr_1')).toBe('zecca-nfc://emit?url=https%3A%2F%2Fzecca.example%2Fpay%2Fpr_1')
+    // The app splits the query on '&': the request url's own query stays inside the one url= parameter.
+    expect(nfcAppUrl('https://zecca.example/pay/pr_1?a=1&b=2')).toBe('zecca-nfc://emit?url=https%3A%2F%2Fzecca.example%2Fpay%2Fpr_1%3Fa%3D1%26b%3D2')
   })
 
   it('Android detection from the user agent', () => {

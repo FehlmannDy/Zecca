@@ -12,7 +12,8 @@ import { AmountKeypad } from '@/components/zecca/amount-keypad'
 import { ArchesProgress } from '@/components/zecca/arches'
 import { Button } from '@/components/zecca/bits'
 import { QrCode } from './qr-code'
-import { expiresIn, isAndroid, mergeRequest, nfcIntentUrl, tillPhase, tillStatusLine } from './till-model'
+import { expiresIn, isAndroid, mergeRequest, nfcAppUrl, tillPhase, tillStatusLine } from './till-model'
+import { copyText } from './copy-text'
 import { useInterval, useRequestStream } from './use-request-stream'
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -215,11 +216,12 @@ function ChargeScreen({ request, onRequest, onNew }: { request: PaymentRequest; 
         {open ? (
           <>
             <QrCode value={request.url} label={`Payment code for ${formatUsd(request.amountMinor)}`} className="mt-6 w-full max-w-[300px] border border-line" />
+            <CopyLink url={request.url} />
             {android && (
               <div className="mt-5 w-full max-w-[300px]">
                 <p className="text-[15px] font-[650]">Hold the customer&apos;s phone to the back of this one</p>
                 <a
-                  href={nfcIntentUrl(request.url)}
+                  href={nfcAppUrl(request.url)}
                   className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[14px] border border-line bg-surface px-5 text-[15px] font-[680] text-ink hover:border-ink/30"
                 >
                   <Nfc className="size-5" aria-hidden="true" />
@@ -253,6 +255,29 @@ function ChargeScreen({ request, onRequest, onNew }: { request: PaymentRequest; 
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/** "Copy link" under the QR: the pay link can always be pasted into NFC PayLink (or sent) by hand. */
+function CopyLink({ url }: { url: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'manual'>('idle')
+  return (
+    <div className="mt-3 flex w-full max-w-[300px] flex-col items-center gap-2">
+      <button
+        type="button"
+        onClick={async () => {
+          const r = await copyText(url)
+          setState(r)
+          if (r === 'copied') setTimeout(() => setState('idle'), 2000)
+        }}
+        className="inline-flex min-h-11 items-center justify-center rounded-[14px] px-4 text-[14.5px] font-[650] text-muted underline decoration-line underline-offset-4 hover:text-ink"
+      >
+        {state === 'copied' ? 'Copied.' : 'Copy link'}
+      </button>
+      {state === 'manual' && (
+        <input readOnly value={url} onFocus={(e) => e.currentTarget.select()} autoFocus aria-label="Payment link" className="w-full rounded-[14px] border border-line bg-surface px-3 py-2 text-[13px]" />
+      )}
     </div>
   )
 }

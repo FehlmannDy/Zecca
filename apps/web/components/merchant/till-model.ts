@@ -36,7 +36,15 @@ export function mergeRequest(current: PaymentRequest | null, incoming: PaymentRe
   return RANK[incoming.status] >= RANK[current.status] ? incoming : current
 }
 
-/** Opens the Zecca NFC app (apps/merchant-nfc) with the request link, from Chrome on Android. */
+/**
+ * Opens the Zecca NFC app (apps/merchant-nfc) with the request link. The custom-scheme deep link carries the link in its
+ * data, so it survives every browser (Firefox for Android drops the S.url extra of an intent: link: NFC test 2).
+ */
+export function nfcAppUrl(requestUrl: string): string {
+  return `zecca-nfc://emit?url=${encodeURIComponent(requestUrl)}`
+}
+
+/** The Chrome-only intent: form, kept for reference and tests. */
 export function nfcIntentUrl(requestUrl: string): string {
   return `intent:#Intent;action=android.intent.action.VIEW;package=ch.ixh.nfcpaylink;S.url=${encodeURIComponent(requestUrl)};end`
 }
