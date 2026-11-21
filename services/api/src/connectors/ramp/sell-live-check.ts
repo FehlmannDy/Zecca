@@ -4,8 +4,9 @@
 // sale from MoonPay, pay its deposit wallet from the treasury and answer { depositId }, then follow the sale's status.
 // MoonPay's email sign-in sits behind hCaptcha and refused a disposable inbox from an automated browser (DECISIONS), so the
 // full run is a human step: open the printed URL in a normal browser on this machine (same public IP as the signature).
-// Run from zecca/ (unsandboxed): node --env-file=.env -r ./scripts/dev/dnsfix.cjs node_modules/tsx/dist/cli.mjs services/api/src/connectors/ramp/sell-live-check.ts [--smoke]
+// Run from zecca/ (unsandboxed): node --env-file=.env -r ./scripts/dev/dnsfix.cjs node_modules/tsx/dist/cli.mjs services/api/src/connectors/ramp/sell-live-check.ts [--smoke] [--usd=60] [--port=3111]
 //   --smoke: opens the page in headless Chromium, checks MoonPay accepted the signature and shows the sale, and exits.
+//   --usd: the sale in whole dollars (default 60); --port: the local page's port (default 3111).
 // Keys come from the environment and are never printed (nor is a signed URL).
 import { createServer, type IncomingMessage } from 'node:http'
 import { createRequire } from 'node:module'
@@ -16,6 +17,7 @@ import { checkSellTx, debitMinor, paymentAmount, resolveDestination } from './se
 import { createLiveTreasuryPayer } from './treasury'
 
 const smoke = process.argv.includes('--smoke')
+const flag = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
 const log = (...a: unknown[]) => console.log(`[${new Date().toISOString()}]`, ...a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))))
 const keys = { publishableKey: process.env.MOONPAY_PUBLISHABLE_KEY ?? '', secretKey: process.env.MOONPAY_SECRET_KEY ?? '' }
 if (!keys.publishableKey || !keys.secretKey) throw new Error('MOONPAY_PUBLISHABLE_KEY / MOONPAY_SECRET_KEY are not set')
@@ -39,7 +41,7 @@ const params: Record<string, string> = {
   apiKey: keys.publishableKey,
   baseCurrencyCode: currencyCode,
   quoteCurrencyCode: 'usd',
-  quoteCurrencyAmount: process.env.SELL_USD ?? '60',
+  quoteCurrencyAmount: flag('usd') ?? '60',
   refundWalletAddress: secret.address,
   paymentMethod: 'credit_debit_card',
   externalCustomerId: 'usr_live_check',
@@ -115,7 +117,7 @@ const server = createServer(async (rq, rs) => {
     rs.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ error: (e as Error).message }))
   }
 })
-const port = Number(process.env.SELL_CHECK_PORT ?? 3111)
+const port = Number(flag('port') ?? 3111)
 await new Promise<void>((r) => server.listen(port, '127.0.0.1', () => r()))
 log(`open http://127.0.0.1:${port}/ in a browser on this machine, press the button and sell with a real inbox (sandbox KYC: UK address; payout card 4000 0209 5159 5032)`)
 
