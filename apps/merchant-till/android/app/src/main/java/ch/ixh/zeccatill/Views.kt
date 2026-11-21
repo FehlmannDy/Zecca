@@ -243,10 +243,15 @@ class BackdropDrawable(private val paper: Int, private val line: Int, private va
         }
     }
 
+    /** The light falloff changes only with the size: drawn once, at a quarter of the resolution (it is a soft glow). */
+    private var light: android.graphics.Bitmap? = null
+    private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+
     override fun draw(canvas: Canvas) {
         val b = bounds
         val w = b.width().toFloat()
         val h = b.height().toFloat()
+        if (w <= 0f || h <= 0f) return
         canvas.drawColor(paper)
         val s = maxOf(w / 1440f, h / 960f)
         canvas.save()
@@ -257,24 +262,33 @@ class BackdropDrawable(private val paper: Int, private val line: Int, private va
         stroke.strokeWidth = 3f
         canvas.drawPath(arches, stroke)
         canvas.restore()
+        val l = light?.takeIf { it.width == (w / 4).toInt().coerceAtLeast(1) && it.height == (h / 4).toInt().coerceAtLeast(1) } ?: lightLayer(w / 4, h / 4).also { light = it }
+        canvas.drawBitmap(l, null, android.graphics.RectF(b), bitmapPaint)
+    }
+
+    private fun lightLayer(w: Float, h: Float): android.graphics.Bitmap {
+        val bmp = android.graphics.Bitmap.createBitmap(w.toInt().coerceAtLeast(1), h.toInt().coerceAtLeast(1), android.graphics.Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val r = android.graphics.RectF(0f, 0f, w, h)
         // radial-gradient(55% 45% at 68% 40%, brass 12%, transparent 70%)
-        ellipse(canvas, w * 0.68f, h * 0.40f, w * 0.55f, h * 0.45f, intArrayOf(Ui.withAlpha(brass, 0.12f), Ui.withAlpha(brass, 0f)), floatArrayOf(0f, 0.7f))
+        ellipse(c, r, w * 0.68f, h * 0.40f, w * 0.55f, h * 0.45f, intArrayOf(Ui.withAlpha(brass, 0.12f), Ui.withAlpha(brass, 0f)), floatArrayOf(0f, 0.7f))
         // radial-gradient(45% 40% at 12% 88%, sealed 9%, transparent 70%)
-        ellipse(canvas, w * 0.12f, h * 0.88f, w * 0.45f, h * 0.40f, intArrayOf(Ui.withAlpha(sealed, 0.09f), Ui.withAlpha(sealed, 0f)), floatArrayOf(0f, 0.7f))
+        ellipse(c, r, w * 0.12f, h * 0.88f, w * 0.45f, h * 0.40f, intArrayOf(Ui.withAlpha(sealed, 0.09f), Ui.withAlpha(sealed, 0f)), floatArrayOf(0f, 0.7f))
         // radial-gradient(120% 90% at 50% 40%, transparent 55%, color-mix(paper 70%, ink 6%) 100%)
         val mix = android.graphics.Color.rgb(
             (android.graphics.Color.red(paper) * 70 + android.graphics.Color.red(ink) * 6) / 76,
             (android.graphics.Color.green(paper) * 70 + android.graphics.Color.green(ink) * 6) / 76,
             (android.graphics.Color.blue(paper) * 70 + android.graphics.Color.blue(ink) * 6) / 76,
         )
-        ellipse(canvas, w * 0.5f, h * 0.4f, w * 1.2f, h * 0.9f, intArrayOf(Ui.withAlpha(mix, 0f), Ui.withAlpha(mix, 0f), Ui.withAlpha(mix, 0.76f)), floatArrayOf(0f, 0.55f, 1f))
+        ellipse(c, r, w * 0.5f, h * 0.4f, w * 1.2f, h * 0.9f, intArrayOf(Ui.withAlpha(mix, 0f), Ui.withAlpha(mix, 0f), Ui.withAlpha(mix, 0.76f)), floatArrayOf(0f, 0.55f, 1f))
+        return bmp
     }
 
-    private fun ellipse(canvas: Canvas, cx: Float, cy: Float, rx: Float, ry: Float, colors: IntArray, stops: FloatArray) {
+    private fun ellipse(canvas: Canvas, area: android.graphics.RectF, cx: Float, cy: Float, rx: Float, ry: Float, colors: IntArray, stops: FloatArray) {
         val g = android.graphics.RadialGradient(cx, cy, rx, colors, stops, android.graphics.Shader.TileMode.CLAMP)
         g.setLocalMatrix(android.graphics.Matrix().apply { setScale(1f, ry / rx, cx, cy) })
         glow.shader = g
-        canvas.drawRect(bounds, glow)
+        canvas.drawRect(area, glow)
     }
 
     override fun setAlpha(alpha: Int) {}

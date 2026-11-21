@@ -4,7 +4,6 @@ import android.Manifest
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -56,7 +55,10 @@ class MainActivity : Activity() {
 
     private lateinit var ui: Ui
     private lateinit var store: TillStore
+    /** The window: its background runs under the status and navigation bars. */
     private lateinit var root: FrameLayout
+    /** The screen, inside the system bars (and above the keyboard). */
+    private lateinit var content: FrameLayout
     private val main = Handler(Looper.getMainLooper())
     private var api: TillApi? = null
     private var nfc: NfcAdapter? = null
@@ -99,6 +101,8 @@ class MainActivity : Activity() {
         store = TillStore(this)
         nfc = NfcAdapter.getDefaultAdapter(this)
         root = FrameLayout(this)
+        content = FrameLayout(this)
+        root.addView(content, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         setContentView(root)
         edgeToEdge()
         store.pairing()?.let { api = TillApi(it.api) { store.pairing()?.token } }
@@ -156,7 +160,7 @@ class MainActivity : Activity() {
         screen = next
         stopPolling()
         pulse?.cancel()
-        root.removeAllViews()
+        content.removeAllViews()
         when (next) {
             Screen.PAIR -> buildPair()
             Screen.TILL -> buildTill()
@@ -187,7 +191,7 @@ class MainActivity : Activity() {
         }
         outer.addView(col, FrameLayout.LayoutParams(ui.match, if (center) ui.match else ui.wrap))
         scroll.addView(outer, ViewGroup.LayoutParams(ui.match, ui.wrap))
-        root.addView(scroll, FrameLayout.LayoutParams(ui.match, ui.match))
+        content.addView(scroll, FrameLayout.LayoutParams(ui.match, ui.match))
         return col
     }
 
@@ -319,7 +323,7 @@ class MainActivity : Activity() {
         if (!data.startsWith("zecca-till:", ignoreCase = true)) return
         intent.data = null
         if (store.pairing() != null) {
-            AlertDialog.Builder(this).setMessage("This till is already paired with ${store.pairing()?.merchantName}. Unpair it first to pair it with another business.").setPositiveButton("OK", null).show()
+            ask("Already paired", "This till takes charges for ${store.pairing()?.merchantName}. Unpair it first to pair it with another business.", null, "OK") {}
             return
         }
         when (val r = PairingPayload.parse(data, BuildConfig.DEBUG)) {
@@ -356,9 +360,13 @@ class MainActivity : Activity() {
             addView(ui.text("Point the camera at the code in your Zecca merchant space.", 16f, ui.semibold, Color.WHITE).apply { gravity = Gravity.CENTER }, ui.lp())
             addView(ui.button("Cancel", Ui.Kind.GHOST).apply { setTextColor(Color.WHITE); setOnClickListener { stopScan() } }, ui.lp(width = ui.wrap, top = 12))
         }
-        overlay.addView(bottom, FrameLayout.LayoutParams(ui.match, ui.wrap, Gravity.BOTTOM))
         overlay.addView(ScanFrame(this, ui.dp(260).toFloat(), ui.dp(20).toFloat(), ui.dp(3).toFloat()), FrameLayout.LayoutParams(ui.match, ui.match))
-        applyInsets(overlay)
+        overlay.addView(bottom, FrameLayout.LayoutParams(ui.match, ui.wrap, Gravity.BOTTOM))
+        bottom.setOnApplyWindowInsetsListener { v, insets ->
+            @Suppress("DEPRECATION") val nav = if (Build.VERSION.SDK_INT >= 30) insets.getInsets(WindowInsets.Type.navigationBars()).bottom else insets.systemWindowInsetBottom
+            v.setPadding(ui.dp(24), ui.dp(16), ui.dp(24), ui.dp(24) + nav)
+            insets
+        }
         root.addView(overlay, FrameLayout.LayoutParams(ui.match, ui.match))
         scanOverlay = overlay
         systemBarIcons(dark = false)
@@ -515,12 +523,32 @@ class MainActivity : Activity() {
 
     private fun confirmUnpair() {
         val name = store.pairing()?.merchantName.orEmpty()
-        AlertDialog.Builder(this)
-            .setTitle("Unpair this till?")
-            .setMessage("It stops taking charges for $name. Remove it from Tills in your merchant space too.")
-            .setPositiveButton("Unpair") { _, _ -> unpair(null) }
-            .setNegativeButton("Keep", null)
-            .show()
+        ask("Unpair this till?", "It stops taking charges for $name. Remove it from Tills in your merchant space too.", "Keep", "Unpair") { unpair(null) }
+    }
+
+    /** A small card in Zecca's look (radius 20, --surface, the web's buttons) instead of the system dialog. */
+    private fun ask(title: String, message: String, cancel: String?, confirm: String, onConfirm: () -> Unit) {
+        val d = android.app.Dialog(this)
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val card = ui.column(Gravity.START).apply {
+            background = ui.rounded(ui.surface, 20f, ui.line)
+            setPadding(ui.dp(24), ui.dp(24), ui.dp(24), ui.dp(20))
+            addView(ui.text(title, 19f, ui.extrabold, ui.ink, -0.02f), ui.lp(gravity = Gravity.START))
+            addView(ui.text(message, 15f, ui.regular, ui.muted), ui.lp(top = 8, gravity = Gravity.START))
+            val buttons = ui.row(Gravity.END or Gravity.CENTER_VERTICAL)
+            if (cancel != null) buttons.addView(ui.button(cancel, Ui.Kind.GHOST).apply { setTextColor(ui.ink); setOnClickListener { d.dismiss() } })
+            buttons.addView(ui.button(confirm).apply {
+                setOnClickListener {
+                    d.dismiss()
+                    onConfirm()
+                }
+            }, LinearLayout.LayoutParams(ui.wrap, ui.wrap).apply { leftMargin = ui.dp(8) })
+            addView(buttons, ui.lp(top = 24))
+        }
+        d.setContentView(card)
+        d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        d.window?.setLayout(minOf(resources.displayMetrics.widthPixels - ui.dp(48), ui.dp(380)), ViewGroup.LayoutParams.WRAP_CONTENT)
+        d.show()
     }
 
     private fun unpair(notice: String?) {
@@ -739,7 +767,8 @@ class MainActivity : Activity() {
                 minWidth = ui.dp(220)
                 setOnClickListener { newCharge() }
             }, ui.lp(width = ui.wrap, top = 40))
-            if (animate) arches.post { arches.complete() } else arches.fill = 7f
+            // A beat after the screen turns green, the arches fill one after the other.
+            if (animate) arches.postDelayed({ arches.complete() }, 180) else arches.fill = 7f
             arches.post {
                 root.performHapticFeedback(if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.LONG_PRESS)
                 root.announceForAccessibility("Paid, ${Money.spoken(c.amountMinor)}")
@@ -784,7 +813,7 @@ class MainActivity : Activity() {
         } else {
             window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
         }
-        applyInsets(root)
+        applyInsets(content)
     }
 
     @Suppress("DEPRECATION")
