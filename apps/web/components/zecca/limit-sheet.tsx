@@ -1,11 +1,14 @@
 'use client'
 // UI.md §5.12: a sheet, not an error toast, when a tier 0 account hits a cap. The limit that was hit is
-// highlighted, from ApiError.details.limit.
+// highlighted, from ApiError.details.limit. Any other limit (a verified payer, a recipient who can't receive that much)
+// is said in one plain sentence instead (limit-view.ts).
 import Link from 'next/link'
 import { formatUsd, type Limits, type LimitName } from '@zecca/contracts'
 import type { ApiErrorDetails } from '@/lib/api'
 import { cn } from '@/lib/cn'
+import { useSession } from '@/lib/session'
 import { Button } from './bits'
+import { limitView } from './limit-view'
 import { Sheet } from './sheet'
 
 const ROWS: { key: LimitName; label: string; cap: (l: Limits) => number }[] = [
@@ -20,6 +23,7 @@ export function LimitSheet({
   limits,
   details,
   verifyHref,
+  message,
 }: {
   open: boolean
   onClose: () => void
@@ -27,8 +31,23 @@ export function LimitSheet({
   details?: ApiErrorDetails
   /** Where "Verify your identity" goes; leave out while identity is switched off. */
   verifyHref?: string
+  /** The API's error.message, shown as is when the limit is not one of the viewer's own tier 0 caps. */
+  message?: string
 }) {
-  const hit = details?.limit
+  const tier = useSession()?.user?.tier
+  const view = limitView({ tier, limits, details, message })
+  if (view.kind === 'other')
+    return (
+      <Sheet open={open} onClose={onClose} title={view.title}>
+        <p className="text-[15px] text-ink" role="alert">
+          {view.line}
+        </p>
+        <Button className="mt-6 w-full" onClick={onClose} data-autofocus>
+          OK
+        </Button>
+      </Sheet>
+    )
+  const hit = view.hit
   return (
     <Sheet open={open} onClose={onClose} title="You've reached the limit for unverified accounts.">
       <ul className="divide-y divide-line rounded-[16px] border border-line">
