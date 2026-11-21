@@ -139,7 +139,10 @@ export type ActivityKind = z.infer<typeof ActivityKind>
 export const ActivityLedger = z.object({
   depositTxHash: TxHash.optional(),
   payoutTxHash: TxHash.optional(),
+  /** Network of the deposit (and of the payout unless payoutNetwork says otherwise). */
   network: Network,
+  /** Network of the payout when it differs from the deposit's (a top-up: delivered on Testnet, paid out on Devnet). */
+  payoutNetwork: Network.optional(),
   /** First bytes of the on-ledger ciphertext of the amount, hex, for the "What the ledger shows" panel. */
   ciphertextPreview: z.string().optional(),
 })

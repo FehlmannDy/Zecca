@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { ActivityPage, Balance, Intent, IntentWithPrepared } from '@zecca/contracts'
 import { createFakePool, type FakeLedger, type FakePool } from '../testing/fakes'
 import { eventually, makeHarness } from '../testing/harness'
+import { intents } from './repo'
 
 async function two(o: { env?: Record<string, string>; pool?: FakePool } = {}) {
   const h = makeHarness<FakeLedger, FakePool>(o)
@@ -178,5 +179,38 @@ describe('reconciliation', () => {
     h.ledger.setConfidential(carla.user.address, { spendableMinor: 4000, inboxMinor: 500 })
     const diffs = await h.app.jobs.reconcile()
     expect(diffs).toEqual([{ userId: carla.user.id, handle: 'carla', booksMinor: 5000, ledgerMinor: 4500 }])
+  })
+})
+
+describe('top-ups delivered on Testnet (ramp)', () => {
+  const DELIVERY = 'A1'.repeat(32)
+
+  it('recovery mints a created top-up and keeps its Testnet delivery hash as the deposit hash', async () => {
+    const h = makeHarness<FakeLedger, FakePool>()
+    const ana = await h.signUp('ana')
+    const id = h.app.core.id('int')
+    intents.insert(h.app.core, { id, kind: 'topup', status: 'created', fromUserId: 'zecca', toUserId: ana.user.id, amountMinor: 2000, feeMinor: 0, network: 'testnet', depositTxHash: DELIVERY, reference: DELIVERY })
+    await h.app.jobs.tick()
+    await h.settle()
+    const i = intents.byId(h.app.core, id)!
+    expect(i).toMatchObject({ status: 'paid_out', depositTxHash: DELIVERY, network: 'testnet' })
+    expect(h.pool.mints).toEqual([{ amountMinor: 2000, reference: DELIVERY }])
+  })
+
+  it('a top-up activity says where its payout is: deposit on Testnet, payout on Devnet', async () => {
+    const h = makeHarness<FakeLedger, FakePool>()
+    const ana = await h.signUp('ana')
+    const id = h.app.core.id('int')
+    intents.insert(h.app.core, { id, kind: 'topup', status: 'created', fromUserId: 'zecca', toUserId: ana.user.id, amountMinor: 2000, feeMinor: 0, network: 'testnet', depositTxHash: DELIVERY, reference: DELIVERY })
+    await h.app.jobs.tick()
+    await h.settle()
+    const act = ActivityPage.parse((await h.json('GET', '/v1/activity', { token: ana.token })).body).items.find((a) => a.intentId === id)!
+    expect(act.ledger).toMatchObject({ network: 'testnet', depositTxHash: DELIVERY, payoutNetwork: 'devnet' })
+    expect(act.ledger.payoutTxHash).toMatch(/^[0-9A-F]{64}$/)
+    // A demo credit is all on Devnet.
+    await h.json('POST', '/v1/dev/credit', { token: ana.token, body: { amountMinor: 500 } })
+    await h.settle()
+    const credit = ActivityPage.parse((await h.json('GET', '/v1/activity', { token: ana.token })).body).items[0]
+    expect(credit.ledger).toMatchObject({ network: 'devnet', payoutNetwork: 'devnet' })
   })
 })

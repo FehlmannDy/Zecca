@@ -21,6 +21,7 @@ const PARTY_WITHOUT_PROFILE: Record<string, string> = {
   welcome: 'Zecca',
   topup: 'Top up',
   card_load: 'Your card',
+  card_purchase: 'Your card',
   earn_deposit: 'Earn',
   market_buy: 'Metals',
   withdraw: 'Withdrawal',
@@ -47,14 +48,21 @@ export function ledgerRows(a: Activity, mode: LedgerMode, opts: { explorer: Publ
   const failed = a.status === 'failed'
   const tx = (key: 'deposit' | 'payout', label: string, hash: string | undefined, waiting: string): LedgerRow =>
     hash
-      ? { key, label, kind: 'hash', hash, href: explorerHref(opts.explorer, a.ledger.network, hash) }
+      ? { key, label, kind: 'hash', hash, href: explorerHref(opts.explorer, key === 'payout' ? (a.ledger.payoutNetwork ?? a.ledger.network) : a.ledger.network, hash) }
       : { key, label, kind: 'waiting', text: failed ? 'Not sent' : waiting }
 
+  // A card purchase shows on the ledger as one payment out of the pool to the card network, once the purchase clears.
+  const card = a.kind === 'card_purchase'
   const rows: LedgerRow[] = [
     { key: 'amount', label: 'Amount', kind: 'sealed', ...(a.ledger.ciphertextPreview ? { preview: a.ledger.ciphertextPreview } : {}) },
-    { key: 'party', label: partyLabel, kind: 'party', text: a.kind === 'welcome' ? 'Zecca' : 'Zecca pool' },
+    { key: 'party', label: card ? 'From' : partyLabel, kind: 'party', text: a.kind === 'welcome' ? 'Zecca' : 'Zecca pool' },
     { key: 'fee', label: 'Fee', kind: 'text', text: 'Not visible' },
   ]
+  if (card) {
+    // A refund goes back to the card balance only: nothing moves on the ledger.
+    if (a.direction === 'out') rows.push(tx('payout', 'Out of the pool', a.ledger.payoutTxHash, 'When the purchase clears'))
+    return rows
+  }
   if (a.kind === 'welcome') {
     if (a.ledger.depositTxHash) rows.push(tx('deposit', 'Sign-up', a.ledger.depositTxHash, 'Waiting'))
     return rows
@@ -70,7 +78,14 @@ export function ledgerRows(a: Activity, mode: LedgerMode, opts: { explorer: Publ
  */
 export function ledgerCaption(a: Activity, mode: LedgerMode): string {
   if (mode === 'you') return a.counterparty ? `What you and ${recipientShortName(a.counterparty)} see.` : 'What you see.'
-  const seen = a.kind === 'welcome' ? 'a payment happened' : POOL_PAYOUT_KINDS.has(a.kind) ? 'a payment into the Zecca pool and one out of it' : 'a payment into the Zecca pool'
+  const seen =
+    a.kind === 'welcome'
+      ? 'a payment happened'
+      : a.kind === 'card_purchase'
+        ? 'a payment out of the Zecca pool'
+        : POOL_PAYOUT_KINDS.has(a.kind)
+          ? 'a payment into the Zecca pool and one out of it'
+          : 'a payment into the Zecca pool'
   return `What anyone reading the public ledger sees: ${seen}, not how much.`
 }
 
@@ -79,7 +94,7 @@ export function statusWord(a: Activity): string {
   if (a.status === 'failed') return 'Failed'
   if (a.status === 'pending') return a.direction === 'in' ? 'Arriving' : 'Sending'
   if (a.direction === 'in') return 'Received'
-  return a.kind === 'merchant' ? 'Paid' : 'Sent'
+  return a.kind === 'merchant' || a.kind === 'card_purchase' ? 'Paid' : 'Sent'
 }
 
 /** Take the latest status and hashes from an intent.updated event. Returns the same object when unrelated. */

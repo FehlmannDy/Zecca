@@ -94,6 +94,62 @@ describe('ledgerRows: Everyone else', () => {
     const dep = rows.find((r) => r.key === 'deposit')
     expect(dep && dep.kind === 'hash' && dep.href).toBe(`https://testnet.xrpl.org/transactions/${fx.HASH.topup}`)
   })
+
+  it('links a top-up payout on its own network (delivered on Testnet, paid out on Devnet)', () => {
+    const topup: Activity = { ...fx.activity.topup, ledger: { depositTxHash: fx.HASH.topup, payoutTxHash: fx.HASH.payout, network: 'testnet', payoutNetwork: 'devnet' } }
+    const rows = ledgerRows(topup, 'everyone', { explorer })
+    expect(rows.filter((r) => r.kind === 'hash').map((r) => r.kind === 'hash' && [r.key, r.href])).toEqual([
+      ['deposit', `https://testnet.xrpl.org/transactions/${fx.HASH.topup}`],
+      ['payout', `https://devnet.xrpl.org/transactions/${fx.HASH.payout}`],
+    ])
+  })
+})
+
+describe('a card purchase', () => {
+  const purchase: Activity = {
+    id: 'act_card_1',
+    intentId: 'auth_1',
+    direction: 'out',
+    kind: 'card_purchase',
+    amountMinor: 1450,
+    feeMinor: 0,
+    status: 'done',
+    at: fx.activity.topup.at,
+    ledger: { network: 'devnet', payoutTxHash: fx.HASH.payout },
+    receipt: { orderNumber: 'SA-1001', shopName: 'Sette Archi', items: [], amountMinor: 1450, method: 'card', cardLast4: '4417', status: 'completed', at: fx.activity.topup.at, reference: 'auth_1' },
+  }
+
+  it('You: the shop by name', () => {
+    expect(ledgerRows(purchase, 'you', { explorer })[1]).toEqual({ key: 'party', label: 'To', kind: 'party', text: 'Sette Archi' })
+  })
+
+  it('Everyone else: one payment out of the Zecca pool (the settlement), amount sealed, no shop name', () => {
+    const rows = ledgerRows(purchase, 'everyone', { explorer })
+    expect(rows).toEqual([
+      { key: 'amount', label: 'Amount', kind: 'sealed' },
+      { key: 'party', label: 'From', kind: 'party', text: 'Zecca pool' },
+      { key: 'fee', label: 'Fee', kind: 'text', text: 'Not visible' },
+      { key: 'payout', label: 'Out of the pool', kind: 'hash', hash: fx.HASH.payout, href: `https://devnet.xrpl.org/transactions/${fx.HASH.payout}` },
+    ])
+    expect(JSON.stringify(rows)).not.toContain('Sette')
+    expect(ledgerCaption(purchase, 'everyone')).toBe('What anyone reading the public ledger sees: a payment out of the Zecca pool, not how much.')
+  })
+
+  it('waits for the settlement until the purchase clears, and says nothing was sent when it was declined', () => {
+    const open = { ...purchase, status: 'pending' as const, ledger: { network: 'devnet' as const } }
+    expect(ledgerRows(open, 'everyone', { explorer }).at(-1)).toEqual({ key: 'payout', label: 'Out of the pool', kind: 'waiting', text: 'When the purchase clears' })
+    expect(ledgerRows({ ...open, status: 'failed' }, 'everyone', { explorer }).at(-1)).toEqual({ key: 'payout', label: 'Out of the pool', kind: 'waiting', text: 'Not sent' })
+  })
+
+  it('says Paid', () => {
+    expect(statusWord(purchase)).toBe('Paid')
+  })
+
+  it('a refund comes back to the card, with no ledger payment', () => {
+    const refund: Activity = { ...purchase, direction: 'in', receipt: undefined, ledger: { network: 'devnet' } }
+    expect(ledgerRows(refund, 'you', { explorer })[1]).toEqual({ key: 'party', label: 'From', kind: 'party', text: 'Your card' })
+    expect(ledgerRows(refund, 'everyone', { explorer }).some((r) => r.key === 'payout' || r.key === 'deposit')).toBe(false)
+  })
 })
 
 describe('statusWord', () => {

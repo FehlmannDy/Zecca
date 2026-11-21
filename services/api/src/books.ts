@@ -146,6 +146,8 @@ export function toActivity(core: Core, a: ActivityRow, intent?: IntentRow): Acti
       ...(i?.depositTxHash ? { depositTxHash: i.depositTxHash } : {}),
       ...(i?.payoutTxHash ? { payoutTxHash: i.payoutTxHash } : {}),
       network: i?.network ?? 'devnet',
+      // Top-ups are paid out of the pool on Devnet, whatever network delivered them.
+      ...(a.kind === 'topup' ? { payoutNetwork: 'devnet' as const } : {}),
       ...(i?.ciphertextPreview ? { ciphertextPreview: i.ciphertextPreview } : {}),
     },
     ...(a.receipt ? { receipt: a.receipt } : {}),

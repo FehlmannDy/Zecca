@@ -338,7 +338,8 @@ function runTopup(core: Core, id: string): Promise<void> {
     if (i.status !== 'created') return true
     try {
       const { hash } = await core.pool.mintIn(i.amountMinor, i.reference ?? `dev-credit:${id}`)
-      intents.transition(core, id, 'created', 'submitted', { depositTxHash: hash, submittedAt: core.iso() })
+      // A ramp top-up already carries its deposit: the Testnet delivery. The mint hash only stands in for a demo credit's.
+      intents.transition(core, id, 'created', 'submitted', { ...(i.depositTxHash ? {} : { depositTxHash: hash }), submittedAt: core.iso() })
     } catch (err) {
       core.log.error(`[topup] ${id} mint failed: ${(err as Error).message}`)
       intents.transition(core, id, 'created', 'failed', { failure: { code: 'mint_failed', message: "The top-up didn't go through. Nothing was charged." } })
