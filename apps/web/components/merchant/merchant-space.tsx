@@ -10,6 +10,8 @@ import { nextSpaceMode, type SpaceMode } from '@/lib/space-mode'
 import { useWide } from '@/lib/use-media'
 import { Dock, GlassRoot, Panel, type DockItem } from '@/components/zecca/glass'
 import { SignupGate } from '@/components/zecca/signup-gate'
+import { SpaceSwitch } from '@/components/zecca/space-switch'
+import { hasSpaceSwitch } from '@/components/zecca/space-switch-model'
 import { useHydrated } from '@/components/zecca/user-shell'
 import { Logo } from '@/components/zecca/wordmark'
 import { Sales } from './sales'
@@ -58,9 +60,12 @@ function Space({ view }: { view: MerchantView }) {
     <GlassRoot>
       <div className="mx-auto w-full max-w-[1120px] px-4 pb-32 pt-[max(16px,env(safe-area-inset-top))] lg:px-8 lg:pb-12">
         <header className="flex h-14 items-center justify-between gap-3">
-          <Link href="/merchant" aria-label="Business home" className="rounded-[10px]">
-            <Logo />
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/merchant" aria-label="Business home" className="inline-flex min-h-11 items-center rounded-[10px]">
+              <Logo className={hasSpaceSwitch(user) ? 'max-sm:[&>span]:hidden' : undefined} />
+            </Link>
+            <SpaceSwitch user={user} />
+          </div>
           <div className="flex items-center gap-2">
             <span className="hidden text-right sm:block">
               <span className="block text-[14px] font-[650] leading-tight">{name}</span>
@@ -76,9 +81,6 @@ function Space({ view }: { view: MerchantView }) {
                 </Link>
                 <Link href="/merchant/charge" className="inline-flex min-h-11 items-center rounded-[14px] bg-ink px-5 text-[14px] font-[700] text-paper hover:opacity-90">
                   Charge
-                </Link>
-                <Link href="/app" className="inline-flex min-h-11 items-center rounded-full border border-line bg-surface/70 px-4 text-[13px] font-[650]">
-                  Personal
                 </Link>
               </nav>
             )}

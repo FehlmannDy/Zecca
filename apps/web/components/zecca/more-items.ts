@@ -16,7 +16,7 @@ export function moreItems(config: PublicConfig, user: User): MoreItem[] {
   if (f.identity) items.push(user.tier === 1 ? { href: '/app/identity', label: 'Identity verified', hint: 'Limits lifted' } : { href: '/app/identity', label: 'Verify your identity', hint: 'Lift the limits' })
   if (f.proofs) items.push({ href: '/app/proofs', label: 'Statements', hint: 'Proof of payments for a tax office or an auditor' })
   if (f.passkey) items.push({ href: '/app/security', label: 'Face ID', hint: 'Approve payments with Face ID' })
-  if (user.role.includes('merchant') && user.merchant) items.push({ href: '/merchant', label: user.merchant.businessName, hint: 'Your business space' })
+  if (user.role.includes('merchant') && user.merchant) items.push({ href: '/merchant', label: `Switch to ${user.merchant.businessName}`, hint: 'Your business space' })
   items.push({ href: '/how-it-works', label: 'How Zecca works', hint: 'What the public ledger sees' })
   return items
 }

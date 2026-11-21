@@ -13,10 +13,10 @@ describe('More menu', () => {
     const on = labels(cfg({ card: true, earn: true, market: true, identity: true, proofs: true, passkey: true }), fx.users.ana as User)
     expect(on).toEqual(['Activity', 'Get paid', 'Add money', 'Card', 'Earn', 'Metals', 'Verify your identity', 'Statements', 'Face ID', 'How Zecca works'])
   })
-  it('a verified person sees "Identity verified", a merchant sees the business space', () => {
+  it('a verified person sees "Identity verified", a merchant can switch to the business space', () => {
     const items = moreItems(cfg({ identity: true }), { ...(fx.users.bruno as User), tier: 1 })
     expect(items.map((i) => i.label)).toContain('Identity verified')
-    expect(items.find((i) => i.label === 'Caffè Bruno')?.href).toBe('/merchant')
+    expect(items.find((i) => i.label === 'Switch to Caffè Bruno')).toEqual({ href: '/merchant', label: 'Switch to Caffè Bruno', hint: 'Your business space' })
   })
   it('top-up shows when the ramp is on or in demo mode', () => {
     expect(labels({ ...cfg({ ramp: false }), demoMode: false }, fx.users.ana as User)).not.toContain('Add money')
