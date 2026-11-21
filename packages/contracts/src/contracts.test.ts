@@ -94,6 +94,10 @@ describe('additions requested by phase 2 (Earn, L)', () => {
 })
 
 describe('route table', () => {
+  it('the Lithic webhook belongs to the card feature (dark while the card is off)', () => {
+    expect((C.routes.lithicWebhook as C.RouteDef).feature).toBe('card')
+  })
+
   it('every route is under /v1 and unique', () => {
     const keys = Object.values(C.routes).map((r) => `${r.method} ${r.path}`)
     expect(new Set(keys).size).toBe(keys.length)

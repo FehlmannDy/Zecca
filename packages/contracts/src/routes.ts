@@ -62,7 +62,7 @@ export const routes = {
   cardLoad: r({ method: 'POST', path: '/v1/card/load', auth: 'user', feature: 'card', phase: 2, body: A.CardLoadRequest, response: A.IntentWithPrepared }),
   cardFreeze: r({ method: 'POST', path: '/v1/card/freeze', auth: 'user', feature: 'card', phase: 2, response: Card }),
   cardUnfreeze: r({ method: 'POST', path: '/v1/card/unfreeze', auth: 'user', feature: 'card', phase: 2, response: Card }),
-  lithicWebhook: r({ method: 'POST', path: '/v1/webhooks/lithic/asa', auth: 'webhook', phase: 2, response: z.object({ token: z.string(), result: z.string() }) }),
+  lithicWebhook: r({ method: 'POST', path: '/v1/webhooks/lithic/asa', auth: 'webhook', feature: 'card', phase: 2, response: z.object({ token: z.string(), result: z.string() }) }),
   devCardSimulate: r({ method: 'POST', path: '/v1/dev/card/simulate', auth: 'dev', feature: 'card', phase: 2, body: A.DevCardSimulateRequest, response: A.DevCardSimulateResponse }),
   shopItems: r({ method: 'GET', path: '/v1/demo/shop/items', auth: 'demo', feature: 'demoShop', phase: 1, response: z.array(A.ShopItem) }),
   shopOrderCreate: r({ method: 'POST', path: '/v1/demo/shop/orders', auth: 'demo', feature: 'demoShop', phase: 1, body: A.ShopOrderCreate, response: A.ShopOrderCreated }),
