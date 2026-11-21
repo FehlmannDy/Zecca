@@ -27,20 +27,21 @@ The order of actions for the demo video: who does what, on which screen, what it
 | 1:35–2:00 | Ana, iPhone, then laptop | Open the payment in **Activity** → **What the ledger shows** → switch to **Everyone else**. Open the transaction link on the explorer. | The amount is a sealed block and the counterparty is "Zecca pool". On the public explorer, no readable amount. |
 | 2:00–2:45 | Merchant, Android till + Ana, iPhone | Till: type **4.50** → **Charge**. Full screen: amount, QR, "Hold the customer's phone to the back of this one". Ana taps the iPhone on the back of the till → "Pay $4.50 to Caffè Bruno" → **Approve with Face ID**. The till turns green: **Paid**, with the arches. | Tap to pay: the till serves the pay link over NFC itself, with the QR as a fallback. Paid at deposit validation, in about 10 s. |
 | 2:45–2:55 | Laptop, merchant sales | Show the new sale: $4.50, fee $0.02, net $4.48. | The merchant dashboard and Zecca's business model (0.5% merchant fee). |
-| 2:55–3:15 | Ana, iPhone (or laptop) | Demo shop `/demo/shop` → add a coffee → **Go to basket** → **Checkout** → **Pay … with Zecca** → **Approve** → **Order confirmed**. | Zecca as a checkout on a third-party site. |
+| 2:55–3:15 | Ana, iPhone (or laptop) | Demo shop `/demo/shop` → add a coffee → **Go to basket** → **Checkout** → **Pay with Zecca** → **Approve** → **Order confirmed**. | Zecca as a payment button on a third-party site (like Apple Pay / PayPal): a confidential on-ledger payment, no card. The card checkout comes at 4:10, once Ana is verified. |
 | 3:15–3:25 | Ana, iPhone | **Send** $60 → the limit sheet: "You've reached the limit for unverified accounts." → **Verify your identity**. | Tier-0 limits, a designed moment. |
 | 3:25–3:55 | Ana, iPhone + Paradym | **Continue** → **Other wallets** → open Paradym → share name and date of birth → back in Zecca: **Verified. Limits raised.** → one approval. | EU Digital Identity Wallet (OpenID4VP) → an on-ledger **XRPL Credential** (CredentialCreate by Zecca, CredentialAccept signed by Ana, sponsored). |
 | 3:55–4:10 | Ana, iPhone | **More → Earn** → add **$10** → **Approve**. *(Cut: the position shows about 2.5 min later; come back to it at 4:45.)* | Yield in XRP from Firelight on Flare: one XRPL Testnet payment opens a Flare smart account, mints FXRP and deposits. |
-| 4:10–4:25 | Ana, iPhone | **More → Card** → **Get my card** → **Load card** $10 → **Approve**. In the demo shop, pay by card → approved. | A virtual card (Lithic sandbox) funded from the confidential balance, purchases answered in milliseconds. |
-| 4:25–4:35 | Ana, iPhone | **More → Metals** → **Gold** → **Buy** 1 g → **Approve**. | Gold, silver and palladium as MPTs, with the price published on the ledger (OracleSet). |
-| 4:35–4:45 | Ana, iPhone | **More → Statements** → tick payments → **Create statement**. | A signed statement with a per-line proof that anyone can check against the public ledger. |
-| 4:45–4:52 | Ana, iPhone | **More → Earn**: the position is live. | Earn round trip; the withdrawal is proven too (README). |
-| 4:52–5:00 | Laptop, landing | https://zecca-beta.vercel.app and the GitHub repo. | Live on XRPL Devnet and Testnet. |
+| 4:10–4:30 | Ana, iPhone (card) + laptop (shop) | **More → Card** → **Get my card** → **Load card** $10 → **Approve**. Tap the card to show its number, expiry and code. On the laptop, demo shop → add an item → **Checkout** → **Pay by card** → type the Zecca card's number, expiry and code → **Pay $…** → approved. | The same virtual card works like any card at a normal card checkout (Lithic sandbox): funded from the confidential balance, purchase answered in milliseconds, settled on Devnet afterwards. |
+| 4:30–4:38 | Ana, iPhone | **More → Metals** → **Gold** → **Buy** 1 g → **Approve**. | Gold, silver and palladium as MPTs, with the price published on the ledger (OracleSet). |
+| 4:38–4:45 | Ana, iPhone | **More → Statements** → tick payments → **Create statement**. | A signed statement with a per-line proof that anyone can check against the public ledger. |
+| 4:45–4:55 | Ana, iPhone, then laptop | **More → Earn**: the position is live. Tap **Last payment** (the XRPL Testnet payment into Flare) and **Smart account** → the Coston2 explorer: FXRP minted, then deposited into the Firelight vault, and the vault shares on the account. | The money's path in public: one XRPL payment → Flare smart account → FXRP → Firelight vault. The withdrawal round trip is proven too (README). |
+| 4:55–5:00 | Laptop, landing | https://zecca-beta.vercel.app and the GitHub repo. | Live on XRPL Devnet and Testnet. |
 
 ## If something is slow
 
 - **Devnet slow or "not synced":** wait 30 s; the API retries by itself. Record that scene again.
 - **No email code:** use **Continue with Google**.
 - **NFC does not trigger:** scan the QR on the till instead; the flow is the same.
-- **Running long:** skip the demo shop (2:55) and the metals scene (4:25); everything else carries the story.
+- **Running long:** skip "Pay with Zecca" in the shop (2:55) and the metals scene (4:30); the card scene still shows the shop.
+- **Earn:** start the $10 Earn deposit before recording if possible, so the explorer path (XRPL payment → Flare smart account → Firelight vault) is ready to show; a fresh deposit takes about 2.5 min to reach the vault.
 - **Add money (MoonPay sandbox):** shown only if there is time, under **More → Add money**.
