@@ -111,6 +111,13 @@ describe('MoonPay API client', () => {
     expect(seen).toEqual(['/v1/transactions/a%20b?apiKey=pk_test_DUMMY', '/v1/transactions/ext/ramp_1?apiKey=pk_test_DUMMY'])
   })
 
+  it('looks up a sell transaction by id (v3)', async () => {
+    const seen: string[] = []
+    const api = createMoonPayApi({ publishableKey: 'pk_test_DUMMY', fetch: fakeFetch({ '/v3/sell_transactions/s%2F1': { status: 200, body: { id: 's/1' } } }, seen) })
+    expect(await api.getSellTransaction('s/1')).toEqual({ status: 200, body: { id: 's/1' } })
+    expect(seen).toEqual(['/v3/sell_transactions/s%2F1?apiKey=pk_test_DUMMY'])
+  })
+
   it('caches the full currency list (GET /v3/currencies/<code> is a 404), and retries after a failure', async () => {
     let calls = 0
     let fail = true

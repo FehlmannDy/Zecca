@@ -3,6 +3,7 @@
 // ledger (validated, tesSUCCESS, our treasury, Ripple's testnet RLUSD), for the DELIVERED amount (D5) times
 // RAMP_SANDBOX_SCALE, then through SPEC §2.7: the issuer mints that amount into the pool (reference = the delivery hash) and
 // the pool pays it out like any payout. One credit per MoonPay transaction and per delivery hash, whatever the trigger.
+// Withdrawal (MoonPay sell, FEATURE_WITHDRAW) lives in withdraw.ts; this file routes its session, signing, webhook and scan.
 import type { Context, Hono } from 'hono'
 import { formatUsd } from '@zecca/contracts'
 import type { Core } from '../../core'
@@ -18,12 +19,16 @@ import { createMoonPayApi, ipHash, redactUrl, signQuery, signedWidgetUrl, verify
 import { checkDelivery, creditMinor, type DeliveredCurrency, type DeliveryCheck } from './delivery'
 import { ensureRampTables, rampCredits, rampSessions, type RampSession } from './store'
 import { createLiveTestnetReader, type TestnetReader } from './testnet'
+import { createLiveTreasuryPayer, type TreasuryPayer } from './treasury'
+import { createWithdraw } from './withdraw'
 
 export type RampDeps = {
   /** MoonPay's public API (default: the real one with MOONPAY_PUBLISHABLE_KEY). */
   moonpay?: MoonPayApi
   /** XRPL Testnet reads (default: a live client on the public Testnet endpoint). */
   testnet?: TestnetReader
+  /** The Testnet treasury's payments to MoonPay for withdrawals (default: a live client signing with 'testnetTreasury'). */
+  treasury?: TreasuryPayer
   /** How often the watcher looks up open sessions at MoonPay, in ms (default 15000; 0 = only on treasury events). */
   pollMs?: number
 }
@@ -72,6 +77,7 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
   let testnet = deps.testnet
   const mp = () => (moonpay ??= createMoonPayApi({ publishableKey: keys()!.publishableKey }))
   const ledger = () => (testnet ??= createLiveTestnetReader({ log: (m) => core.log.warn(m) }))
+  let payer = deps.treasury
 
   /** Everything a session needs, or 503. */
   function ready(): { keys: { publishableKey: string; secretKey: string }; treasury: string } {
@@ -98,8 +104,21 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
     return blocked ? FALLBACK : PRIMARY
   }
 
+  const sell = createWithdraw({
+    core,
+    keys,
+    treasuryAddress: treasury,
+    mp,
+    treasury: () => (payer ??= createLiveTreasuryPayer({ keystore: core.keystore, log: (m) => core.log.warn(m) })),
+    clientIp,
+    pickCurrency,
+  })
+  sell.mountRoutes(app)
+  // Registered whatever the flag: a withdrawal the pool already holds is paid even if the flag goes off afterwards.
+  core.receivedHandlers.set('withdraw', sell.received)
+
   mount(app, core, 'rampSession', async ({ c, user, body }) => {
-    if (body.direction !== 'buy') throw Err.featureOff() // sell (withdraw) is not built: SPEC §4.5, FEATURE_WITHDRAW stays off
+    if (body.direction === 'sell') return sell.session(c, user!, body)
     const r = ready()
     const u = user!
     const fiatCurrency = (body.fiatCurrency ?? 'usd').toLowerCase()
@@ -152,7 +171,7 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
     if (q.get('apiKey') !== r.keys.publishableKey) return 'apiKey mismatch'
     for (const k of ['walletAddresses', 'refundWalletAddress', 'refundWalletAddresses', 'quoteCurrencyAmount']) if (q.has(k)) return `${k} not allowed`
     const s = rampSessions.byExternalId(core.db, q.get('externalTransactionId'))
-    if (!s || s.userId !== u.id) return 'externalTransactionId is not a session of this user'
+    if (!s || s.userId !== u.id || s.direction !== 'buy') return 'externalTransactionId is not a session of this user'
     if (s.doneAt) return 'session already credited'
     if (q.get('baseCurrencyAmount') !== s.fiatAmount || q.get('baseCurrencyCode') !== s.fiatCurrency) return 'amount is not the session amount'
     if (q.get('lockAmount') !== 'true') return 'amount not locked'
@@ -165,7 +184,7 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
   mount(app, core, 'rampSign', ({ user, body }) => {
     const r = ready()
     const url = new URL(body.url)
-    const why = refuseToSign(url, user!, r)
+    const why = /^sell(-sandbox)?\.moonpay\.com$/.test(url.hostname) ? sell.refuseToSign(url, user!) : refuseToSign(url, user!, r)
     if (why) {
       core.log.warn(`[ramp] refused to sign a widget URL for @${user!.handle}: ${why}`)
       throw Err.badRequest(COPY.badLink)
@@ -192,6 +211,8 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
     core.log.info(`[ramp] webhook ${body?.type} ${(body?.data as { status?: string })?.status ?? ''}`)
     // Buy events only (MoonPay never sent transaction_created; the first one is transaction_updated / pending).
     if (body?.type && /^transaction_/.test(body.type) && body.data) core.track(handle(body.data, 'webhook'), 'ramp webhook')
+    // Sell (withdrawal) events: kept whatever the withdraw flag, so a withdrawal in flight still learns its outcome.
+    if (body?.type && /^sell_transaction_/.test(body.type) && body.data) sell.onSellEvent(body.data)
     return { ok: true as const }
   })
 
@@ -210,7 +231,7 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
   async function handle(tx: any, source: 'webhook' | 'watcher'): Promise<Outcome> {
     if (!tx || typeof tx !== 'object' || typeof tx.id !== 'string') return 'ignored'
     const s = rampSessions.byExternalId(core.db, tx.externalTransactionId)
-    if (!s) return 'ignored' // not one of ours
+    if (!s || s.direction !== 'buy') return 'ignored' // not one of our top-ups
     if (tx.status === 'failed') {
       core.log.warn(`[ramp] MoonPay ${tx.id} for ${s.externalId} failed: ${tx.failureReason ?? 'no reason given'}`)
       return 'ignored'
@@ -341,6 +362,7 @@ export function mountRamp(app: Hono, core: Core, deps: RampDeps = {}): void {
       if (r?.status !== 200 || !Array.isArray(r.body)) continue // 404: no purchase yet
       for (const tx of r.body) await handle(tx, 'watcher')
     }
+    await sell.scan()
   }
 
   function scan(): Promise<void> {

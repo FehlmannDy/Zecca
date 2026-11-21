@@ -75,6 +75,8 @@ export type MoonPayApi = {
   /** Country and public IP as MoonPay sees them. No ip: the caller's own public IP (a local browser shares it). */
   ipCountry(ip: string | undefined): Promise<ApiResult>
   getBuyTransaction(id: string): Promise<ApiResult>
+  /** A sell (withdrawal) transaction by MoonPay's id: GET /v3/sell_transactions/:id. */
+  getSellTransaction(id: string): Promise<ApiResult>
   /** Buy transactions carrying our externalTransactionId (an array). */
   buyTransactionsByExternalId(externalId: string): Promise<ApiResult>
   /** One entry of the full /v3/currencies list, cached (there is no per-code endpoint). */
@@ -101,6 +103,7 @@ export function createMoonPayApi(o: { publishableKey: string; fetch?: typeof fet
   return {
     ipCountry: (ipAddress) => getJson('/v3/ip_address', { ipAddress }),
     getBuyTransaction: (id) => getJson(`/v1/transactions/${encodeURIComponent(id)}`),
+    getSellTransaction: (id) => getJson(`/v3/sell_transactions/${encodeURIComponent(id)}`),
     buyTransactionsByExternalId: (id) => getJson(`/v1/transactions/ext/${encodeURIComponent(id)}`),
     async currency(code) {
       currencies ??= getJson('/v3/currencies')

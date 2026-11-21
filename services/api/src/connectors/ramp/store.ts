@@ -133,12 +133,12 @@ export const rampSessions = {
     const r = db.prepare('SELECT * FROM ramp_sessions WHERE external_id = ?').get(id) as SessionRaw | undefined
     return r && sessionFromRaw(r)
   },
-  /** Sessions with no outcome yet created at or after `sinceIso`, newest first, at most `perUser` per user (so no one crowds out another). */
+  /** Top-up sessions with no outcome yet created at or after `sinceIso`, newest first, at most `perUser` per user (so no one crowds out another). */
   open(db: Db, sinceIso: string, perUser: number): RampSession[] {
     return (
       db
         .prepare(
-          `SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS nth FROM ramp_sessions WHERE done_at IS NULL AND created_at >= ?)
+          `SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS nth FROM ramp_sessions WHERE direction = 'buy' AND done_at IS NULL AND created_at >= ?)
            WHERE nth <= ? ORDER BY created_at DESC`,
         )
         .all(sinceIso, perUser) as SessionRaw[]

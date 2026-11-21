@@ -43,6 +43,9 @@ function fakeMoonPay() {
       const tx = [...byExt.values()].flat().find((t) => t.id === id)
       return tx ? { status: 200, body: tx } : { status: 404, body: { message: 'Transaction not found' } }
     },
+    async getSellTransaction() {
+      return { status: 404, body: { message: 'Transaction not found' } }
+    },
     async buyTransactionsByExternalId(id) {
       extCalls.push(id)
       const l = byExt.get(id)
@@ -183,7 +186,7 @@ describe('POST /v1/ramp/session', () => {
     }
   })
 
-  it('503 "Top-up is not available right now." without a Testnet treasury or MoonPay keys; sell is not built (feature_off)', async () => {
+  it('503 "Top-up is not available right now." without a Testnet treasury or MoonPay keys; sell needs FEATURE_WITHDRAW (feature_off)', async () => {
     const noTreasury = world({ treasury: false })
     const ana = await noTreasury.h.signUp('ana')
     const r = await noTreasury.session(ana.token)
