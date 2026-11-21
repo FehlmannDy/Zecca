@@ -45,6 +45,13 @@ const activity = async (h: H, u: TestUser) => {
   return ActivityPage.parse(r.body).items
 }
 const purchases = async (h: H, u: TestUser) => (await activity(h, u)).filter((a) => a.kind === 'card_purchase')
+/** A card with money and an approved purchase, written straight into the card store (works with the card feature off). */
+function cardInStore(h: H, u: TestUser) {
+  const store = cardCtx(h.app.core).store
+  store.linkCard(u.user.id, { id: 'card_1', token: 'lc_1', last4: '4417', expMonth: 11, expYear: 2029, state: 'OPEN', holderName: 'Ana Ferri' })
+  store.creditDeposit({ intentId: 'int_load_1', userId: u.user.id, amountMinor: 1000 })
+  expect(store.authorize({ authToken: 'auth_off_1', userId: u.user.id, cardToken: 'lc_1', amountMinor: 400, merchant: 'Bar Roma' }).approved).toBe(true)
+}
 const simulate = (h: H, u: TestUser, amountMinor: number, merchantName = 'Sette Archi') =>
   h.json('POST', '/v1/dev/card/simulate', { token: u.token, body: { amountMinor, merchantName } })
 
@@ -102,7 +109,8 @@ describe('card purchases in GET /v1/activity', () => {
     await h.settle()
     const p = (await purchases(h, ana))[0]
     expect(p.status).toBe('failed')
-    expect(p.note).toMatch(/back on your card/i)
+    // The shop's name stays (a void has no receipt), and the copy holds for an expiry or a late decline too.
+    expect(p.note).toBe('Sette Archi: cancelled. The money is back on your card.')
   })
 
   it('pushes the row live (activity.created) at the purchase and again when it completes', async () => {
@@ -146,6 +154,7 @@ describe('card purchases in GET /v1/activity', () => {
   it('shows nothing of the card while the card feature is off', async () => {
     const h = makeHarness()
     const ana = await h.signUp('ana')
+    cardInStore(h, ana)
     expect((await activity(h, ana)).some((a) => a.kind === 'card_purchase')).toBe(false)
   })
 })
@@ -163,6 +172,7 @@ describe('GET /v1/balance with a card', () => {
   it('has no cardMinor while the card feature is off', async () => {
     const h = makeHarness()
     const ana = await h.signUp('ana')
+    cardInStore(h, ana)
     expect((await h.json('GET', '/v1/balance', { token: ana.token })).body.cardMinor).toBeUndefined()
   })
 })

@@ -159,7 +159,9 @@ export function toActivity(core: Core, a: ActivityRow, intent?: IntentRow): Acti
 // activity row (intentId = the authorization id) gives it a place in the list; status, amount and receipt are read from
 // the hold each time, so they follow it (authorised -> completed, declined, voided).
 
-const CARD_COPY = { voided: 'Cancelled by the shop. The money is back on your card.' } as const
+// A void also comes from an expiry or Lithic's own late decline, so the copy does not blame the shop. It keeps the shop's
+// name: a void has no receipt to carry it.
+const voidedNote = (merchant: string) => `${merchant}: cancelled. The money is back on your card.`
 
 function cardPurchaseActivity(core: Core, a: ActivityRow): Activity {
   const store = cardCtx(core).store
@@ -167,7 +169,7 @@ function cardPurchaseActivity(core: Core, a: ActivityRow): Activity {
   const base: Activity = { id: a.id, intentId: a.intentId, direction: a.direction, kind: 'card_purchase', amountMinor: a.amountMinor, feeMinor: 0, status: 'pending', at: a.createdAt, ledger: { network: 'devnet' } }
   if (!h) return base
   const status: Activity['status'] = h.status === 'completed' || h.status === 'refunded' ? 'done' : h.status === 'authorised' ? 'pending' : 'failed'
-  const note = h.status === 'refunded' ? `Refund from ${h.merchant}` : h.status === 'declined' ? h.declineReason : h.status === 'voided' ? CARD_COPY.voided : undefined
+  const note = h.status === 'refunded' ? `Refund from ${h.merchant}` : h.status === 'declined' ? h.declineReason : h.status === 'voided' ? voidedNote(h.merchant) : undefined
   const receiptStatus = h.status === 'completed' ? 'completed' : h.status === 'authorised' ? 'authorised' : h.status === 'declined' ? 'declined' : undefined
   let receipt: Receipt | undefined
   if (receiptStatus && h.amountMinor > 0) {
