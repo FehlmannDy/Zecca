@@ -12,8 +12,8 @@ android {
         applicationId = "ch.ixh.nfcpaylink"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3"
+        versionCode = 4
+        versionName = "0.4"
         // Hosts whose /pay/ links this app may send over NFC (see PayLinkPolicy, README.md).
         val hosts = providers.gradleProperty("zeccaNfcHosts").getOrElse("")
         buildConfigField("String", "PAYLINK_HOSTS", "\"$hosts\"")
