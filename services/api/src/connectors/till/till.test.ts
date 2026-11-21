@@ -224,7 +224,7 @@ describe('till token scope', () => {
     const t = await pairedTill()
     const all = Object.entries(routes) as [RouteName, RouteDef][]
     for (const [name, def] of all) {
-      if (def.auth === 'public' || def.auth === 'webhook' || def.auth === 'demo') continue
+      if (def.auth === 'public' || def.auth === 'webhook' || def.auth === 'demo' || def.auth === 'till') continue
       const params = Object.fromEntries([...def.path.matchAll(/:([a-zA-Z]+)/g)].map((m) => [m[1], 'x']))
       const res = await h.call(def.method, routePath(name, params), { token: t.tillToken, ...(def.method === 'POST' ? { body: {} } : {}) })
       const label = `${def.method} ${def.path} -> ${res.status}`
@@ -232,13 +232,25 @@ describe('till token scope', () => {
       if (def.feature && !h.app.core.settings.features[def.feature as keyof typeof h.app.core.settings.features]) expect(res.status, label).toBe(404)
       else expect(res.status, label).toBe(401)
     }
-    for (const [method, path] of [
-      ['GET', '/v1/merchant/tills'],
-      ['POST', '/v1/merchant/tills'],
-      ['POST', `/v1/merchant/tills/${t.tillId}/revoke`],
-    ] as const) {
-      expect((await h.call(method, path, { token: t.tillToken })).status, `${method} ${path}`).toBe(401)
-    }
+    // The merchant's till routes are in the table: the till cannot list, pair or unpair tills.
+    expect((await h.call('POST', `/v1/merchant/tills/${t.tillId}/revoke`, { token: t.tillToken })).status).toBe(401)
+  })
+
+  it('the till routes are in the route table (till token only for the charges) and all mounted', () => {
+    const h = makeHarness()
+    const till = (Object.entries(routes) as [RouteName, RouteDef][]).filter(([n]) => n.startsWith('till'))
+    expect(Object.fromEntries(till.map(([n, d]) => [n, `${d.auth} ${d.method} ${d.path}`]))).toEqual({
+      tillPairingCreate: 'merchant POST /v1/merchant/tills',
+      tillList: 'merchant GET /v1/merchant/tills',
+      tillRevoke: 'merchant POST /v1/merchant/tills/:id/revoke',
+      tillPair: 'public POST /v1/till/pair',
+      tillChargeCreate: 'till POST /v1/till/charges',
+      tillChargeGet: 'till GET /v1/till/charges/:id',
+      tillChargeCancel: 'till POST /v1/till/charges/:id/cancel',
+    })
+    expect(till.every(([, d]) => !d.feature)).toBe(true)
+    const registered = new Set((h.app as unknown as { routes: { method: string; path: string }[] }).routes.map((r) => `${r.method} ${r.path}`))
+    expect(till.filter(([, d]) => !registered.has(`${d.method} ${d.path}`)).map(([n]) => n)).toEqual([])
   })
 
   it('the till routes refuse a user or merchant session, and no token', async () => {

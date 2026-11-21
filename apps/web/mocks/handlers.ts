@@ -135,6 +135,13 @@ export function createHandlers(state: MockState, origin: string): HttpHandler[] 
     marketOrder: ({ token, body }) => (state.userOf(token), { orderId: randomId('ord'), prepared: fx.preparedSend, quote: { quantityMg: 118, amountMinor: body.amountMinor ?? 1000, unitPriceMinor: 8454, spreadMinor: 10 } }),
     disclosureCreate: ({ token }) => (state.userOf(token), { id: fx.statement.id, url: `${state.config.webOrigin}/proofs/${fx.statement.id}` }),
     disclosureGet: () => fx.statement,
+    tillPairingCreate: ({ token }) => state.tillPairingCreate(token!, origin),
+    tillList: ({ token }) => state.tillList(token!),
+    tillRevoke: ({ token, params }) => state.tillRevoke(token!, params.id),
+    tillPair: ({ body }) => state.tillPair(body.code, body.name),
+    tillChargeCreate: ({ token, body }) => state.tillChargeCreate(token, body.amountMinor, body.reference),
+    tillChargeGet: ({ token, params }) => state.tillChargeGet(token, params.id),
+    tillChargeCancel: ({ token, params }) => state.tillChargeCancel(token, params.id),
   }
 
   const handlers: HttpHandler[] = []

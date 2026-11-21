@@ -2,7 +2,8 @@
 // made which payment request.
 import { createHash, randomBytes, randomInt } from 'node:crypto'
 import type { Core } from '../../core'
-import { CODE_ALPHABET, CODE_LENGTH, PAIRING_TTL_MS, type TillView } from './schemas'
+import type { ResponseOf } from '@zecca/contracts'
+import { CODE_ALPHABET, CODE_LENGTH, PAIRING_TTL_MS } from './schemas'
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')
 
@@ -73,7 +74,8 @@ export function redeemPairing(core: Core, code: string, name: string): { tillId:
 
 export type TillRow = { id: string; merchantId: string; name: string }
 
-/** The paired (not revoked) till holding this token; marks it seen. */
+/** The paired (not revoked) till holding this token; marks it seen. Found by the SHA-256 of the token (the secret itself
+ * is never compared, so the lookup time says nothing about it), as sessions are. */
 export function tillByToken(core: Core, token: string): TillRow | undefined {
   if (!token.startsWith('till_') || token.length > 200) return undefined
   const r = core.db.prepare('SELECT id, merchant_id, name FROM tills WHERE token_hash = ? AND revoked_at IS NULL').get(sha256(token)) as
@@ -84,7 +86,7 @@ export function tillByToken(core: Core, token: string): TillRow | undefined {
   return { id: r.id, merchantId: r.merchant_id, name: r.name }
 }
 
-export function listTills(core: Core, merchantId: string): TillView[] {
+export function listTills(core: Core, merchantId: string): ResponseOf<'tillList'>['items'] {
   const rows = core.db
     .prepare('SELECT id, name, created_at, last_seen_at FROM tills WHERE merchant_id = ? AND revoked_at IS NULL ORDER BY created_at DESC, id DESC')
     .all(merchantId) as Array<{ id: string; name: string; created_at: string; last_seen_at: string | null }>

@@ -3,6 +3,8 @@
 // intent state machine (submitted -> received -> paid_out) and events. Persisted to localStorage in the browser.
 import {
   DEFAULTS,
+  TILL_CODE_ALPHABET,
+  TILL_CODE_LENGTH,
   feeMinor as feeOf,
   formatUsd,
   type Activity,
@@ -69,6 +71,10 @@ type Data = {
   card: { state: 'OPEN' | 'PAUSED' | 'CLOSED' } | null
   /** Identity checks: who started them, when, the CredentialAccept to approve, and whether it was. */
   identity?: Record<string, { userId: string; startedAt: number; prepareId?: string; accepted?: boolean }>
+  /** Zecca Till: unused pairing codes, paired tills (token in clear: this is the mock) and which till made which request. */
+  tillCodes?: Record<string, { merchantId: string; expiresAt: string }>
+  tills?: Record<string, { id: string; merchantId: string; name: string; token: string; pairedAt: string; lastSeenAt?: string; revoked?: boolean }>
+  tillCharges?: Record<string, string>
   seq: number
 }
 
@@ -206,6 +212,21 @@ export function createMockState(opts: { features?: Partial<Features>; delays?: P
   function expireRequests() {
     for (const pr of Object.values(data.paymentRequests))
       if ((pr.status === 'created' || pr.status === 'opened') && Date.parse(pr.expiresAt) < Date.now()) setRequest(pr, { status: 'expired' })
+  }
+  /** The paired till behind a till token, and its merchant (POST /v1/till/charges and the other till routes). */
+  function tillOf(token: string | null) {
+    const till = token ? Object.values(data.tills ?? {}).find((t) => t.token === token && !t.revoked) : undefined
+    const merchant = till && data.users[till.merchantId]
+    if (!till || !merchant) return fail(401, 'unauthorized', 'This till is not paired. Pair it again from your Zecca merchant space.')
+    till.lastSeenAt = now()
+    return { till, merchant }
+  }
+  function tillCharge(token: string | null, id: string) {
+    const { till } = tillOf(token)
+    expireRequests()
+    const pr = data.paymentRequests[id]
+    if (!pr || data.tillCharges?.[id] !== till.id) fail(404, 'not_found', "We couldn't find this charge.")
+    return pr
   }
   function sendTx(account: string, publicKey: string): PreparedTx['tx'] {
     const p = fx.preparedSend.tx
@@ -588,6 +609,72 @@ export function createMockState(opts: { features?: Partial<Features>; delays?: P
     setCard(state: 'OPEN' | 'PAUSED' | 'CLOSED') {
       data.card = { state }
       save()
+    },
+
+    // ---------- Zecca Till (same rules as services/api/src/connectors/till) ----------
+    tillPairingCreate(token: string, apiOrigin: string) {
+      const u = userOf(token)
+      const codes = (data.tillCodes ??= {})
+      for (const [c, row] of Object.entries(codes)) if (row.merchantId === u.id) delete codes[c]
+      const code = Array.from({ length: TILL_CODE_LENGTH }, () => TILL_CODE_ALPHABET[Math.floor(Math.random() * TILL_CODE_ALPHABET.length)]).join('')
+      const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString()
+      codes[code] = { merchantId: u.id, expiresAt }
+      save()
+      return { pairingCode: code, qrPayload: `zecca-till://pair?api=${encodeURIComponent(apiOrigin)}&code=${code}`, expiresAt }
+    },
+    tillList(token: string) {
+      const u = userOf(token)
+      const mine = Object.values(data.tills ?? {}).filter((t) => t.merchantId === u.id && !t.revoked)
+      mine.sort((a, b) => b.pairedAt.localeCompare(a.pairedAt))
+      return { items: mine.map((t) => ({ id: t.id, name: t.name, pairedAt: t.pairedAt, ...(t.lastSeenAt ? { lastSeenAt: t.lastSeenAt } : {}) })) }
+    },
+    tillRevoke(token: string, id: string) {
+      const u = userOf(token)
+      const t = data.tills?.[id]
+      if (!t || t.merchantId !== u.id || t.revoked) fail(404, 'not_found', "We couldn't find this till.")
+      t!.revoked = true
+      save()
+      return { ok: true as const }
+    },
+    tillPair(rawCode: string, name?: string) {
+      const code = rawCode.toUpperCase().replace(/[\s-]+/g, '')
+      const row = data.tillCodes?.[code]
+      if (!row || Date.parse(row.expiresAt) <= Date.now()) return fail(400, 'bad_request', 'This code is not valid or has expired. Show a new one in your Zecca merchant space.')
+      delete data.tillCodes![code]
+      const id = randomId('till')
+      const token = `till_${hex(32).toLowerCase()}`
+      data.tills = { ...data.tills, [id]: { id, merchantId: row.merchantId, name: name ?? 'Till', token, pairedAt: now() } }
+      save()
+      const m = data.users[row.merchantId]
+      return { tillToken: token, merchantName: m?.merchant?.businessName ?? m?.displayName ?? 'Merchant', tillId: id }
+    },
+    tillChargeCreate(token: string | null, amountMinor: number, reference?: string) {
+      const { till, merchant } = tillOf(token)
+      const id = randomId('pr')
+      const ref = reference?.trim()
+      const pr: PaymentRequest = {
+        id,
+        merchantId: merchant.id,
+        merchantName: merchant.merchant?.businessName ?? merchant.displayName,
+        amountMinor,
+        ...(ref ? { reference: ref } : {}),
+        status: 'created',
+        url: `${config.webOrigin}/pay/${id}`,
+        expiresAt: new Date(Date.now() + DEFAULTS.PAYMENT_REQUEST_TTL_SECONDS * 1000).toISOString(),
+      }
+      data.paymentRequests[id] = pr
+      data.tillCharges = { ...data.tillCharges, [id]: till.id }
+      save()
+      return pr
+    },
+    tillChargeGet: (token: string | null, id: string) => ({ ...tillCharge(token, id) }),
+    tillChargeCancel(token: string | null, id: string) {
+      const pr = tillCharge(token, id)
+      if (pr.status === 'paid') fail(409, 'conflict', 'This request has already been paid.')
+      if (pr.status === 'expired') fail(409, 'conflict', 'This request has expired.')
+      if (pr.status !== 'cancelled') setRequest(pr, { status: 'cancelled' })
+      save()
+      return { ...pr }
     },
   }
 }

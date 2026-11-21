@@ -1,18 +1,18 @@
 'use client'
 // Pair a till (/merchant/pair): a single-use code, as a QR code and in large type, that Zecca Till (the merchant's
 // Android app, apps/merchant-till) scans or types to take charges for this business. Below it, the paired tills with "Unpair".
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Check, Download, Smartphone } from 'lucide-react'
 import { isApiError } from '@/lib/api'
 import { useApp } from '@/lib/app'
-import { sessionStore, useSession } from '@/lib/session'
+import { useSession } from '@/lib/session'
 import { Button, EmptyState, Skeleton } from '@/components/zecca/bits'
 import { GlassRoot, Panel } from '@/components/zecca/glass'
 import { useHydrated } from '@/components/zecca/user-shell'
 import { Logo } from '@/components/zecca/wordmark'
-import { TILL_APK_URL, createTillsApi, formatCode, newTillAfter, tillSubtitle, type PairingCode, type TillView } from '@/app/merchant/pair/pair-model'
+import { TILL_APK_URL, formatCode, newTillAfter, tillSubtitle, type PairingCode, type TillView } from '@/app/merchant/pair/pair-model'
 import { QrCode } from './qr-code'
 import { expiresIn } from './till-model'
 import { useInterval } from './use-request-stream'
@@ -64,7 +64,6 @@ export function PairTill() {
 
 function PairScreen() {
   const { api } = useApp()
-  const tills = useMemo(() => createTillsApi({ origin: api.origin, getToken: () => sessionStore().get()?.token }), [api])
   const [code, setCode] = useState<PairingCode | null>(null)
   const [codeError, setCodeError] = useState('')
   const [loadingCode, setLoadingCode] = useState(false)
@@ -76,7 +75,7 @@ function PairScreen() {
 
   const refresh = useCallback(async () => {
     try {
-      const { items } = await tills.list()
+      const { items } = await api.call('tillList')
       setListError('')
       setList(items)
       if (known.current) {
@@ -90,14 +89,14 @@ function PairScreen() {
     } catch (e) {
       setListError(message(e, "We couldn't load your tills. Try again."))
     }
-  }, [tills])
+  }, [api])
 
   const showCode = useCallback(async () => {
     setLoadingCode(true)
     setCodeError('')
     setPaired(null)
     try {
-      setCode(await tills.newCode())
+      setCode(await api.call('tillPairingCreate'))
       setNow(Date.now())
     } catch (e) {
       setCode(null)
@@ -105,7 +104,7 @@ function PairScreen() {
     } finally {
       setLoadingCode(false)
     }
-  }, [tills])
+  }, [api])
 
   // Once per visit (React's strict mode runs effects twice; a second code would replace the first one on screen).
   const started = useRef(false)
@@ -188,7 +187,7 @@ function PairScreen() {
           <ul className="divide-y divide-[var(--line)]">
             {list.map((t) => (
               <TillRow key={t.id} till={t} now={now} onUnpair={async () => {
-                await tills.revoke(t.id)
+                await api.call('tillRevoke', { params: { id: t.id } })
                 known.current = (known.current ?? []).filter((x) => x.id !== t.id)
                 setList((l) => (l ?? []).filter((x) => x.id !== t.id))
                 setPaired((p) => (p?.id === t.id ? null : p))

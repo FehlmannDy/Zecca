@@ -7,12 +7,13 @@ import { Activity, Balance, Intent, PaymentRequest, PreparedTx, User, Card, Card
  * The route table: the single source of truth for the HTTP API (base path /v1).
  * - auth: 'public' (no session), 'user' (Bearer session), 'merchant' (session with role merchant),
  *         'webhook' (public, vendor signature checked), 'demo' (public, only when DEMO_MODE=1),
- *         'dev' (session, only when DEMO_MODE=1)
+ *         'dev' (session, only when DEMO_MODE=1),
+ *         'till' (Bearer till token from POST /v1/till/pair; every other route refuses it)
  * - feature: the flag that must be on, otherwise 404 feature_off
  * - body / query: request schemas; response: the 2xx body schema ('sse' and 'csv' are streams)
  * The API's contract tests and the web's MSW handlers both iterate this table.
  */
-export type RouteAuth = 'public' | 'user' | 'merchant' | 'webhook' | 'demo' | 'dev'
+export type RouteAuth = 'public' | 'user' | 'merchant' | 'webhook' | 'demo' | 'dev' | 'till'
 export type RouteDef = {
   method: 'GET' | 'POST'
   path: string
@@ -78,6 +79,15 @@ export const routes = {
   marketOrder: r({ method: 'POST', path: '/v1/market/orders', auth: 'user', feature: 'market', phase: 2, body: A.MarketOrderRequest, response: A.MarketOrderResponse }),
   disclosureCreate: r({ method: 'POST', path: '/v1/disclosures', auth: 'user', feature: 'proofs', phase: 2, body: A.DisclosureRequest, response: A.DisclosureResponse }),
   disclosureGet: r({ method: 'GET', path: '/v1/disclosures/:id', auth: 'public', feature: 'proofs', phase: 2, response: A.DisclosureStatement }),
+
+  // ---------- Zecca Till (apps/merchant-till): always on ----------
+  tillPairingCreate: r({ method: 'POST', path: '/v1/merchant/tills', auth: 'merchant', phase: 2, response: A.TillPairingCode }),
+  tillList: r({ method: 'GET', path: '/v1/merchant/tills', auth: 'merchant', phase: 2, response: A.TillList }),
+  tillRevoke: r({ method: 'POST', path: '/v1/merchant/tills/:id/revoke', auth: 'merchant', phase: 2, response: A.Ok }),
+  tillPair: r({ method: 'POST', path: '/v1/till/pair', auth: 'public', phase: 2, body: A.TillPairRequest, response: A.TillPairResponse }),
+  tillChargeCreate: r({ method: 'POST', path: '/v1/till/charges', auth: 'till', phase: 2, body: A.PaymentRequestCreate, response: PaymentRequest }),
+  tillChargeGet: r({ method: 'GET', path: '/v1/till/charges/:id', auth: 'till', phase: 2, response: PaymentRequest }),
+  tillChargeCancel: r({ method: 'POST', path: '/v1/till/charges/:id/cancel', auth: 'till', phase: 2, response: PaymentRequest }),
 } as const satisfies Record<string, RouteDef>
 
 export type RouteName = keyof typeof routes

@@ -1,41 +1,11 @@
-// "Pair a till" (apps/merchant-till): the API calls behind /merchant/pair and the words on the screen.
-// The till routes are not in the shared route table (a till token is its own kind of auth), so this is a small client of its own.
-import { ApiError } from '@zecca/contracts'
-import { ZeccaApiError } from '../../../lib/api'
+// "Pair a till" (apps/merchant-till): the words on /merchant/pair. The calls are the till routes of the contracts' route table.
+import type { ResponseOf } from '@zecca/contracts'
 
-export type PairingCode = { pairingCode: string; qrPayload: string; expiresAt: string }
-export type TillView = { id: string; name: string; pairedAt: string; lastSeenAt?: string }
+export type PairingCode = ResponseOf<'tillPairingCreate'>
+export type TillView = ResponseOf<'tillList'>['items'][number]
 
 /** The Android app, as committed in the public repository. */
 export const TILL_APK_URL = 'https://github.com/FehlmannDy/Zecca/raw/main/apps/merchant-till/release/zecca-till.apk'
-
-const OFFLINE = "Can't reach Zecca right now. Check your connection and try again."
-const UNKNOWN = 'Something went wrong on our side. Try again in a moment.'
-
-export function createTillsApi(o: { origin: string; getToken: () => string | null | undefined; fetch?: typeof fetch }) {
-  const origin = o.origin.replace(/\/$/, '')
-  async function req<T>(method: 'GET' | 'POST', path: string): Promise<T> {
-    const headers: Record<string, string> = { accept: 'application/json' }
-    const token = o.getToken()
-    if (token) headers.authorization = `Bearer ${token}`
-    let res: Response
-    try {
-      res = await (o.fetch ?? fetch)(origin + path, { method, headers })
-    } catch {
-      throw new ZeccaApiError(0, { code: 'upstream_error', message: OFFLINE })
-    }
-    if (!res.ok) {
-      const parsed = ApiError.safeParse(await res.json().catch(() => null))
-      throw new ZeccaApiError(res.status, parsed.success ? parsed.data.error : { code: res.status >= 500 ? 'internal' : 'bad_request', message: UNKNOWN })
-    }
-    return (await res.json()) as T
-  }
-  return {
-    newCode: () => req<PairingCode>('POST', '/v1/merchant/tills'),
-    list: () => req<{ items: TillView[] }>('GET', '/v1/merchant/tills'),
-    revoke: (id: string) => req<{ ok: true }>('POST', `/v1/merchant/tills/${encodeURIComponent(id)}/revoke`),
-  }
-}
 
 /** "ABCD2345" -> "ABCD 2345": easier to read across a counter. */
 export const formatCode = (code: string): string => (code.length === 8 ? `${code.slice(0, 4)} ${code.slice(4)}` : code)

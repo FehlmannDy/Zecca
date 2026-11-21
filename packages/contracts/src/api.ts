@@ -193,6 +193,25 @@ export const DisclosureRequest = z.object({ activityIds: z.array(Id).min(1).max(
 export const DisclosureResponse = z.object({ id: Id, url: z.string().url() })
 export const DisclosureStatement = Statement
 
+// ---------- Zecca Till (apps/merchant-till): an Android till paired to a merchant by a single-use code ----------
+/** Pairing codes: no 0/O, 1/I/L, so a code read off a screen is typed right. */
+export const TILL_CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ'
+export const TILL_CODE_LENGTH = 8
+export const TillPairingCode = z.object({
+  pairingCode: z.string().regex(new RegExp(`^[${TILL_CODE_ALPHABET}]{${TILL_CODE_LENGTH}}$`)),
+  /** zecca-till://pair?api=<encoded API origin>&code=<code>: what the merchant space shows as a QR code. */
+  qrPayload: z.string().startsWith('zecca-till://pair?'),
+  expiresAt: IsoTime,
+})
+export const TillPairRequest = z.object({
+  code: z.string().min(1).max(40),
+  /** The phone's model, shown in the merchant's list of tills. */
+  name: z.string().trim().min(1).max(40).optional(),
+})
+export const TillPairResponse = z.object({ tillToken: z.string().min(40), merchantName: z.string(), tillId: Id })
+export const TillView = z.object({ id: Id, name: z.string(), pairedAt: IsoTime, lastSeenAt: IsoTime.optional() })
+export const TillList = z.object({ items: z.array(TillView) })
+
 // ---------- misc ----------
 export const Ok = z.object({ ok: z.literal(true) })
 export const HealthResponse = z.object({ ok: z.boolean(), ledger: z.enum(['mock', 'devnet']), version: z.string() })

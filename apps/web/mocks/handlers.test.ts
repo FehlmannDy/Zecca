@@ -149,6 +149,17 @@ describe('mock API handlers vs the contracts', () => {
     const disc = await h.call('disclosureCreate', { token: t, body: { activityIds: ['act_1'] } })
     await h.call('disclosureGet', { params: { id: disc.data.id } })
 
+    // Zecca Till: a code, pairing, a charge, reading and cancelling it, the list, unpairing
+    const code = await h.call('tillPairingCreate', { token: bruno.token })
+    expect(code.data.qrPayload).toBe(`zecca-till://pair?api=${encodeURIComponent(ORIGIN)}&code=${code.data.pairingCode}`)
+    const till = await h.call('tillPair', { body: { code: code.data.pairingCode, name: 'Pixel 8' } })
+    expect(till.data.merchantName).toBe('Caffè Test')
+    const charge = await h.call('tillChargeCreate', { token: till.data.tillToken, body: { amountMinor: 450, reference: 'Table 4' } })
+    expect((await h.call('tillChargeGet', { token: till.data.tillToken, params: { id: charge.data.id } })).data.status).toBe('created')
+    expect((await h.call('tillChargeCancel', { token: till.data.tillToken, params: { id: charge.data.id } })).data.status).toBe('cancelled')
+    expect((await h.call('tillList', { token: bruno.token })).data.items.map((x: { name: string }) => x.name)).toEqual(['Pixel 8'])
+    expect((await h.call('tillRevoke', { token: bruno.token, params: { id: till.data.tillId } })).data).toEqual({ ok: true })
+
     const missing = (Object.keys(routes) as RouteName[]).filter((n) => !h.hit.has(n))
     expect(missing).toEqual([])
   })
@@ -160,6 +171,34 @@ describe('mock API handlers vs the contracts', () => {
     expect((await h.call('me', { token })).status).toBe(404) // signed in, not signed up
     const u = await signUp(h, 'dario')
     expect((await h.call('paymentRequestCreate', { token: u.token, body: { amountMinor: 100 } })).status).toBe(403)
+  })
+
+  it('Zecca Till: a code pairs once, the till token only works on the till routes, and stops at once when unpaired', async () => {
+    const h = harness()
+    const bruno = await signUp(h, 'brunobar', 'merchant')
+    const ana = await signUp(h, 'anna')
+    expect((await h.call('tillPairingCreate', { token: ana.token })).status).toBe(403)
+    const code = await h.call('tillPairingCreate', { token: bruno.token })
+    const typed = `${code.data.pairingCode.slice(0, 4).toLowerCase()}-${code.data.pairingCode.slice(4)}`
+    const till = await h.call('tillPair', { body: { code: typed } })
+    expect(till.status).toBe(200)
+    const again = await h.call('tillPair', { body: { code: code.data.pairingCode } })
+    expect(again.status).toBe(400)
+    expect(again.data.error.message).toBe('This code is not valid or has expired. Show a new one in your Zecca merchant space.')
+
+    const t = till.data.tillToken as string
+    for (const name of ['me', 'balance', 'activity', 'sales', 'tillList'] as const) expect((await h.call(name, { token: t })).status, name).toBe(401)
+    expect((await h.call('transferCreate', { token: t, body: { to: fx.users.carla.id, amountMinor: 100 } })).status).toBe(401)
+    expect((await h.call('tillChargeCreate', { token: bruno.token, body: { amountMinor: 100 } })).status).toBe(401)
+    const web = await h.call('paymentRequestCreate', { token: bruno.token, body: { amountMinor: 200 } })
+    expect((await h.call('tillChargeGet', { token: t, params: { id: web.data.id } })).status).toBe(404)
+
+    const charge = await h.call('tillChargeCreate', { token: t, body: { amountMinor: 450 } })
+    expect(charge.data).toMatchObject({ status: 'created', merchantName: 'Caffè Test', amountMinor: 450 })
+    expect((await h.call('tillList', { token: bruno.token })).data.items[0]).toMatchObject({ name: 'Till', lastSeenAt: expect.any(String) })
+    await h.call('tillRevoke', { token: bruno.token, params: { id: till.data.tillId } })
+    expect((await h.call('tillChargeGet', { token: t, params: { id: charge.data.id } })).status).toBe(401)
+    expect((await h.call('tillList', { token: bruno.token })).data.items).toEqual([])
   })
 
   it('hides features that are off (404 feature_off)', async () => {

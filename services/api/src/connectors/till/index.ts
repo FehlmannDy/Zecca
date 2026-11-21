@@ -1,5 +1,5 @@
 // Zecca Till connector: pairs a merchant's Android till (apps/merchant-till) without Privy on the phone, then lets that
-// till create, read and cancel its own payment requests, and nothing else.
+// till create, read and cancel its own payment requests, and nothing else. Routes (contracts route table, till*):
 //   POST /v1/merchant/tills              merchant session -> a single-use 8-character code (10 min) and its QR payload
 //   GET  /v1/merchant/tills              merchant session -> the paired tills
 //   POST /v1/merchant/tills/:id/revoke   merchant session -> unpairs one (its token stops working at once)
@@ -9,20 +9,16 @@
 //   POST /v1/till/charges/:id/cancel     till token -> PaymentRequest
 // A till token is not a session: every other route refuses it (lookupSession never finds it).
 import type { Context, Hono } from 'hono'
-import type { z } from 'zod'
-import { PaymentRequestCreate, formatUsd } from '@zecca/contracts'
+import { formatUsd } from '@zecca/contracts'
 import type { Core } from '../../core'
 import { Err } from '../../errors'
-import { zodMessage } from '../../http'
-import { lookupSession } from '../../auth/sessions'
+import { mount } from '../../http'
 import { createRateLimiter } from '../../limits'
 import { users, type UserRow } from '../../users'
 import { requests, toPaymentRequest } from '../../paymentRequests/repo'
 import { emitRequest } from '../../paymentRequests/routes'
-import { TillPairRequest, isCode, normalizeCode } from './schemas'
+import { isCode, normalizeCode } from './schemas'
 import { createPairing, ensureTillTables, isTillCharge, listTills, recordCharge, redeemPairing, revokeTill, tillByToken, type TillRow } from './store'
-
-export { TillList, TillPairResponse, TillPairingCode, TillView, normalizeCode } from './schemas'
 
 export const TILL_COPY = {
   badCode: 'This code is not valid or has expired. Show a new one in your Zecca merchant space.',
@@ -34,41 +30,16 @@ export const TILL_COPY = {
 const PAIR_PER_ADDRESS_PER_MIN = 10
 const PAIR_GLOBAL_PER_MIN = 300
 
-function bearer(c: Context): string | undefined {
-  const h = c.req.header('authorization')
-  return h && /^Bearer\s+/i.test(h) ? h.replace(/^Bearer\s+/i, '').trim() : undefined
-}
-
-async function bodyOf<S extends z.ZodType>(c: Context, schema: S, message?: string): Promise<z.output<S>> {
-  let raw: unknown
-  try {
-    raw = await c.req.json()
-  } catch {
-    throw Err.badRequest('The request body must be JSON.')
-  }
-  const p = schema.safeParse(raw)
-  if (!p.success) throw Err.badRequest(message ?? zodMessage(p.error))
-  return p.data
-}
-
-function merchantOf(core: Core, c: Context): UserRow {
-  const token = bearer(c)
-  const s = token ? lookupSession(core, token) : undefined
-  if (!s) throw Err.unauthorized()
-  if (!s.user || s.user.status !== 'active') throw Err.notSignedUp()
-  if (!s.user.roles.includes('merchant')) throw Err.forbidden('This is for business accounts.')
-  return s.user
-}
-
 function tillOf(core: Core, c: Context): { till: TillRow; merchant: UserRow } {
-  const token = bearer(c)
+  const h = c.req.header('authorization')
+  const token = h && /^Bearer\s+/i.test(h) ? h.replace(/^Bearer\s+/i, '').trim() : undefined
   const till = token ? tillByToken(core, token) : undefined
   const merchant = till && users.byId(core, till.merchantId)
   if (!till || !merchant || merchant.status !== 'active' || !merchant.roles.includes('merchant')) throw Err.unauthorized(TILL_COPY.notPaired)
   return { till, merchant }
 }
 
-/** The API origin the till should talk to: API_ORIGIN, else the origin this request came in on. */
+/** The API origin the till should talk to: API_ORIGIN (set in production), else the origin this request came in on. */
 function apiOrigin(core: Core, c: Context): string {
   const env = core.env.API_ORIGIN?.trim().replace(/\/+$/, '')
   if (env) return env
@@ -86,39 +57,34 @@ export function mountTill(app: Hono, core: Core): void {
   const everyone = createRateLimiter(core, PAIR_GLOBAL_PER_MIN)
 
   // ---------- merchant session ----------
-  app.post('/v1/merchant/tills', (c) => {
-    const m = merchantOf(core, c)
-    core.rateLimit(`till-code:${m.id}`)
-    const { code, expiresAt } = createPairing(core, m.id)
-    const qrPayload = `zecca-till://pair?api=${encodeURIComponent(apiOrigin(core, c))}&code=${code}`
-    return c.json({ pairingCode: code, qrPayload, expiresAt })
+  mount(app, core, 'tillPairingCreate', ({ c, user }) => {
+    core.rateLimit(`till-code:${user!.id}`)
+    const { code, expiresAt } = createPairing(core, user!.id)
+    return { pairingCode: code, qrPayload: `zecca-till://pair?api=${encodeURIComponent(apiOrigin(core, c))}&code=${code}`, expiresAt }
   })
 
-  app.get('/v1/merchant/tills', (c) => c.json({ items: listTills(core, merchantOf(core, c).id) }))
+  mount(app, core, 'tillList', ({ user }) => ({ items: listTills(core, user!.id) }))
 
-  app.post('/v1/merchant/tills/:id/revoke', (c) => {
-    const m = merchantOf(core, c)
-    if (!revokeTill(core, m.id, c.req.param('id'))) throw Err.notFound("We couldn't find this till.")
-    return c.json({ ok: true })
+  mount(app, core, 'tillRevoke', ({ user, params }) => {
+    if (!revokeTill(core, user!.id, params.id)) throw Err.notFound("We couldn't find this till.")
+    return { ok: true as const }
   })
 
   // ---------- public: the till pairs ----------
-  app.post('/v1/till/pair', async (c) => {
+  mount(app, core, 'tillPair', ({ c, body }) => {
     perAddress.hit(clientAddress(c))
     everyone.hit('all')
-    const body = await bodyOf(c, TillPairRequest, 'Type the 8-character code shown in your Zecca merchant space.')
     const code = normalizeCode(body.code)
     const paired = isCode(code) ? redeemPairing(core, code, body.name ?? 'Till') : undefined
     if (!paired) throw Err.badRequest(TILL_COPY.badCode)
     const m = users.byId(core, paired.merchantId)
     core.log.info(`[till] paired ${paired.tillId} to ${paired.merchantId}`)
-    return c.json({ tillToken: paired.token, merchantName: m?.businessName ?? m?.displayName ?? 'Merchant', tillId: paired.tillId })
+    return { tillToken: paired.token, merchantName: m?.businessName ?? m?.displayName ?? 'Merchant', tillId: paired.tillId }
   })
 
   // ---------- till token ----------
-  app.post('/v1/till/charges', async (c) => {
+  mount(app, core, 'tillChargeCreate', ({ c, body }) => {
     const { till, merchant } = tillOf(core, c)
-    const body = await bodyOf(c, PaymentRequestCreate)
     const cap = core.settings.txCapMinor
     if (body.amountMinor > cap) throw Err.badRequest(`The most per charge is ${formatUsd(cap)}.`)
     // The same row the merchant's web till creates (paymentRequests/routes.ts, paymentRequestCreate).
@@ -131,29 +97,27 @@ export function mountTill(app: Hono, core: Core): void {
       expiresAt: core.iso(core.now() + core.settings.paymentRequestTtlMs),
     })
     recordCharge(core, r.id, till.id)
-    return c.json(toPaymentRequest(core, r))
+    return toPaymentRequest(core, r)
   })
 
-  app.get('/v1/till/charges/:id', (c) => {
+  mount(app, core, 'tillChargeGet', ({ c, params }) => {
     const { till } = tillOf(core, c)
-    const id = c.req.param('id')
     // The till is the merchant's own screen: reading never marks the request opened (only the customer's page does).
-    const r = isTillCharge(core, id, till.id) ? requests.refresh(core, id) : undefined
+    const r = isTillCharge(core, params.id, till.id) ? requests.refresh(core, params.id) : undefined
     if (!r) throw Err.notFound(TILL_COPY.noCharge)
-    return c.json(toPaymentRequest(core, r))
+    return toPaymentRequest(core, r)
   })
 
-  app.post('/v1/till/charges/:id/cancel', (c) => {
+  mount(app, core, 'tillChargeCancel', ({ c, params }) => {
     const { till } = tillOf(core, c)
-    const id = c.req.param('id')
-    const r = isTillCharge(core, id, till.id) ? requests.refresh(core, id) : undefined
+    const r = isTillCharge(core, params.id, till.id) ? requests.refresh(core, params.id) : undefined
     if (!r) throw Err.notFound(TILL_COPY.noCharge)
     // Same rules as POST /v1/payment-requests/:id/cancel.
-    if (r.status === 'cancelled') return c.json(toPaymentRequest(core, r))
+    if (r.status === 'cancelled') return toPaymentRequest(core, r)
     if (r.status !== 'created' && r.status !== 'opened') throw Err.conflict(r.status === 'paid' ? 'This request has already been paid.' : 'This request has expired.')
     if (r.claimedIntentId) throw Err.conflict('The customer is paying right now.')
     requests.transition(core, r.id, r.status, 'cancelled')
     emitRequest(core, r.id)
-    return c.json(toPaymentRequest(core, requests.byId(core, r.id)!))
+    return toPaymentRequest(core, requests.byId(core, r.id)!)
   })
 }
