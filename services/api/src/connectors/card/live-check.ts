@@ -116,6 +116,9 @@ export async function liveCheck(o: { port: number; zeccaRoot: string }): Promise
     say(`void: Lithic ${vt?.status} [${(vt?.events ?? []).map((e) => `${e.type}:${e.amount}`).join(',')}]; return: Lithic ${rt?.status} [${(rt?.events ?? []).map((e) => `${e.type}:${e.amount}`).join(',')}]`)
     const d2 = (await call('GET', '/v1/card', token)).body
     say(`after void and return: card balance ${d2.balanceMinor}; payments: ${d2.authorizations.map((a: { status: string; amountMinor: number; merchant: string }) => `${a.merchant} ${a.amountMinor} ${a.status}`).join(', ')}`)
+    await app.core.idle()
+    const back = ctx.store.returnOf(`${ret.token}:return`)
+    say(`return back to the pool: ${back ? `${back.status}${back.txHash ? ` tx=${back.txHash.slice(0, 12)}…` : back.error ? ` (${back.error})` : ''}` : 'nothing recorded'}`)
   } finally {
     server.close()
     await w.poolWorker.stop().catch(() => {})
