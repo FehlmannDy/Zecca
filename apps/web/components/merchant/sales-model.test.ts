@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Sale } from '@zecca/contracts'
-import { payerName, periodStart, salesInPeriod, salesSeries, totalsOf } from './sales-model'
+import { payerName, periodStart, radioStep, salesInPeriod, salesSeries, totalsOf } from './sales-model'
 
 // Local time is the machine's; build dates in local time so the buckets are stable anywhere.
 const local = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).toISOString()
@@ -50,5 +50,17 @@ describe('sales view model', () => {
   it("payer: the first name, or 'Customer'", () => {
     expect(payerName(sale(local(21, 9), 450, { payer: { id: 'u', handle: 'ana', displayName: 'Ana Ferri', isMerchant: false } }))).toBe('Ana')
     expect(payerName(sale(local(21, 9)))).toBe('Customer')
+  })
+})
+
+describe('radioStep (the period switch keyboard)', () => {
+  it('arrows move and wrap, Home and End jump, other keys do nothing', () => {
+    expect(radioStep(0, 3, 'ArrowRight')).toBe(1)
+    expect(radioStep(2, 3, 'ArrowDown')).toBe(0)
+    expect(radioStep(0, 3, 'ArrowLeft')).toBe(2)
+    expect(radioStep(1, 3, 'ArrowUp')).toBe(0)
+    expect(radioStep(1, 3, 'Home')).toBe(0)
+    expect(radioStep(0, 3, 'End')).toBe(2)
+    expect(radioStep(1, 3, 'Enter')).toBeNull()
   })
 })

@@ -59,3 +59,12 @@ export function salesSeries(items: Sale[], p: Period, now: Date): Array<{ label:
 }
 
 export const payerName = (s: Sale) => s.payer?.displayName.trim().split(/\s+/)[0] || 'Customer'
+
+/** The radio-group keyboard (WAI-ARIA): the option index a key moves to, or null when the key is not one of ours. */
+export function radioStep(index: number, length: number, key: string): number | null {
+  if (key === 'ArrowRight' || key === 'ArrowDown') return (index + 1) % length
+  if (key === 'ArrowLeft' || key === 'ArrowUp') return (index - 1 + length) % length
+  if (key === 'Home') return 0
+  if (key === 'End') return length - 1
+  return null
+}

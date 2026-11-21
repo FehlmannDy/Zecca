@@ -13,7 +13,7 @@ import { cn } from '@/lib/cn'
 import { Amount } from '@/components/zecca/amount'
 import { Button, EmptyState, Skeleton } from '@/components/zecca/bits'
 import { Badge, Metric, Panel } from '@/components/zecca/glass'
-import { PERIODS, payerName, periodStart, salesInPeriod, salesSeries, totalsOf, type Period } from './sales-model'
+import { PERIODS, payerName, periodStart, radioStep, salesInPeriod, salesSeries, totalsOf, type Period } from './sales-model'
 
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 const dayOf = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -71,14 +71,24 @@ export function Sales({ wide }: { wide: boolean }) {
     }
   }
 
+  // A radio group: one Tab stop (the checked option), arrows move the choice.
+  function onPeriodKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    const next = radioStep(PERIODS.indexOf(period), PERIODS.length, e.key)
+    if (next === null) return
+    e.preventDefault()
+    setPeriod(PERIODS[next])
+    e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus()
+  }
+
   const periodSwitch = (
-    <div role="radiogroup" aria-label="Period" className="inline-flex rounded-full border border-line bg-surface/70 p-1">
+    <div role="radiogroup" aria-label="Period" onKeyDown={onPeriodKey} className="inline-flex rounded-full border border-line bg-surface/70 p-1">
       {PERIODS.map((p) => (
         <button
           key={p}
           type="button"
           role="radio"
           aria-checked={p === period}
+          tabIndex={p === period ? 0 : -1}
           onClick={() => setPeriod(p)}
           className={cn('min-h-10 rounded-full px-4 text-[13.5px] font-[650] transition-colors duration-150', p === period ? 'bg-ink text-paper' : 'text-muted hover:text-ink')}
         >
@@ -108,7 +118,7 @@ export function Sales({ wide }: { wide: boolean }) {
     <Skeleton className="aspect-[540/696] w-full max-w-[380px] rounded-[40px]" />
   ) : busyBuckets >= 2 ? (
     <PeakChart
-      width={wide ? 380 : 340}
+      width={wide ? 380 : 320}
       data={series.map((p) => p.minor)}
       labels={series.map((p) => p.label)}
       // Display only: the headline takes dollars; every sum stays in integer cents.
@@ -152,16 +162,7 @@ export function Sales({ wide }: { wide: boolean }) {
           {csvError}
         </p>
       )}
-      {sales.error && !sales.data ? (
-        <div className="flex flex-col items-start gap-3 py-4">
-          <p className="text-[15px] text-alert" role="alert">
-            {sales.error}
-          </p>
-          <Button variant="secondary" onClick={sales.reload}>
-            Try again
-          </Button>
-        </div>
-      ) : !sales.data ? (
+      {!sales.data ? (
         <div className="space-y-3" aria-busy="true" aria-label="Loading sales">
           {Array.from({ length: 4 }, (_, i) => (
             <Skeleton key={i} className="h-12 w-full" />
@@ -179,12 +180,29 @@ export function Sales({ wide }: { wide: boolean }) {
     </Panel>
   )
 
+  // Nothing loaded: one error for the whole dashboard, not an error beside skeletons that never resolve.
+  if (sales.error && !sales.data) {
+    return (
+      <Panel title="Sales" className="mx-auto w-full max-w-[560px]">
+        <div className="flex flex-col items-start gap-3 py-2">
+          <p className="text-[15px] text-alert" role="alert">
+            {sales.error}
+          </p>
+          <Button variant="secondary" onClick={sales.reload}>
+            Try again
+          </Button>
+        </div>
+      </Panel>
+    )
+  }
+
   if (!wide) {
     return (
       <div className="flex flex-col gap-4">
         <div className="flex justify-center">{periodSwitch}</div>
         {metrics}
-        <div className="flex justify-center">{chart}</div>
+        {/* The card's glow paints beyond its width: clip it at the screen edge so a phone never scrolls sideways. */}
+        <div className="-mx-4 flex justify-center overflow-x-clip px-4">{chart}</div>
         {feed}
       </div>
     )
