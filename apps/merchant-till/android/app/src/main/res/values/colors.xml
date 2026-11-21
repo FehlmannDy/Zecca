@@ -9,6 +9,7 @@
     <color name="brass">#A8842F</color>
     <color name="in">#1E6B57</color>
     <color name="alert">#B23A24</color>
+    <color name="sealed">#23324F</color>
     <!-- QR codes stay dark on light in both themes, so any phone camera reads them. -->
     <color name="qr_dark">#0C0C0D</color>
     <color name="qr_light">#FFFFFF</color>

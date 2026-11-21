@@ -75,7 +75,7 @@ class MainActivity : Activity() {
     private var scanOverlay: View? = null
 
     // Till screen
-    private var amountText: TextView? = null
+    private var amountText: TightText? = null
     private var tillMessage: TextView? = null
     private var chargeButton: TextView? = null
     private var creating = false
@@ -171,8 +171,8 @@ class MainActivity : Activity() {
     }
 
     /** A scrolling page in --paper (or [bg]), padded for the status and navigation bars and the keyboard. */
-    private fun page(bg: Int = ui.paper, center: Boolean = false, build: LinearLayout.() -> Unit): LinearLayout {
-        root.setBackgroundColor(bg)
+    private fun page(bg: Int = ui.paper, center: Boolean = false, backdrop: Boolean = false, build: LinearLayout.() -> Unit): LinearLayout {
+        root.background = if (backdrop) BackdropDrawable(ui.paper, ui.line, ui.brass, getColor(R.color.sealed), ui.ink) else android.graphics.drawable.ColorDrawable(bg)
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             overScrollMode = View.OVER_SCROLL_NEVER
@@ -211,7 +211,7 @@ class MainActivity : Activity() {
     // ---------- (1) pair ----------
 
     private fun buildPair() {
-        page {
+        page(backdrop = true) {
             header(this)
             title(this, "Zecca Till", "Pair this till")
             addView(ui.text("Scan the code shown in your Zecca merchant space.", 16f, ui.semibold), ui.lp(top = 12, gravity = Gravity.START))
@@ -402,7 +402,7 @@ class MainActivity : Activity() {
 
     private fun buildTill() {
         val pairingInfo = store.pairing()!!
-        page {
+        page(backdrop = true) {
             header(this, ui.button("Unpair", Ui.Kind.GHOST).apply {
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13.5f)
                 typeface = ui.semibold
@@ -415,11 +415,7 @@ class MainActivity : Activity() {
 
             val till = ui.column().apply { setPadding(0, ui.dp(28), 0, 0) }
             till.addView(ui.labelCaps("Charge"), ui.lp(width = ui.wrap))
-            amountText = ui.text(ui.typedAmount(Session.typed), 64f, ui.bold).apply {
-                gravity = Gravity.CENTER
-                setLineSpacing(0f, 1f)
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-            }
+            amountText = ui.tight(ui.typedAmount(Session.typed), 64f)
             till.addView(amountText, ui.lp(top = 12))
             tillMessage = ui.text("", 14f, ui.regular, ui.alert).apply { gravity = Gravity.CENTER; minHeight = ui.dp(20) }
             till.addView(tillMessage, ui.lp(top = 12))
@@ -432,6 +428,10 @@ class MainActivity : Activity() {
                 contentDescription = "Reference (optional)"
                 addTextChangedListener(watch { Session.reference = it })
                 setOnEditorActionListener { _, _, _ -> charge(); true }
+                // Above the keyboard, show the field and "Charge" under it.
+                setOnFocusChangeListener { _, has ->
+                    if (has) postDelayed({ chargeButton?.let { b -> b.requestRectangleOnScreen(android.graphics.Rect(0, 0, b.width, b.height + ui.dp(16))) } }, 350)
+                }
             }
             till.addView(ref, ui.lp(width = ui.dp(320), top = 16))
             chargeButton = ui.button("Charge").apply { setOnClickListener { charge() } }
@@ -482,6 +482,7 @@ class MainActivity : Activity() {
     private fun updateTill() {
         val minor = Money.parse(Session.typed)
         amountText?.text = ui.typedAmount(Session.typed)
+        amountText?.size = ui.typedSize(Session.typed)
         amountText?.contentDescription = "Charge " + Money.spoken(minor ?: 0)
         tillMessage?.text = ""
         val can = minor != null && minor > 0 && !creating
@@ -557,15 +558,14 @@ class MainActivity : Activity() {
                 setOnClickListener { cancelCharge() }
             }
             addView(cancel, ui.lp(width = ui.wrap, gravity = Gravity.END))
-            addView(ui.text(ui.amount(c.amountMinor), 56f, ui.bold).apply {
-                gravity = Gravity.CENTER
-                contentDescription = "Charge " + Money.spoken(c.amountMinor)
-            }, ui.lp(top = 8))
+            // Measured against the web till: its hero amount sits higher in a taller box (the cents keep the body line height).
+            addView(ui.tight(ui.amount(c.amountMinor), 56f).apply { contentDescription = "Charge " + Money.spoken(c.amountMinor) }, ui.lp(top = 0))
+            addView(View(context), ui.lp(height = ui.dp(8)))
             c.reference?.let { addView(ui.text(it, 15f, ui.regular, ui.muted).apply { gravity = Gravity.CENTER }, ui.lp(top = 8)) }
 
             val qr = QrView(context, getColor(R.color.qr_dark), getColor(R.color.qr_light), ui.dp(20).toFloat(), ui.dp(16).toFloat(), ui.line, maxOf(1, ui.dp(1)).toFloat())
             qr.show(c.url, "Payment code for ${Money.format(c.amountMinor)}")
-            addView(qr, ui.lp(width = minOf(ui.dp(300), resources.displayMetrics.widthPixels - ui.dp(40)), top = 24))
+            addView(qr, ui.lp(width = minOf(ui.dp(300), resources.displayMetrics.widthPixels - ui.dp(40)), top = 27))
 
             nfcLine = ui.text("Hold the customer's phone to the back of this one", 15f, ui.semibold).apply {
                 gravity = Gravity.CENTER
@@ -704,7 +704,8 @@ class MainActivity : Activity() {
         page {
             setPadding(paddingLeft, ui.dp(8), paddingRight, ui.dp(24))
             addView(View(context), ui.lp(height = ui.dp(44)))
-            addView(ui.text(ui.amount(c.amountMinor), 56f, ui.bold).apply { gravity = Gravity.CENTER; contentDescription = Money.spoken(c.amountMinor) }, ui.lp(top = 8))
+            addView(ui.tight(ui.amount(c.amountMinor), 56f).apply { contentDescription = Money.spoken(c.amountMinor) }, ui.lp(top = 0))
+            addView(View(context), ui.lp(height = ui.dp(8)))
             c.reference?.let { addView(ui.text(it, 15f, ui.regular, ui.muted).apply { gravity = Gravity.CENTER }, ui.lp(top = 8)) }
             val line = ui.text(c.status.line, 17f, ui.semibold).apply { gravity = Gravity.CENTER }
             addView(line, ui.lp(top = 40))
@@ -728,8 +729,9 @@ class MainActivity : Activity() {
         page(bg = ui.green, center = true) {
             val arches = ArchesView(context, Ui.withAlpha(onGreen, 0.3f), onGreen)
             addView(arches, ui.lp(width = ui.wrap, height = ui.dp(56)))
-            addView(ui.text("Paid", 56f, ui.extrabold, onGreen, -0.04f).apply { gravity = Gravity.CENTER; setLineSpacing(0f, 1f) }, ui.lp(top = 32))
-            addView(ui.text(ui.amount(c.amountMinor, dimCents = false), 56f, ui.bold, onGreen).apply { gravity = Gravity.CENTER }, ui.lp(top = 16))
+            addView(ui.tight("Paid", 56f, ui.extrabold, onGreen, -0.04f), ui.lp(top = 32))
+            addView(ui.tight(ui.amount(c.amountMinor, dimCents = false), 56f, ui.bold, onGreen).apply { contentDescription = Money.spoken(c.amountMinor) }, ui.lp(top = 8))
+            addView(View(context), ui.lp(height = ui.dp(8)))
             c.reference?.let { addView(ui.text(it, 16f, ui.regular, Ui.withAlpha(onGreen, 0.85f)).apply { gravity = Gravity.CENTER }, ui.lp(top = 12)) }
             val time = SimpleDateFormat("h:mm a", Locale.US).format(Date(c.paidAtMs ?: System.currentTimeMillis()))
             addView(ui.text(time, 15f, ui.regular, Ui.withAlpha(onGreen, 0.85f)).apply { gravity = Gravity.CENTER }, ui.lp(top = 8))

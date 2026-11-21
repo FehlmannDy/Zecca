@@ -8,14 +8,7 @@ import android.hardware.Camera
 import android.os.Handler
 import android.os.Looper
 import android.view.TextureView
-import com.google.zxing.BinaryBitmap
-import com.google.zxing.DecodeHintType
-import com.google.zxing.LuminanceSource
-import com.google.zxing.NotFoundException
 import com.google.zxing.PlanarYUVLuminanceSource
-import com.google.zxing.ReaderException
-import com.google.zxing.common.HybridBinarizer
-import com.google.zxing.qrcode.QRCodeReader
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -76,7 +69,7 @@ class QrScanner(private val view: TextureView, private val onText: (String) -> U
         if (done.get() || !busy.compareAndSet(false, true)) return
         val copy = data.copyOf()
         worker.execute {
-            val text = decode(PlanarYUVLuminanceSource(copy, w, h, 0, 0, w, h, false))
+            val text = Qr.decode(PlanarYUVLuminanceSource(copy, w, h, 0, 0, w, h, false))
             busy.set(false)
             if (text != null && done.compareAndSet(false, true)) main.post { onText(text) }
         }
@@ -98,17 +91,4 @@ class QrScanner(private val view: TextureView, private val onText: (String) -> U
         return true
     }
     override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
-
-    companion object {
-        private val hints = mapOf(DecodeHintType.TRY_HARDER to true)
-
-        /** The QR code's text in [source], or null. Pure zxing, so a JVM test can check it. */
-        fun decode(source: LuminanceSource): String? = try {
-            QRCodeReader().decode(BinaryBitmap(HybridBinarizer(source)), hints).text
-        } catch (e: NotFoundException) {
-            null
-        } catch (e: ReaderException) {
-            null
-        }
-    }
 }

@@ -42,3 +42,18 @@ class ChargeStateTest {
         assertEquals(951_782_400_000L, Iso.parse("2000-02-29T00:00:00.000Z"))
     }
 }
+
+class ChargeMergeTest {
+    private fun charge(status: ChargeStatus, id: String = "pr_1") = Charge(id, "Caffè Bruno", 450, null, status, "https://x/pay/$id", 0, null)
+
+    @Test fun `a newer answer replaces the charge, an older one does not`() {
+        assertEquals(ChargeStatus.OPENED, charge(ChargeStatus.CREATED).merge(charge(ChargeStatus.OPENED)).status)
+        assertEquals(ChargeStatus.PAID, charge(ChargeStatus.PAID).merge(charge(ChargeStatus.OPENED)).status)
+        assertEquals(ChargeStatus.CANCELLED, charge(ChargeStatus.OPENED).merge(charge(ChargeStatus.CANCELLED)).status)
+    }
+
+    @Test fun `an answer about another charge or with an unknown status is ignored`() {
+        assertEquals("pr_1", charge(ChargeStatus.CREATED).merge(charge(ChargeStatus.PAID, id = "pr_2")).id)
+        assertEquals(ChargeStatus.OPENED, charge(ChargeStatus.OPENED).merge(charge(ChargeStatus.UNKNOWN)).status)
+    }
+}

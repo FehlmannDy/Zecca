@@ -9,11 +9,7 @@ import android.graphics.PathMeasure
 import android.graphics.RectF
 import android.view.View
 import android.view.animation.DecelerateInterpolator
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
 import com.google.zxing.common.BitMatrix
-import com.google.zxing.qrcode.QRCodeWriter
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 
 /** The mint without its letters (apps/web/components/zecca/wordmark.tsx LogoMark): dome, pediment, arches, line art. */
 class LogoMarkView(context: Context, color: Int) : View(context) {
@@ -107,7 +103,7 @@ class ArchesView(context: Context, private val track: Int, private val stroke: I
     }
 
     /** Each arch fills in [archMs], [stepMs] after the one before it (the web's 260 ms ease-out, 30 ms apart, slowed a little). */
-    fun complete(archMs: Long = 340, stepMs: Long = 70, onEnd: (() -> Unit)? = null) {
+    fun complete(archMs: Long = 420, stepMs: Long = 110, onEnd: (() -> Unit)? = null) {
         animator?.cancel()
         val from = fill
         val total = archMs + stepMs * (N - 1)
@@ -181,7 +177,7 @@ class QrView(context: Context, private val dark: Int, private val light: Int, pr
     private val box = RectF()
 
     fun show(value: String, label: String) {
-        matrix = encode(value)
+        matrix = Qr.encode(value)
         contentDescription = label
         invalidate()
     }
@@ -214,10 +210,132 @@ class QrView(context: Context, private val dark: Int, private val light: Int, pr
             }
         }
     }
+}
 
-    companion object {
-        /** Error correction M and no quiet zone (the white padding is the quiet zone), as on the web. */
-        fun encode(value: String): BitMatrix =
-            QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 0, 0, mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M, EncodeHintType.MARGIN to 0, EncodeHintType.CHARACTER_SET to "UTF-8"))
+/**
+ * The merchant space's backdrop (apps/web/components/zecca/glass/backdrop.tsx): the mint's dome, pediment and arches
+ * in --line on --paper, under a warm light from the top right, a cool one from the bottom left and a soft vignette.
+ * Drawn like the SVG's viewBox 0 0 1440 960 with preserveAspectRatio="xMidYMid slice".
+ */
+class BackdropDrawable(private val paper: Int, private val line: Int, private val brass: Int, private val sealed: Int, private val ink: Int) : android.graphics.drawable.Drawable() {
+    private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        color = line
+    }
+    private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val mint = Path().apply {
+        moveTo(720f, 40f); lineTo(720f, 70f)
+        moveTo(672f, 132f); arcTo(RectF(672f, 84f, 768f, 180f), 180f, 180f)
+        moveTo(660f, 132f); lineTo(780f, 132f)
+        moveTo(680f, 132f); lineTo(680f, 178f); lineTo(760f, 178f); lineTo(760f, 132f)
+        moveTo(676f, 186f); lineTo(250f, 318f); moveTo(764f, 186f); lineTo(1190f, 318f)
+    }
+    private val arches = Path().apply {
+        val w = 150f
+        val x0 = (1440f - (7 * w + 6 * 46f)) / 2
+        for (i in 0 until 7) {
+            val x = x0 + i * (w + 46f)
+            moveTo(x, 1010f); lineTo(x, 790f)
+            arcTo(RectF(x, 790f - w / 2, x + w, 790f + w / 2), 180f, 180f)
+            lineTo(x + w, 1010f)
+        }
+    }
+
+    override fun draw(canvas: Canvas) {
+        val b = bounds
+        val w = b.width().toFloat()
+        val h = b.height().toFloat()
+        canvas.drawColor(paper)
+        val s = maxOf(w / 1440f, h / 960f)
+        canvas.save()
+        canvas.translate(b.left + (w - 1440f * s) / 2, b.top + (h - 960f * s) / 2)
+        canvas.scale(s, s)
+        stroke.strokeWidth = 2.5f
+        canvas.drawPath(mint, stroke)
+        stroke.strokeWidth = 3f
+        canvas.drawPath(arches, stroke)
+        canvas.restore()
+        // radial-gradient(55% 45% at 68% 40%, brass 12%, transparent 70%)
+        ellipse(canvas, w * 0.68f, h * 0.40f, w * 0.55f, h * 0.45f, intArrayOf(Ui.withAlpha(brass, 0.12f), Ui.withAlpha(brass, 0f)), floatArrayOf(0f, 0.7f))
+        // radial-gradient(45% 40% at 12% 88%, sealed 9%, transparent 70%)
+        ellipse(canvas, w * 0.12f, h * 0.88f, w * 0.45f, h * 0.40f, intArrayOf(Ui.withAlpha(sealed, 0.09f), Ui.withAlpha(sealed, 0f)), floatArrayOf(0f, 0.7f))
+        // radial-gradient(120% 90% at 50% 40%, transparent 55%, color-mix(paper 70%, ink 6%) 100%)
+        val mix = android.graphics.Color.rgb(
+            (android.graphics.Color.red(paper) * 70 + android.graphics.Color.red(ink) * 6) / 76,
+            (android.graphics.Color.green(paper) * 70 + android.graphics.Color.green(ink) * 6) / 76,
+            (android.graphics.Color.blue(paper) * 70 + android.graphics.Color.blue(ink) * 6) / 76,
+        )
+        ellipse(canvas, w * 0.5f, h * 0.4f, w * 1.2f, h * 0.9f, intArrayOf(Ui.withAlpha(mix, 0f), Ui.withAlpha(mix, 0f), Ui.withAlpha(mix, 0.76f)), floatArrayOf(0f, 0.55f, 1f))
+    }
+
+    private fun ellipse(canvas: Canvas, cx: Float, cy: Float, rx: Float, ry: Float, colors: IntArray, stops: FloatArray) {
+        val g = android.graphics.RadialGradient(cx, cy, rx, colors, stops, android.graphics.Shader.TileMode.CLAMP)
+        g.setLocalMatrix(android.graphics.Matrix().apply { setScale(1f, ry / rx, cx, cy) })
+        glow.shader = g
+        canvas.drawRect(bounds, glow)
+    }
+
+    override fun setAlpha(alpha: Int) {}
+    override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity(): Int = android.graphics.PixelFormat.OPAQUE
+}
+
+/** A full-width button whose icon sits next to its centred label (the web's inline-flex, gap-2), not at the edge. */
+class IconButtonText(context: Context) : android.widget.TextView(context) {
+    override fun onDraw(canvas: Canvas) {
+        val d = compoundDrawablesRelative[0]
+        val l = layout
+        if (d == null || l == null) return super.onDraw(canvas)
+        val content = l.getLineWidth(0) + d.bounds.width() + compoundDrawablePadding
+        canvas.save()
+        canvas.translate((width - content) / 2f - paddingLeft, 0f)
+        super.onDraw(canvas)
+        canvas.restore()
+    }
+}
+
+/**
+ * One line of large type set like CSS `leading-none` (the web's amounts and "Paid"): the view is as tall as the type
+ * size, and the font's taller line (Manrope's is about 1.37 em) is centred on it, the way a browser does.
+ */
+class TightText(context: Context, color: Int, typeface: android.graphics.Typeface) : View(context) {
+    private val paint = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color
+        this.typeface = typeface
+        fontFeatureSettings = "tnum"
+    }
+    private var layout: android.text.StaticLayout? = null
+
+    /** The line box, in px: the largest type size in [text]. */
+    var size = 0f
+        set(v) { field = v; paint.textSize = v; layout = null; requestLayout(); invalidate() }
+
+    var text: CharSequence = ""
+        set(v) { field = v; layout = null; requestLayout(); invalidate() }
+
+    var tracking: Float
+        get() = paint.letterSpacing
+        set(v) { paint.letterSpacing = v }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val w = MeasureSpec.getSize(widthMeasureSpec)
+        setMeasuredDimension(w, Math.ceil(size.toDouble()).toInt())
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val l = layout ?: android.text.StaticLayout.Builder.obtain(text, 0, text.length, paint, maxOf(1, width))
+            .setAlignment(android.text.Layout.Alignment.ALIGN_CENTER)
+            .setIncludePad(false)
+            .setMaxLines(1)
+            .build().also { layout = it }
+        val ascent = -l.getLineAscent(0).toFloat()
+        val descent = l.getLineDescent(0).toFloat()
+        canvas.save()
+        canvas.translate(0f, (height - ascent - descent) / 2f)
+        l.draw(canvas)
+        canvas.restore()
     }
 }

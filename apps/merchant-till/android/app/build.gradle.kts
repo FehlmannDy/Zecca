@@ -20,6 +20,15 @@ android {
         buildConfig = true
     }
 
+    buildTypes {
+        // The APK in apps/merchant-till/release: a release build (no http, not debuggable), signed with the Android
+        // debug key like the NFC PayLink APK, so anyone can build the same app and phones accept it as an update.
+        getByName("release") {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

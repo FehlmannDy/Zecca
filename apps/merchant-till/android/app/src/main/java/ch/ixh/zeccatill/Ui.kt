@@ -65,7 +65,11 @@ class Ui(val ctx: Context) {
     }
 
     fun text(s: CharSequence = "", size: Float = 15f, face: Typeface = regular, color: Int = ink, tracking: Float = 0f): TextView =
-        TextView(ctx).apply {
+        style(TextView(ctx), s, size, face, color, tracking)
+
+    /** Body text: Manrope, tabular figures, the web's 1.5 line height (Manrope's own is about 1.37). */
+    fun <T : TextView> style(tv: T, s: CharSequence, size: Float, face: Typeface, color: Int, tracking: Float = 0f): T =
+        tv.apply {
             text = s
             setTextSize(TypedValue.COMPLEX_UNIT_SP, size)
             typeface = face
@@ -73,7 +77,7 @@ class Ui(val ctx: Context) {
             letterSpacing = tracking
             fontFeatureSettings = "tnum"
             includeFontPadding = false
-            setLineSpacing(0f, 1.25f)
+            setLineSpacing(0f, 1.1f)
         }
 
     /** Section labels: Montserrat 500, uppercase, 0.12em, 11 px. */
@@ -100,8 +104,8 @@ class Ui(val ctx: Context) {
     enum class Kind { PRIMARY, SECONDARY, GHOST, ON_GREEN }
 
     /** Buttons: 48 dp tall, radius 14, 15 px Manrope bold (apps/web/components/zecca/bits.tsx). */
-    fun button(label: String, kind: Kind = Kind.PRIMARY, icon: Int? = null): TextView = text(label, 15f, bold).apply {
-        gravity = Gravity.CENTER
+    fun button(label: String, kind: Kind = Kind.PRIMARY, icon: Int? = null): TextView = style(if (icon != null) IconButtonText(ctx) else TextView(ctx), label, 15f, bold, ink).apply {
+        gravity = if (icon != null) Gravity.START or Gravity.CENTER_VERTICAL else Gravity.CENTER
         minHeight = dp(48)
         minimumHeight = dp(48)
         setPadding(dp(20), 0, dp(20), 0)
@@ -197,7 +201,7 @@ class Ui(val ctx: Context) {
      */
     fun typedAmount(text: String): CharSequence {
         val shown = Keypad.shown(text)
-        val size = sp(if (shown.length > 8) 44f else if (shown.length > 5) 54f else 64f)
+        val size = typedSize(text)
         val dot = shown.indexOf('.')
         val dollars = if (dot >= 0) shown.substring(0, dot) else shown
         val b = SpannableStringBuilder()
@@ -206,6 +210,18 @@ class Ui(val ctx: Context) {
         if (dot >= 0) b.append(shown.substring(dot), Face(semibold, size * 0.5f, -0.02f, alpha = 0.6f), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         return b
     }
+
+    /** 64 px, smaller as the amount gets longer (amount-keypad.tsx). */
+    fun typedSize(text: String): Float = Keypad.shown(text).length.let { sp(if (it > 8) 44f else if (it > 5) 54f else 64f) }
+
+    /** Large type on one line, leading-none (see [TightText]). */
+    fun tight(s: CharSequence, size: Float, face: Typeface = bold, color: Int = ink, tracking: Float = 0f): TightText =
+        TightText(ctx, color, face).apply {
+            this.size = sp(size)
+            this.tracking = tracking
+            text = s
+            contentDescription = s
+        }
 
     private fun groupDigits(d: String) = d.reversed().chunked(3).joinToString(",").reversed()
 
