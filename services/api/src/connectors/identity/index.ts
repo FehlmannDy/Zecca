@@ -116,6 +116,10 @@ export function mountIdentity(app: Hono, core: Core, o: { verifier?: IdentityVer
   const verifier =
     o.verifier ??
     (core.settings.features.identity ? verifierFromEnv(core.env, { now: () => core.now(), fetch: o.fetch, log: core.log }) : createMockVerifier({ now: () => core.now() }))
+  // A labelled test identity can be asked for next to the live verifier in demo mode (?test=1), so a judge without an
+  // EU wallet is not stuck at tier 0. Each session remembers its verifier.
+  const testVerifier = verifier.mode === 'mock' ? verifier : createMockVerifier({ now: () => core.now() })
+  const verifierFor = (mode: string) => (mode === 'mock' ? testVerifier : verifier)
   const inflight = new Map<string, Promise<PreparedTx | undefined>>()
 
   /**
@@ -169,12 +173,15 @@ export function mountIdentity(app: Hono, core: Core, o: { verifier?: IdentityVer
     return prepared ? { status: 'verified' as const, identity, prepared } : { status: 'verified' as const, identity, message: COPY.confirming }
   }
 
-  mount(app, core, 'identitySessionCreate', async ({ user }) => {
+  mount(app, core, 'identitySessionCreate', async ({ user, query }) => {
     const u = user!
+    const test = query?.test === '1'
+    if (test && !core.settings.demoMode) throw Err.forbidden('Test identities are only available in the demo.')
+    const v = test ? testVerifier : verifier
     core.rateLimit(`identity:${u.id}`)
     let t: { transactionId: string; link: string }
     try {
-      t = await verifier.start()
+      t = await v.start()
     } catch (e) {
       core.log.warn(`[identity] could not start a check: ${(e as Error)?.message ?? e}`)
       throw Err.upstream(COPY.upstream)
@@ -182,8 +189,8 @@ export function mountIdentity(app: Hono, core: Core, o: { verifier?: IdentityVer
     const now = core.now()
     const id = core.id('idv')
     const expiresAt = core.iso(now + SESSION_TTL_MS)
-    insertSession(core, { id, userId: u.id, mode: verifier.mode, transactionId: t.transactionId, link: t.link, createdAt: core.iso(now), expiresAt })
-    return { id, qrUrl: t.link, deepLink: t.link, expiresAt, mode: verifier.mode }
+    insertSession(core, { id, userId: u.id, mode: v.mode, transactionId: t.transactionId, link: t.link, createdAt: core.iso(now), expiresAt })
+    return { id, qrUrl: t.link, deepLink: t.link, expiresAt, mode: v.mode }
   })
 
   mount(app, core, 'identitySessionGet', async ({ params, user }) => {
@@ -193,7 +200,7 @@ export function mountIdentity(app: Hono, core: Core, o: { verifier?: IdentityVer
     if (row.status === 'pending') {
       if (Date.parse(row.expiresAt) <= core.now()) endSession(core, row.id, 'error', COPY.expired)
       else {
-        const st = await verifier.poll(row.transactionId, Date.parse(row.createdAt))
+        const st = await verifierFor(row.mode).poll(row.transactionId, Date.parse(row.createdAt))
         if (st.state === 'rejected' || st.state === 'error') endSession(core, row.id, st.state, rejectionCopy(st))
         else if (st.state === 'verified') {
           const { givenName, familyName, birthDate } = st.claims

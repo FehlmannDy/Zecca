@@ -34,10 +34,10 @@ export function IdentityScreen() {
   /** The session whose approval was already pressed once: a retry asks the server again instead of resending a used one. */
   const attempted = useRef<string | null>(null)
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (test = false) => {
     setPhase({ kind: 'starting' })
     try {
-      const session = await api.call('identitySessionCreate')
+      const session = await api.call('identitySessionCreate', test ? { query: { test: '1' } } : {})
       setPhase({ kind: 'session', session, view: { kind: 'waiting' } })
     } catch (e) {
       setPhase({ kind: 'start-failed', message: e instanceof Error && e.message ? e.message : "That didn't work. Try again." })
@@ -166,7 +166,7 @@ export function IdentityScreen() {
               {phase.message}
             </p>
           )}
-          <Button className="w-full" onClick={start} disabled={phase.kind === 'starting'} aria-busy={phase.kind === 'starting' || undefined}>
+          <Button className="w-full" onClick={() => start()} disabled={phase.kind === 'starting'} aria-busy={phase.kind === 'starting' || undefined}>
             {phase.kind === 'start-failed' ? 'Try again' : 'Continue'}
           </Button>
         </Panel>
@@ -187,7 +187,14 @@ export function IdentityScreen() {
           {mock ? (
             <p className="rounded-[16px] border border-line bg-paper px-4 py-3 text-[14.5px] text-muted">This demo uses a test identity. No wallet is needed.</p>
           ) : (
-            <WalletLink link={session.deepLink} />
+            <>
+              <WalletLink link={session.deepLink} />
+              {config.demoMode && (
+                <button type="button" onClick={() => start(true)} className="self-center min-h-11 text-[14.5px] font-[650] text-muted underline decoration-line underline-offset-4 hover:text-ink">
+                  No EU wallet? Use a test identity
+                </button>
+              )}
+            </>
           )}
           {phase.pollError ? (
             <div className="flex flex-col gap-3" role="alert">
@@ -247,7 +254,7 @@ export function IdentityScreen() {
           <p className="text-[15px] text-alert" role="alert">
             {view.message}
           </p>
-          <Button className="w-full" onClick={start}>
+          <Button className="w-full" onClick={() => start()}>
             Start again
           </Button>
           <HomeLink />

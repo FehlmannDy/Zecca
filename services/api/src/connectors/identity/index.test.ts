@@ -458,3 +458,28 @@ describe('identity on the real mock ledger', () => {
     await pool.stop()
   })
 })
+
+
+describe('identity: a test identity next to the real EU wallet (demo mode)', () => {
+  it('with DEMO_MODE on, POST /v1/identity/sessions?test=1 starts a test session while the default stays the live verifier', async () => {
+    const f = fakeVerifier()
+    const w = world({ verifier: f.v, env: { DEMO_MODE: '1' } })
+    const ana = await w.h.signUp('ana')
+    const live = await w.start(ana.token)
+    expect(live.body.mode).toBe('live')
+    const t = await w.h.json('POST', '/v1/identity/sessions?test=1', { token: ana.token })
+    expect(t.status).toBe(200)
+    expect(t.body.mode).toBe('mock')
+    w.h.clock.advance(3_000)
+    const s = await w.status(ana.token, t.body.id)
+    expect(s.body.status).toBe('verified')
+    expect(f.polls).not.toContain(t.body.id) // the test session never asks the real verifier
+  })
+  it('without DEMO_MODE, ?test=1 is refused', async () => {
+    const f = fakeVerifier()
+    const w = world({ verifier: f.v, env: { DEMO_MODE: '0' } })
+    const ana = await w.h.signUp('ana')
+    const t = await w.h.json('POST', '/v1/identity/sessions?test=1', { token: ana.token })
+    expect(t.status).toBe(403)
+  })
+})

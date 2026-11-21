@@ -163,6 +163,8 @@ export const EarnWithdrawRequest = z.object({ amountDrops: z.number().int().posi
 export const EarnWithdrawResponse = z.object({ status: z.literal('requested'), claimableAt: IsoTime })
 
 // ---------- phase 2: identity ----------
+/** ?test=1 (demo mode only): a labelled test identity instead of the EU wallet. */
+export const IdentitySessionCreateQuery = z.object({ test: z.enum(['1']).optional() })
 export const IdentitySession = z.object({ id: Id, qrUrl: z.string(), deepLink: z.string(), expiresAt: IsoTime, mode: z.enum(['live', 'mock']) })
 export const IdentitySessionStatus = z.object({
   status: z.enum(['pending', 'verified', 'rejected', 'error']),

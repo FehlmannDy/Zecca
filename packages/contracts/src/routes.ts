@@ -71,7 +71,7 @@ export const routes = {
   earnPosition: r({ method: 'GET', path: '/v1/earn/position', auth: 'user', feature: 'earn', phase: 2, response: EarnPositionRef() }),
   earnDeposit: r({ method: 'POST', path: '/v1/earn/deposits', auth: 'user', feature: 'earn', phase: 2, body: A.EarnDepositRequest, response: A.EarnDepositResponse }),
   earnWithdraw: r({ method: 'POST', path: '/v1/earn/withdrawals', auth: 'user', feature: 'earn', phase: 2, body: A.EarnWithdrawRequest, response: A.EarnWithdrawResponse }),
-  identitySessionCreate: r({ method: 'POST', path: '/v1/identity/sessions', auth: 'user', feature: 'identity', phase: 2, response: A.IdentitySession }),
+  identitySessionCreate: r({ method: 'POST', path: '/v1/identity/sessions', auth: 'user', feature: 'identity', phase: 2, query: A.IdentitySessionCreateQuery, response: A.IdentitySession }),
   identitySessionGet: r({ method: 'GET', path: '/v1/identity/sessions/:id', auth: 'user', feature: 'identity', phase: 2, response: A.IdentitySessionStatus }),
   marketAssets: r({ method: 'GET', path: '/v1/market/assets', auth: 'user', feature: 'market', phase: 2, response: A.MarketAssetsResponse }),
   marketHoldings: r({ method: 'GET', path: '/v1/market/holdings', auth: 'user', feature: 'market', phase: 2, response: A.HoldingsResponse }),
