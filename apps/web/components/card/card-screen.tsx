@@ -43,10 +43,10 @@ export function CardScreen() {
       </Panel>
     )
   if (tier !== 1) return <Locked verifyHref={verifyHref} holder={session?.user?.displayName} />
-  return <CardHome api={api} verifyHref={verifyHref} />
+  return <CardHome api={api} verifyHref={verifyHref} holder={session?.user?.displayName} />
 }
 
-function CardHome({ api, verifyHref }: { api: ReturnType<typeof useApp>['api']; verifyHref?: string }) {
+function CardHome({ api, verifyHref, holder }: { api: ReturnType<typeof useApp>['api']; verifyHref?: string; holder?: string }) {
   const { config } = useApp()
   const card = useResource<Details | null>(
     () =>
@@ -168,7 +168,7 @@ function CardHome({ api, verifyHref }: { api: ReturnType<typeof useApp>['api']; 
   if (!d)
     return (
       <div className="flex flex-col gap-5">
-        <CardVisual card={{ last4: '0000', expMonth: 1, expYear: 2030, state: 'OPEN', holderName: '' }} flipped={false} locked className="opacity-90" />
+        <CardVisual card={{ last4: '0000', expMonth: 1, expYear: 2030, state: 'OPEN', holderName: holder ?? '' }} flipped={false} locked className="opacity-90" />
         <Panel>
           <h1 className="text-[22px] font-[740] tracking-[-0.025em]">Your Zecca card</h1>
           <p className="mt-2 text-[15px] text-muted">A virtual card for paying online. {MODEL_LINE}</p>
