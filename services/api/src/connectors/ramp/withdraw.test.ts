@@ -196,6 +196,18 @@ describe('POST /v1/ramp/session { direction: sell }', () => {
     expect(new URL((await w.session(ana.token)).body.widgetUrl).searchParams.get('baseCurrencyCode')).toBe('xrp')
   })
 
+  it('sells XRP where RLUSD is allowed but the treasury does not hold the RLUSD to pay MoonPay (no dead end after the approval)', async () => {
+    const w = world()
+    const ana = await w.h.signUp('ana')
+    const asked: unknown[] = []
+    const canPay = w.treasury.canPay
+    w.treasury.canPay = async (a) => (asked.push(a), typeof a === 'string')
+    expect(new URL((await w.session(ana.token)).body.widgetUrl).searchParams.get('baseCurrencyCode')).toBe('xrp')
+    expect(asked).toEqual([{ currency: RLUSD_HEX, issuer: RLUSD_TESTNET_ISSUER, value: '25' }])
+    w.treasury.canPay = canPay
+    expect(new URL((await w.session(ana.token)).body.widgetUrl).searchParams.get('baseCurrencyCode')).toBe('rlusd_xrp')
+  })
+
   it('refuses: the flag off, under $20 or not whole dollars, not dollars, over the tier-0 per-payment cap or the balance, a region MoonPay refuses', async () => {
     const off = world({ env: { FEATURE_WITHDRAW: '0' } })
     const bo = await off.h.signUp('bob')

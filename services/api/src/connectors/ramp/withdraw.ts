@@ -110,7 +110,15 @@ export function createWithdraw(ctx: SellCtx) {
       throw unavailable()
     }
     if (where!.body.isSellAllowed === false) throw new ApiErr(503, 'upstream_error', SELL_COPY.region)
-    const currencyCode = await ctx.pickCurrency(where!.body.alpha2)
+    let currencyCode = await ctx.pickCurrency(where!.body.alpha2)
+    // The treasury pays MoonPay: RLUSD only when it holds that much (top-ups bring sandbox-sized RLUSD), else Testnet XRP.
+    if (currencyCode !== 'xrp') {
+      const rlusd = await ctx
+        .treasury()
+        .canPay(paymentAmount('RLUSD', String(fiatAmount)))
+        .catch(() => false)
+      if (!rlusd) currencyCode = 'xrp'
+    }
     const allowedIpAddress = ipHash(r.keys.secretKey, ip)
     const externalId = core.id('ramp')
     rampSessions.insert(core.db, {
