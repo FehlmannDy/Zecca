@@ -119,7 +119,7 @@ export function ProofsScreen() {
         )}
         {cursor && (
           <div className="pt-2">
-            <Button variant="secondary" className="w-full" disabled={loading} onClick={() => load(cursor)}>
+            <Button variant="secondary" className="w-full" busy={loading} onClick={() => load(cursor)}>
               {loading ? 'Loading…' : 'Show older payments'}
             </Button>
           </div>
@@ -133,7 +133,7 @@ export function ProofsScreen() {
             {createError}
           </p>
         )}
-        <Button className="w-full shadow-[0_8px_24px_rgba(0,0,0,0.12)]" disabled={sel.size === 0 || busy} onClick={create}>
+        <Button className="w-full shadow-[0_8px_24px_rgba(0,0,0,0.12)]" disabled={sel.size === 0} busy={busy} onClick={create}>
           {busy ? 'Signing your statement…' : sel.size > 0 ? `Create statement (${sel.size})` : 'Create statement'}
         </Button>
       </div>

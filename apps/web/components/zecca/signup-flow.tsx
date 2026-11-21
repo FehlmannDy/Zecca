@@ -255,7 +255,7 @@ export function SignupFlow({ business = false, homeHref = '/app', onFinished }: 
               <>
             <div className="mt-8 flex flex-col gap-3">
               {google && (
-                <Button variant="secondary" onClick={() => onWelcome('google')} disabled={busy || !config}>
+                <Button variant="secondary" onClick={() => onWelcome('google')} disabled={!config} busy={busy}>
                   <GoogleMark /> Continue with Google
                 </Button>
               )}
@@ -264,7 +264,7 @@ export function SignupFlow({ business = false, homeHref = '/app', onFinished }: 
                   <input id="email" className={inputCls} type="email" inputMode="email" autoComplete="email" required placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} aria-describedby="email-help" />
                 </Field>
               ) : null}
-              <Button type="submit" disabled={busy || !config || (mock && !/^\S+@\S+\.\S+$/.test(email))}>
+              <Button type="submit" disabled={!config || (mock && !/^\S+@\S+\.\S+$/.test(email))} busy={busy}>
                 {busy ? <LoaderCircle className="size-5 motion-safe:animate-spin" aria-hidden="true" /> : null}
                 {mock ? 'Continue' : 'Continue with email'}
               </Button>
@@ -321,7 +321,7 @@ export function SignupFlow({ business = false, homeHref = '/app', onFinished }: 
               <label className="flex min-h-12 cursor-pointer items-center justify-between gap-4 rounded-[14px] border border-line bg-surface px-4">
                 <span className="text-[15px] font-[600]">I'm setting up a business</span>
                 <input type="checkbox" role="switch" checked={isBusiness} onChange={(e) => setIsBusiness(e.target.checked)} className="peer sr-only" />
-                <span aria-hidden="true" className="relative h-7 w-12 shrink-0 rounded-full bg-line transition-colors peer-checked:bg-ink peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--brass)] after:absolute after:left-1 after:top-1 after:size-5 after:rounded-full after:bg-surface after:shadow after:transition-transform peer-checked:after:translate-x-5" />
+                <span aria-hidden="true" className="relative h-7 w-12 shrink-0 rounded-full bg-line transition-colors peer-checked:bg-ink peer-focus-visible:outline-2 peer-focus-visible:outline-solid peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--brass)] after:absolute after:left-1 after:top-1 after:size-5 after:rounded-full after:bg-surface after:shadow after:transition-transform peer-checked:after:translate-x-5" />
               </label>
               {isBusiness && (
                 <div className="mt-3">

@@ -108,7 +108,7 @@ export function AddFaceId() {
                 </p>
               )}
               <div className="mt-10 flex flex-col gap-2">
-                <Button onClick={add} disabled={phase === 'adding'} aria-busy={phase === 'adding'}>
+                <Button onClick={add} busy={phase === 'adding'}>
                   {phase === 'adding' ? 'Waiting for your phone…' : phase === 'error' ? 'Try again' : add_}
                 </Button>
                 <Button variant="ghost" onClick={() => router.replace(next)} disabled={phase === 'adding'}>

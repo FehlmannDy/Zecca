@@ -19,7 +19,7 @@ import { useInterval, useRequestStream } from './use-request-stream'
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 const inputCls =
-  'h-12 w-full rounded-[14px] border border-line bg-surface px-4 text-[16px] text-ink placeholder:text-muted/80 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--brass)]'
+  'h-12 w-full rounded-[14px] border border-line bg-surface px-4 text-[16px] text-ink placeholder:text-muted/80 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-1 focus-visible:outline-[var(--brass)]'
 
 export function Till({ className }: { className?: string }) {
   const { api, config } = useApp()
@@ -35,10 +35,10 @@ export function Till({ className }: { className?: string }) {
 
   const cap = config?.limits.txCapMinor
   const tooBig = minor !== null && cap !== undefined && minor > cap
-  const canCharge = minor !== null && minor > 0 && !tooBig && !creating
+  const canCharge = minor !== null && minor > 0 && !tooBig
 
   async function charge() {
-    if (!canCharge || minor === null) return
+    if (!canCharge || creating || minor === null) return
     setCreating(true)
     setError('')
     try {
@@ -80,7 +80,7 @@ export function Till({ className }: { className?: string }) {
         <span className="sr-only">Reference (optional)</span>
         <input className={inputCls} value={reference} onChange={(e) => setReference(e.target.value)} maxLength={60} placeholder="Reference (optional)" autoComplete="off" enterKeyHint="go" />
       </label>
-      <Button className="mt-4 w-full max-w-[320px]" disabled={!canCharge} onClick={charge} aria-busy={creating}>
+      <Button className="mt-4 w-full max-w-[320px]" disabled={!canCharge} busy={creating} onClick={charge}>
         {creating ? 'Charging…' : minor ? `Charge ${formatUsd(minor)}` : 'Charge'}
       </Button>
       {request && phase !== 'entry' && phase !== 'creating' && <ChargeScreen request={request} onRequest={onRequest} onNew={newCharge} />}

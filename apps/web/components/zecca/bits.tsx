@@ -84,17 +84,22 @@ export function EmptyState({ title, action, className }: { title: ReactNode; act
   )
 }
 
-/** Buttons used across the app: 44 px targets, 14 px radius, visible focus from the base layer. */
+/**
+ * Buttons used across the app: 44 px targets, 14 px radius, visible focus from the base layer. `busy`: the button looks
+ * disabled and ignores clicks, but stays focusable (aria-disabled, not disabled), so keyboard focus is not lost to <body>.
+ */
 export function Button({
   variant = 'primary',
   className,
+  busy,
   ...rest
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger' }) {
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; busy?: boolean }) {
   const v = {
-    primary: 'bg-ink text-paper hover:opacity-90 disabled:opacity-40',
-    secondary: 'border border-line bg-surface text-ink hover:border-ink/30 disabled:opacity-50',
-    ghost: 'text-ink hover:bg-ink/5 disabled:opacity-50',
+    primary: 'bg-ink text-paper hover:opacity-90 disabled:opacity-40 aria-disabled:opacity-40',
+    secondary: 'border border-line bg-surface text-ink hover:border-ink/30 disabled:opacity-50 aria-disabled:opacity-50',
+    ghost: 'text-ink hover:bg-ink/5 disabled:opacity-50 aria-disabled:opacity-50',
     danger: 'border border-alert/40 bg-surface text-alert hover:bg-alert/5',
   }[variant]
-  return <button type="button" className={cn('inline-flex min-h-12 items-center justify-center gap-2 rounded-[14px] px-5 text-[15px] font-[680] transition-[opacity,background-color,border-color] duration-150', v, className)} {...rest} />
+  const busyProps = busy ? { 'aria-disabled': true, 'aria-busy': true, onClick: (e: React.MouseEvent) => e.preventDefault() } : {}
+  return <button type="button" className={cn('inline-flex min-h-12 items-center justify-center gap-2 rounded-[14px] px-5 text-[15px] font-[680] transition-[opacity,background-color,border-color] duration-150', v, className)} {...rest} {...busyProps} />
 }

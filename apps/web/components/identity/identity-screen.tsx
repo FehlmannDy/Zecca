@@ -79,6 +79,17 @@ export function IdentityScreen() {
     }
   }, [api, waiting, sessionId, expiresAt])
 
+  // A new step replaces the control that had focus: focus moves to the step's heading instead of falling to <body>.
+  const step = phase.kind === 'session' ? phase.view.kind : user?.tier === 1 && !approveOpen ? 'done' : 'intro'
+  const shownStep = useRef(step)
+  useEffect(() => {
+    if (shownStep.current === step) return
+    shownStep.current = step
+    const a = document.activeElement
+    if (a && a !== document.body) return
+    document.querySelector<HTMLElement>('[data-step-focus]')?.focus()
+  }, [step])
+
   // The approval opens by itself once, when it arrives.
   useEffect(() => {
     if (phase.kind === 'session' && phase.view.kind === 'approve' && autoOpened.current !== phase.session.id) {
@@ -144,7 +155,7 @@ export function IdentityScreen() {
           <span className="grid size-12 place-items-center rounded-full border border-line text-in">
             <ShieldCheck className="size-6" aria-hidden="true" />
           </span>
-          <h2 className="text-[22px] font-[740] leading-tight tracking-[-0.02em]">{DONE}</h2>
+          <h2 tabIndex={-1} data-step-focus className="text-[22px] font-[740] leading-tight tracking-[-0.02em] outline-none">{DONE}</h2>
           <p className="text-[15px] text-muted">{liftedLimitsLine(config.limits)}</p>
           <HomeLink primary />
         </Panel>
@@ -157,7 +168,7 @@ export function IdentityScreen() {
       <Frame>
         <Panel className="flex flex-col gap-5">
           <div>
-            <h2 className="text-[22px] font-[740] leading-tight tracking-[-0.02em]">{TITLE}</h2>
+            <h2 tabIndex={-1} data-step-focus className="text-[22px] font-[740] leading-tight tracking-[-0.02em] outline-none">{TITLE}</h2>
             <p className="mt-2 text-[15px] text-muted">Unverified accounts have limits. Verify once to lift them.</p>
           </div>
           <Shared />
@@ -166,7 +177,7 @@ export function IdentityScreen() {
               {phase.message}
             </p>
           )}
-          <Button className="w-full" onClick={() => start()} disabled={phase.kind === 'starting'} aria-busy={phase.kind === 'starting' || undefined}>
+          <Button className="w-full" onClick={() => start()} busy={phase.kind === 'starting'}>
             {phase.kind === 'start-failed' ? 'Try again' : 'Continue'}
           </Button>
         </Panel>
@@ -181,7 +192,7 @@ export function IdentityScreen() {
       {view.kind === 'waiting' && (
         <Panel className="flex flex-col gap-5">
           <div>
-            <h2 className="text-[22px] font-[740] leading-tight tracking-[-0.02em]">{TITLE}</h2>
+            <h2 tabIndex={-1} data-step-focus className="text-[22px] font-[740] leading-tight tracking-[-0.02em] outline-none">{TITLE}</h2>
             <p className="mt-2 text-[15px] text-muted">Your name and date of birth. Nothing else.</p>
           </div>
           {mock ? (
@@ -221,7 +232,7 @@ export function IdentityScreen() {
             <span className="grid size-11 place-items-center rounded-full border border-line text-in">
               <ShieldCheck className="size-5" aria-hidden="true" />
             </span>
-            <h2 className="text-[20px] font-[740] tracking-[-0.02em]">Verified</h2>
+            <h2 tabIndex={-1} data-step-focus className="text-[20px] font-[740] tracking-[-0.02em] outline-none">Verified</h2>
           </div>
           <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2.5 rounded-[16px] border border-line px-4 py-3.5 text-[15px]">
             <dt className="text-muted">Name</dt>
@@ -251,7 +262,7 @@ export function IdentityScreen() {
 
       {view.kind === 'failed' && (
         <Panel className="flex flex-col gap-4">
-          <p className="text-[15px] text-alert" role="alert">
+          <p tabIndex={-1} data-step-focus className="text-[15px] text-alert outline-none" role="alert">
             {view.message}
           </p>
           <Button className="w-full" onClick={() => start()}>

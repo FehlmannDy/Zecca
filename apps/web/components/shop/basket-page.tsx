@@ -89,7 +89,7 @@ export function BasketPage() {
             <Link href="/demo/shop" className="inline-flex min-h-12 items-center justify-center px-4 text-[15px] font-[600] underline decoration-[var(--s-line)] underline-offset-4">
               Keep shopping
             </Link>
-            <ShopButton onClick={checkout} disabled={busy} aria-busy={busy}>
+            <ShopButton onClick={() => !busy && checkout()} aria-disabled={busy || undefined} aria-busy={busy || undefined} className={busy ? 'opacity-45' : ''}>
               {busy ? 'One moment…' : 'Checkout'}
             </ShopButton>
           </div>

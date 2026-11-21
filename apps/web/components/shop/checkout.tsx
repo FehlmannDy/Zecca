@@ -170,6 +170,7 @@ function CardOption({ orderId, amountMinor, enabled, onApproved }: { orderId: st
 
   async function pay(e: React.FormEvent) {
     e.preventDefault()
+    if (busy) return
     setMessage('')
     const m = /^(\d{1,2})\s*\/\s*(\d{2})$/.exec(exp.trim())
     const digits = pan.replace(/\s+/g, '')
@@ -198,7 +199,7 @@ function CardOption({ orderId, amountMinor, enabled, onApproved }: { orderId: st
         {!enabled && <span className="rounded-full bg-[var(--s-line)] px-2.5 py-0.5 text-[12px] font-[650] text-[var(--s-ink)]">Coming soon</span>}
       </div>
       <form className="mt-4 space-y-3" onSubmit={pay} aria-describedby={!enabled ? 'card-soon' : undefined}>
-        <fieldset disabled={!enabled || busy} className="space-y-3">
+        <fieldset disabled={!enabled} className="space-y-3">
           <label className="block">
             <span className="text-[13px] font-[600] text-[var(--s-muted)]">Card number</span>
             <input className={`${field} mt-1`} inputMode="numeric" autoComplete="cc-number" placeholder="1234 5678 9012 3456" value={pan} onChange={(e) => setPan(e.target.value)} />
@@ -213,7 +214,7 @@ function CardOption({ orderId, amountMinor, enabled, onApproved }: { orderId: st
               <input className={`${field} mt-1`} inputMode="numeric" autoComplete="cc-csc" placeholder="123" value={cvc} onChange={(e) => setCvc(e.target.value)} />
             </label>
           </div>
-          <ShopButton type="submit" variant="outline" className="w-full">
+          <ShopButton type="submit" variant="outline" className={busy ? 'w-full opacity-45' : 'w-full'} aria-disabled={busy || undefined} aria-busy={busy || undefined}>
             {busy ? 'Checking the card…' : `Pay ${formatUsd(amountMinor)}`}
           </ShopButton>
         </fieldset>

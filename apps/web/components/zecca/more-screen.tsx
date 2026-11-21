@@ -27,7 +27,7 @@ export function MoreScreen() {
         <ul className="mt-6 overflow-hidden rounded-[20px] border border-line bg-surface">
           {moreItems(config, user).map((item) => (
             <li key={item.href + item.label} className="border-b border-line last:border-b-0">
-              <Link href={item.href} className="flex min-h-16 items-center gap-3 px-5 py-3 hover:bg-paper focus-visible:outline-2 focus-visible:outline-brass">
+              <Link href={item.href} className="flex min-h-16 items-center gap-3 px-5 py-3 hover:bg-paper focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-brass">
                 <span className="flex-1">
                   <span className="block text-[16px] font-[650]">{item.label}</span>
                   {item.hint && <span className="block text-[13.5px] text-muted">{item.hint}</span>}

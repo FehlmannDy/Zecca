@@ -12,7 +12,7 @@ type Detector = { detect(source: HTMLVideoElement): Promise<Array<{ rawValue: st
 type DetectorCtor = new (opts: { formats: string[] }) => Detector
 
 const inputCls =
-  'h-12 w-full min-w-0 rounded-[14px] border border-line bg-surface px-4 text-[16px] text-ink placeholder:text-muted/80 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--brass)]'
+  'h-12 w-full min-w-0 rounded-[14px] border border-line bg-surface px-4 text-[16px] text-ink placeholder:text-muted/80 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-1 focus-visible:outline-[var(--brass)]'
 
 export function PayEntry() {
   const router = useRouter()

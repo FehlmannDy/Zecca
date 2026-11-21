@@ -124,7 +124,7 @@ export function ActivityList() {
                     {moreError}
                   </p>
                 )}
-                <Button variant="secondary" onClick={more} disabled={loadingMore} aria-busy={loadingMore || undefined}>
+                <Button variant="secondary" onClick={more} busy={loadingMore}>
                   {loadingMore ? 'Loading…' : 'Show more'}
                 </Button>
               </div>

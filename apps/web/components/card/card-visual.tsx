@@ -189,7 +189,7 @@ export function CardVisual({
                 e.stopPropagation()
                 onToggle?.()
               }}
-              className="absolute inset-0 rounded-[inherit] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--brass)]"
+              className="absolute inset-0 rounded-[inherit] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-4 focus-visible:outline-[var(--brass)]"
               aria-label="Show card number, expiry and code"
             />
           )}

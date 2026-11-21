@@ -39,7 +39,7 @@ function FollowLine() {
 }
 
 const inputCls =
-  'h-14 w-full rounded-[14px] border border-line bg-surface px-4 text-center text-[28px] font-[700] tabular text-ink outline-none focus-visible:border-ink/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brass)]'
+  'h-14 w-full rounded-[14px] border border-line bg-surface px-4 text-center text-[28px] font-[700] tabular text-ink outline-none focus-visible:border-ink/40 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-[var(--brass)]'
 
 export function AssetScreen({ symbol }: { symbol: MetalSymbol }) {
   const { api, config, getSigner } = useApp()
@@ -279,7 +279,7 @@ export function AssetScreen({ symbol }: { symbol: MetalSymbol }) {
             <p className="min-h-5 text-[14px] text-muted" aria-live="polite">
               {preview ? (side === 'buy' ? `About ${gramsText(preview.quantityMg)} for ${formatUsd(preview.amountMinor)}` : `About ${formatUsd(preview.amountMinor)} for ${gramsText(preview.quantityMg)}`) : ''}
             </p>
-            <Button className="w-full" onClick={onContinue} disabled={creating || !by} aria-busy={creating || undefined}>
+            <Button className="w-full" onClick={onContinue} disabled={!by} busy={creating}>
               Continue
             </Button>
           </div>

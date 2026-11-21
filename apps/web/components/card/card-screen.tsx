@@ -172,7 +172,7 @@ function CardHome({ api, verifyHref, holder }: { api: ReturnType<typeof useApp>[
         <Panel>
           <h1 className="text-[22px] font-[740] tracking-[-0.025em]">Your Zecca card</h1>
           <p className="mt-2 text-[15px] text-muted">A virtual card for paying online. {MODEL_LINE}</p>
-          <Button className="mt-5 w-full" onClick={create} disabled={busy === 'create'}>
+          <Button className="mt-5 w-full" onClick={create} busy={busy === 'create'}>
             <CreditCard className="size-5" aria-hidden="true" /> {busy === 'create' ? 'Creating your card…' : 'Get my card'}
           </Button>
           {actionError && (
@@ -288,9 +288,11 @@ function FreezeSwitch({ frozen, disabled, onChange }: { frozen: boolean; disable
         role="switch"
         aria-checked={frozen}
         aria-label="Freeze card"
-        disabled={disabled}
-        onClick={() => onChange(!frozen)}
-        className={cn('relative h-7 w-12 rounded-full transition-colors duration-150 disabled:opacity-50', frozen ? 'bg-ink' : 'bg-line')}
+        // Busy is aria-disabled, not disabled: the switch keeps keyboard focus while the change is saved.
+        aria-disabled={disabled || undefined}
+        aria-busy={disabled || undefined}
+        onClick={() => !disabled && onChange(!frozen)}
+        className={cn('relative h-7 w-12 rounded-full transition-colors duration-150 aria-disabled:opacity-50', frozen ? 'bg-ink' : 'bg-line')}
       >
         <span className={cn('absolute top-1 left-1 size-5 rounded-full bg-surface shadow transition-transform duration-150', frozen && 'translate-x-5')} aria-hidden="true" />
       </button>
