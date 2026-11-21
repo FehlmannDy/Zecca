@@ -12,6 +12,7 @@ import { useMediaQuery } from '@/lib/use-media'
 import { QrCode } from '@/components/merchant/qr-code'
 import { mergeRequest } from '@/components/merchant/till-model'
 import { useInterval, useRequestStream } from '@/components/merchant/use-request-stream'
+import { formatExpiry, parseExpiry } from './expiry'
 import { ShopReceipt } from './receipt'
 import { SERIF, ShopButton } from './shop-frame'
 import { ShopUnavailable } from './shop-home'
@@ -172,15 +173,15 @@ function CardOption({ orderId, amountMinor, enabled, onApproved }: { orderId: st
     e.preventDefault()
     if (busy) return
     setMessage('')
-    const m = /^(\d{1,2})\s*\/\s*(\d{2})$/.exec(exp.trim())
+    const expiry = parseExpiry(exp)
     const digits = pan.replace(/\s+/g, '')
-    if (!m || !/^\d{12,19}$/.test(digits) || !/^\d{3,4}$/.test(cvc)) {
+    if (!expiry || !/^\d{12,19}$/.test(digits) || !/^\d{3,4}$/.test(cvc)) {
       setMessage('Check the card number, expiry (MM/YY) and code.')
       return
     }
     setBusy(true)
     try {
-      const r = await api.call('shopCharge', { body: { orderId, pan: digits, expMonth: Number(m[1]), expYear: 2000 + Number(m[2]), cvc } })
+      const r = await api.call('shopCharge', { body: { orderId, pan: digits, ...expiry, cvc } })
       if (r.approved && r.receipt) onApproved(r.receipt)
       else setMessage('Card declined. Try another payment method.')
     } catch (err) {
@@ -207,7 +208,7 @@ function CardOption({ orderId, amountMinor, enabled, onApproved }: { orderId: st
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className="text-[13px] font-[600] text-[var(--s-muted)]">Expiry</span>
-              <input className={`${field} mt-1`} inputMode="numeric" autoComplete="cc-exp" placeholder="MM/YY" value={exp} onChange={(e) => setExp(e.target.value)} />
+              <input className={`${field} mt-1`} inputMode="numeric" autoComplete="cc-exp" placeholder="MM/YY" value={exp} onChange={(e) => setExp(formatExpiry(e.target.value))} />
             </label>
             <label className="block">
               <span className="text-[13px] font-[600] text-[var(--s-muted)]">Security code</span>
