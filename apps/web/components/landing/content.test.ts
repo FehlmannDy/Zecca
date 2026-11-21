@@ -116,4 +116,11 @@ describe('SPEC §11: no claim beyond what is true today', () => {
     expect(text).not.toMatch(/\b(seed|gas|trust ?line|wallet address)\b|\bXRP\b(?! Ledger)/i)
     expect(LIMITS).toBeDefined()
   })
+  it('scopes "no smart contracts" to payments (Earn uses a Flare smart account) and keeps the building blocks plain', () => {
+    expect(copy.LEDGER.intro).toMatch(/^Payments use no sidechain and no smart contracts/)
+    const blocks = strings(copy.BUILDING_BLOCKS.map((b) => b.body)).join('\n')
+    expect(blocks).not.toMatch(/\bXRP\b(?! Ledger)|\breserve\b/i)
+    const signUp = copy.NETWORK_ROWS.find((r) => r.step === 'Sign up')?.what ?? ''
+    expect(signUp).not.toMatch(/\bdrop\b|\bXRP\b|\bbatch\b/i)
+  })
 })

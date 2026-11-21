@@ -11,15 +11,16 @@ export function SiteHeader({ brand = true }: { brand?: boolean }) {
     <header className="sticky top-0 z-20 border-b border-line/70 backdrop-blur-md" style={{ background: 'color-mix(in srgb, var(--paper) 82%, transparent)' }}>
       <div className={`mx-auto flex h-16 w-full max-w-[1120px] items-center gap-3 px-4 sm:px-6 ${brand ? 'justify-between' : 'justify-end'}`}>
         {brand && (
-          <Link href="/" aria-label="Zecca, home" className="shrink-0 rounded-[10px]">
+          <Link href="/" aria-label="Zecca, home" className="inline-flex min-h-11 shrink-0 items-center rounded-[10px]">
             <Logo />
           </Link>
         )}
         <nav aria-label="Main" className="flex items-center gap-1 whitespace-nowrap sm:gap-2">
-          <Link href="/how-it-works" className="inline-flex min-h-11 items-center rounded-[12px] px-2.5 text-[14.5px] font-[620] text-muted hover:text-ink sm:px-3">
+          {/* Below 380 px with the logo there is no room for both links: the logo leads home, "Open the app" stays. */}
+          <Link href="/how-it-works" className={`${brand ? 'hidden min-[380px]:inline-flex' : 'inline-flex'} min-h-11 items-center rounded-[12px] px-2.5 text-[14.5px] font-[620] text-muted hover:text-ink sm:px-3`}>
             How it works
           </Link>
-          <LinkButton href="/app" className="min-h-10 px-4 text-[14px]">
+          <LinkButton href="/app" className="min-h-11 px-4 text-[14px]">
             Open the app
           </LinkButton>
         </nav>

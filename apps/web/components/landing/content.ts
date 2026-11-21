@@ -69,13 +69,13 @@ export const PAYMENT = {
 export type BlockIcon = 'sponsor' | 'sealed' | 'batch' | 'credential'
 export const LEDGER = {
   title: 'Built on the XRP Ledger, layer 1',
-  intro: 'No sidechain and no smart contracts. Four features of the ledger itself do the work.',
+  intro: 'Payments use no sidechain and no smart contracts: four features of the ledger itself do the work.',
 } as const
 export const BUILDING_BLOCKS: readonly { icon: BlockIcon; title: string; body: string; networks: readonly string[] }[] = [
   {
     icon: 'sponsor',
     title: 'Sponsored accounts',
-    body: 'Zecca opens your account and pays its fees and reserve, so you never need to hold XRP.',
+    body: 'Zecca opens your account and pays every ledger cost, so you never need to buy anything to start.',
     networks: ['Live on XRPL Devnet'],
   },
   {
@@ -132,7 +132,7 @@ export const NETWORK_ROWS: readonly { step: string; network: string; what: strin
   {
     step: 'Sign up',
     network: 'XRPL Devnet',
-    what: 'Zecca’s sponsor opens your account with one drop of XRP. One approval then opens your private balance and adds the demo credit, in one batch.',
+    what: 'Zecca’s sponsor opens your account and pays for it. One approval then opens your private balance and adds the demo credit, both at once.',
   },
   {
     step: 'Send and pay',
