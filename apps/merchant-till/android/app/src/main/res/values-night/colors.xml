@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Zecca tokens (docs/UI.md §2), dark. -->
+<resources>
+    <color name="paper">#0C0D0F</color>
+    <color name="surface">#16181B</color>
+    <color name="ink">#F2EFE8</color>
+    <color name="muted">#9A988F</color>
+    <color name="line">#2A2C30</color>
+    <color name="brass">#D2AE5A</color>
+    <color name="in">#58B79C</color>
+    <color name="alert">#E5745C</color>
+</resources>

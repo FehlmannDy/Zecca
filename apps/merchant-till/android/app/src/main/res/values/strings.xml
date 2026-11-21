@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Zecca Till</string>
+    <string name="service_description">Zecca Till: the payment link of the charge on screen</string>
+    <string name="aid_group_description">Zecca payment link (NFC tag)</string>
+</resources>
