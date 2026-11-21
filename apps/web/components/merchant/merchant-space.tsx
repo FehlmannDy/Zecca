@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Calculator, ChartColumn, UserRound } from 'lucide-react'
+import { Calculator, ChartColumn, Smartphone, UserRound } from 'lucide-react'
 import { useSession } from '@/lib/session'
 import { nextSpaceMode, type SpaceMode } from '@/lib/space-mode'
 import { useWide } from '@/lib/use-media'
@@ -49,6 +49,7 @@ function Space({ view }: { view: MerchantView }) {
   const items: DockItem[] = [
     { href: '/merchant/charge', label: 'Charge', icon: Calculator, current: shown === 'charge' },
     { href: '/merchant/sales', label: 'Sales', icon: ChartColumn, current: shown === 'sales' },
+    { href: '/merchant/pair', label: 'Tills', icon: Smartphone },
     { href: '/app', label: 'Personal', icon: UserRound },
   ]
   const name = user.merchant?.businessName ?? user.displayName
@@ -69,6 +70,9 @@ function Space({ view }: { view: MerchantView }) {
               <nav aria-label="Business" className="ml-3 flex items-center gap-2">
                 <Link href="/merchant/sales" aria-current={shown === 'sales' ? 'page' : undefined} className="inline-flex min-h-11 items-center rounded-full px-4 text-[13.5px] font-[650] text-muted hover:text-ink aria-[current=page]:text-ink">
                   Sales
+                </Link>
+                <Link href="/merchant/pair" className="inline-flex min-h-11 items-center rounded-full px-4 text-[13.5px] font-[650] text-muted hover:text-ink">
+                  Pair a till
                 </Link>
                 <Link href="/merchant/charge" className="inline-flex min-h-11 items-center rounded-[14px] bg-ink px-5 text-[14px] font-[700] text-paper hover:opacity-90">
                   Charge
