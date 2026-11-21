@@ -15,7 +15,7 @@ On in production: top-up (MoonPay), card, Earn, metals, identity, statements, th
 | 5 | Merchant: **Charge** $4.50 | Full-screen QR code (and "Use NFC" on Android) | A payment request; the link is the QR. |
 | 6 | Customer: scan the QR (or tap phones with the NFC app) → "Pay $4.50 to Caffè Bruno" → **Approve** | | Pay a merchant from a link, often in a fresh browser. |
 | 7 | Merchant screen | Turns to **Paid** by itself in about 10 s; the sale shows fee $0.02 and net $4.48 | Paid at deposit validation (D4); the payout follows from the pool in the background. Zecca's 0.5% fee is in its own books, not on the ledger. |
-| 8 | Customer: **More → Add money** | MoonPay sandbox widget (or **Add demo credit**); step by step in [One MoonPay sandbox purchase](#one-moonpay-sandbox-purchase) | Fiat top-up: RLUSD delivered on Testnet, credited after checking the delivery on the ledger. Labelled "Sandbox". |
+| 8 | Customer: **More → Add money** | MoonPay sandbox widget (or **Add demo credit**); step by step in [One MoonPay sandbox purchase](#one-moonpay-sandbox-purchase) | Fiat top-up: RLUSD delivered on Testnet (XRP from an EU/EEA IP), credited after checking the delivery on the ledger. Labelled "Sandbox". |
 | 9 | Customer: open `/demo/shop` (Sette Archi) → add a coffee → **Pay with Zecca** | "Order confirmed" with a receipt, and the receipt in the app's activity | Zecca from the outside: checkout on a third-party site. |
 | 10 | Customer: try to send $60 | "You've reached the limit for unverified accounts." | Tier-0 limits (EU low-value e-money style), a designed moment, not an error. |
 
@@ -44,10 +44,10 @@ On in production: top-up (MoonPay), card, Earn, metals, identity, statements, th
 
 On https://zecca-beta.vercel.app, signed in (a fresh account with its $50 demo credit is fine):
 
-1. **More → Add money**, pick **$25** (MoonPay's minimum is about €21.60), **Continue**. MoonPay's widget opens over the page; the screen says "Sandbox purchase. No real money moved."
+1. **More → Add money**, pick **$25** (MoonPay's minimum is about €21.60), **Continue**. MoonPay's widget opens over the page; the screen says "Sandbox purchase. No real money moved." From an EU/EEA IP the widget offers XRP instead of RLUSD (see step 4).
 2. In the widget: an email address you can read (MoonPay sends a code to it), the code, then a UK address.
 3. Pay with MoonPay's sandbox test card `4485 0403 7153 6584`, expiry `12/2030`, CVC `123`, and confirm.
-4. MoonPay's sandbox delivers RLUSD to Zecca's treasury on XRPL Testnet. Zecca checks the delivery on the ledger, mints the amount delivered (times the sandbox multiplier, `RAMP_SANDBOX_SCALE`, 100 in production) into the pool on Devnet and pays it out to you.
+4. MoonPay delivers RLUSD on XRPL Testnet, or XRP from an EU/EEA IP such as Italy, where MoonPay does not offer RLUSD on the XRP Ledger; Zecca credits either after checking the delivery: it checks the `Payment` to its treasury on the ledger, values what was delivered (RLUSD one to one, XRP at the price MoonPay charged for this purchase), multiplies it by the sandbox multiplier (`RAMP_SANDBOX_SCALE`, 100 in production), mints that into the pool on Devnet and pays it out to you.
 5. About 30 s later the screen says "Added $X." and home shows a Top up row marked Sandbox.
 
 ## What the public ledger sees

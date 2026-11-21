@@ -21,7 +21,7 @@ https://zecca-beta.vercel.app — sign up with an email (you get $50 of demo cre
 | Pay a shop by QR code or NFC tap | The same confidential deposit to the pool, from a payment request link | `services/api/src/paymentRequests/`, `apps/web/app/pay/`, `apps/merchant-nfc/` |
 | Face ID on approvals | Privy passkey check on the `raw_sign` that signs the transaction | `apps/web/lib/passkey/`, `apps/web/lib/wallet/privy.ts` |
 | Verified identity raises limits | Credentials: `CredentialCreate` by Zecca's KYC issuer, `CredentialAccept` signed by the user | `services/api/src/connectors/identity/` |
-| Top up with a card | MoonPay sandbox delivers RLUSD by `Payment` on Testnet; once that is checked, Zecca's issuer mints the credit into the pool on Devnet (`Payment`, then `ConfidentialMPTConvert`) and the pool pays it out | `services/api/src/connectors/ramp/` |
+| Top up with a card | MoonPay sandbox delivers RLUSD by `Payment` on Testnet (XRP where MoonPay does not offer RLUSD, such as the EU/EEA); once that is checked, Zecca's issuer mints the credit into the pool on Devnet (`Payment`, then `ConfidentialMPTConvert`) and the pool pays it out | `services/api/src/connectors/ramp/` |
 | Payment card | Lithic sandbox card; purchases settled by a `ConfidentialMPTSend` from the pool to the card settlement account | `services/api/src/connectors/card/` |
 | Earn | A Testnet `Payment` with a memo instruction opens a Flare smart account, which deposits into the Firelight vault on Flare Coston2 | `services/api/src/connectors/earn/` |
 | Gold, silver, palladium | One MPT per metal; prices published on the ledger with `OracleSet` | `services/api/src/connectors/market/` |
@@ -33,54 +33,47 @@ Every payment goes through the Zecca pool: you send a confidential transfer to t
 
 ### System architecture
 
-The web app talks to one HTTP API; the API prepares each transaction the user approves, the user signs it in the browser with their Privy key, and the pool worker on its own thread is the only part that moves money out of the pool.
+The web app talks to one HTTP API; the API prepares each transaction the user approves, the user signs it in the browser with their Privy key, and the pool worker on its own thread is the only part that moves money out of the pool (the outside services are drawn connector by connector in the last diagram).
 
 ```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 30, "subGraphTitleMargin": {"top": 4, "bottom": 16}}}}%%
 flowchart TB
   nfc["Android NFC app<br/>apps/merchant-nfc"]
   web["Web app, Next.js<br/>apps/web"]
-  privy["Privy<br/>email or Google sign-in, embedded wallet:<br/>the user's key, raw_sign, Face ID"]
+  privy["Privy<br/>email or Google sign-in,<br/>embedded wallet: the user's key,<br/>raw_sign, Face ID"]
 
-  subgraph api["Zecca API, Hono · services/api"]
-    direction LR
+  subgraph api["Zecca API (Hono)"]
     auth["auth"]
     dir["directory"]
+    events["events, SSE"]
     prep["prepared transactions<br/>+ sponsor policy"]
     intents["intents"]
-    events["events, SSE"]
     conn["connectors<br/>ramp · card · earn<br/>market · identity · proofs"]
+    auth ~~~ prep
+    dir ~~~ intents
+    events ~~~ conn
   end
 
+  db[("API store, SQLite<br/>users, intents, books,<br/>deposit to payout routing")]
+  ks[("Key store, encrypted file<br/>wallets, ElGamal keys")]
   pool["Pool worker<br/>worker thread<br/>services/pool-worker"]
-  db[("SQLite<br/>users, intents, books,<br/>deposit to payout routing")]
-  ks[("Key store<br/>encrypted file:<br/>wallets, ElGamal keys")]
-
-  devnet[["XRPL Devnet"]]
-  testnet[["XRPL Testnet"]]
-  flare[["Flare Coston2"]]
-  moonpay["MoonPay sandbox"]
-  lithic["Lithic sandbox"]
-  eudi["EUDI verifier<br/>OpenID4VP"]
+  pooldb[("Pool store, SQLite<br/>expected deposits,<br/>payouts, mints")]
+  devnet[["XRPL Devnet<br/>every payment"]]
+  outside["MoonPay and Lithic sandboxes,<br/>EUDI verifier, XRPL Testnet,<br/>Flare Coston2"]
 
   nfc -- "tap: pay link" --> web
   web -- "sign in, raw_sign" --> privy
-  web -- "HTTPS + SSE" --> api
-  auth -- "verify token" --> privy
-  api --- db
-  api --- ks
-  intents -- "RPC: expect deposit,<br/>pay out, mint, merge" --> pool
-  pool --- db
+  privy -. "auth verifies the token" .- auth
+  web -- "HTTPS + SSE" --> auth
+  intents --- db
+  prep --- ks
+  intents -- "expect deposit, pay out,<br/>mint, merge" --> pool
   pool --- ks
-  prep -- "sponsor co-signs, submits" --> devnet
-  pool -- "watch the pool, decrypt,<br/>pay out, merge" --> devnet
-  conn -- "credentials, metals, oracle" --> devnet
-  conn --> eudi
-  conn <--> moonpay
-  conn <--> lithic
-  moonpay -- "RLUSD" --> testnet
-  conn -- "check deliveries,<br/>Earn payments" --> testnet
-  testnet -. "executor relays" .-> flare
-  conn -- "reads" --> flare
+  prep -- "sponsor co-signs,<br/>submits" --> devnet
+  pool -- "watch, decrypt,<br/>pay out, merge" --> devnet
+  conn -- "credentials,<br/>metals, oracle" --> devnet
+  conn <--> outside
+  pool --- pooldb
 ```
 
 ### One payment
@@ -137,7 +130,7 @@ sequenceDiagram
   U->>W: email code, pick a handle
   W->>API: POST /v1/onboarding/prepare
   API->>L: sponsor Payment of 1 drop, tfSponsorCreatedAccount
-  Note over L: account exists, no XRP held
+  Note over L: account exists with 1 drop,<br/>the user buys no XRP
   Note over API: new ElGamal key for the user,<br/>kept in the key store.<br/>Batch built, issuer and sponsor<br/>add their BatchSigners
   API-->>W: Batch to approve
   U->>W: Approve, one signature
@@ -170,7 +163,7 @@ sequenceDiagram
     M->>N: zecca-nfc://emit?url=link
     N->>C: tap: an NFC Type 4 tag holding the link
   end
-  C->>API: open /pay/:id, "Pay $4.50 to Caffè Bruno"
+  C->>API: GET /v1/payment-requests/:id (pay page /pay/:id), "Pay $4.50 to Caffè Bruno"
   C->>API: POST /v1/payment-requests/:id/pay
   API-->>C: transaction to approve
   C->>API: Approve, raw_sign, POST /v1/tx/submit
@@ -221,7 +214,7 @@ flowchart LR
   metals["Metals"] --> m2["deposit to the pool<br/>Devnet"] --> m3["metal MPT from the issuer<br/>price from OracleSet<br/>Devnet"]
   st["Statements"] --> s2["statement<br/>signed by Zecca"] --> s3["proof per line:<br/>ciphertext = amount shown<br/>checked on a public node"]
   card["Card"] --> c2["Lithic ASA answered<br/>from the card balance"] --> c3["at clearing: pool pays<br/>the card settlement account<br/>Devnet"]
-  topup["Top-up"] --> t2["MoonPay delivers RLUSD<br/>to Zecca's treasury<br/>Testnet"] --> t3["delivery checked, minted<br/>into the pool, paid out<br/>Devnet"]
+  topup["Top-up"] --> t2["MoonPay delivers RLUSD,<br/>or XRP where RLUSD<br/>is not offered,<br/>to Zecca's treasury<br/>Testnet"] --> t3["delivery checked, minted<br/>into the pool, paid out<br/>Devnet"]
 ```
 
 ## Proven on the ledger
