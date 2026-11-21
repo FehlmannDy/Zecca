@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import type { CardAuthorization } from '@zecca/contracts'
-import { authLine, authStatusLabel, cardFormErrors, formatCardNumberInput, formatExpiry, formatPan, latestOnly, parseExpiry, tiltFrom, upsertAuthorization } from './card-logic'
+import {
+  authLine,
+  authStatusLabel,
+  cardFormErrors,
+  cardLengths,
+  formatCardNumberInput,
+  formatCvcInput,
+  formatExpiry,
+  formatExpiryInput,
+  formatPan,
+  latestOnly,
+  parseExpiry,
+  tiltFrom,
+  upsertAuthorization,
+} from './card-logic'
 
 const a = (id: string, status: CardAuthorization['status'], o: Partial<CardAuthorization> = {}): CardAuthorization => ({
   id,
@@ -15,8 +29,37 @@ const a = (id: string, status: CardAuthorization['status'], o: Partial<CardAutho
 describe('card numbers and expiry', () => {
   it('groups a number by four', () => {
     expect(formatPan('4111111111114417')).toBe('4111 1111 1111 4417')
-    expect(formatCardNumberInput('4111-1111 11114417999999')).toBe('4111 1111 1111 4417 999')
+    expect(formatCardNumberInput('4111-1111 11114417999999')).toBe('4111 1111 1111 4417')
     expect(formatCardNumberInput('41a1')).toBe('411')
+    expect(formatCardNumberInput('4111 ')).toBe('4111')
+  })
+
+  it('stops the number and the code at the card length (American Express: 15 and 4)', () => {
+    expect(cardLengths('4111')).toEqual({ pan: 16, cvc: 3 })
+    expect(cardLengths('3782')).toEqual({ pan: 15, cvc: 4 })
+    expect(formatCardNumberInput('3782822463100059')).toBe('3782 8224 6310 005')
+    expect(formatCvcInput('12345', '4111 1111 1111 1111')).toBe('123')
+    expect(formatCvcInput('12a3', '')).toBe('123')
+    expect(formatCvcInput('12345', '3782 8224 6310 005')).toBe('1234')
+  })
+
+  it('types the expiry on a keypad without a slash', () => {
+    expect(formatExpiryInput('1')).toBe('1')
+    expect(formatExpiryInput('12')).toBe('12')
+    expect(formatExpiryInput('122')).toBe('12/2')
+    expect(formatExpiryInput('1228')).toBe('12/28')
+    expect(formatExpiryInput('122899')).toBe('12/28')
+    expect(formatExpiryInput('5')).toBe('05')
+    expect(formatExpiryInput('528')).toBe('05/28')
+  })
+
+  it('keeps a typed or autofilled slash, and lets backspace remove it', () => {
+    expect(formatExpiryInput('1/')).toBe('01/')
+    expect(formatExpiryInput('12/')).toBe('12/')
+    expect(formatExpiryInput('12/289')).toBe('12/28')
+    expect(formatExpiryInput('12/2028')).toBe('12/28')
+    expect(formatExpiryInput(' 12 / 28 ')).toBe('12/28')
+    expect(formatExpiryInput('/')).toBe('')
   })
 
   it('shows and reads MM/YY', () => {

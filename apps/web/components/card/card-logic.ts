@@ -9,8 +9,16 @@ const digits = (s: string) => s.replace(/\D/g, '')
 /** "4111111111114417" -> "4111 1111 1111 4417". */
 export const formatPan = (pan: string) => digits(pan).replace(/(\d{4})(?=\d)/g, '$1 ')
 
-/** What a person types in the number field, cleaned and grouped (19 digits at most). */
-export const formatCardNumberInput = (raw: string) => formatPan(digits(raw).slice(0, 19))
+/** The lengths a card number needs: 15 digits and a 4-digit code for American Express (34, 37), else 16 and 3. */
+export function cardLengths(pan: string): { pan: number; cvc: number } {
+  return /^3[47]/.test(digits(pan)) ? { pan: 15, cvc: 4 } : { pan: 16, cvc: 3 }
+}
+
+/** What a person types in the number field, cleaned, grouped and stopped at the card's length. */
+export const formatCardNumberInput = (raw: string) => formatPan(digits(raw).slice(0, cardLengths(raw).pan))
+
+/** What a person types in the security code field: digits only, stopped at the card's code length. */
+export const formatCvcInput = (raw: string, pan: string) => digits(raw).slice(0, cardLengths(pan).cvc)
 
 export const formatExpiry = (m: number, y: number) => `${String(m).padStart(2, '0')}/${String(y % 100).padStart(2, '0')}`
 
@@ -24,9 +32,21 @@ export function parseExpiry(s: string): { expMonth: number; expYear: number } | 
   return { expMonth: month, expYear: m[2].length === 2 ? 2000 + y : y }
 }
 
-/** Typing help for the expiry field: digits become "MM/YY". */
+/**
+ * Typing help for the expiry field (a phone's numeric keypad has no "/"): digits become "MM/YY" ("1228" -> "12/28",
+ * "5" -> "05"), a typed or autofilled slash is kept ("1/" -> "01/", "12/2028" -> "12/28"), nothing past MM/YY.
+ */
 export function formatExpiryInput(raw: string): string {
-  const d = digits(raw).slice(0, 4)
+  const slash = raw.indexOf('/')
+  if (slash >= 0) {
+    const month = digits(raw.slice(0, slash)).slice(-2)
+    if (!month) return ''
+    const year = digits(raw.slice(slash + 1))
+    return `${month.padStart(2, '0')}/${year.length === 4 ? year.slice(2) : year.slice(0, 2)}`
+  }
+  let d = digits(raw)
+  if (d && d[0] > '1') d = `0${d}` // no month starts with 2 to 9
+  d = d.slice(0, 4)
   return d.length <= 2 ? d : `${d.slice(0, 2)}/${d.slice(2)}`
 }
 

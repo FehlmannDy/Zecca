@@ -12,7 +12,7 @@ import { useMediaQuery } from '@/lib/use-media'
 import { QrCode } from '@/components/merchant/qr-code'
 import { mergeRequest } from '@/components/merchant/till-model'
 import { useInterval, useRequestStream } from '@/components/merchant/use-request-stream'
-import { formatExpiry, parseExpiry } from './expiry'
+import { cardLengths, formatCardNumberInput, formatCvcInput, formatExpiryInput, parseExpiry } from '@/components/card/card-logic'
 import { ShopReceipt } from './receipt'
 import { SERIF, ShopButton } from './shop-frame'
 import { ShopUnavailable } from './shop-home'
@@ -175,7 +175,8 @@ function CardOption({ orderId, amountMinor, enabled, onApproved }: { orderId: st
     setMessage('')
     const expiry = parseExpiry(exp)
     const digits = pan.replace(/\s+/g, '')
-    if (!expiry || !/^\d{12,19}$/.test(digits) || !/^\d{3,4}$/.test(cvc)) {
+    const need = cardLengths(digits)
+    if (!expiry || digits.length !== need.pan || cvc.length !== need.cvc) {
       setMessage('Check the card number, expiry (MM/YY) and code.')
       return
     }
@@ -203,16 +204,20 @@ function CardOption({ orderId, amountMinor, enabled, onApproved }: { orderId: st
         <fieldset disabled={!enabled} className="space-y-3">
           <label className="block">
             <span className="text-[13px] font-[600] text-[var(--s-muted)]">Card number</span>
-            <input className={`${field} mt-1`} inputMode="numeric" autoComplete="cc-number" placeholder="1234 5678 9012 3456" value={pan} onChange={(e) => setPan(e.target.value)} />
+            <input className={`${field} mt-1`} inputMode="numeric" autoComplete="cc-number" placeholder="1234 5678 9012 3456" value={pan} onChange={(e) => {
+                const next = formatCardNumberInput(e.target.value)
+                setPan(next)
+                setCvc((c) => formatCvcInput(c, next))
+              }} />
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className="text-[13px] font-[600] text-[var(--s-muted)]">Expiry</span>
-              <input className={`${field} mt-1`} inputMode="numeric" autoComplete="cc-exp" placeholder="MM/YY" value={exp} onChange={(e) => setExp(formatExpiry(e.target.value))} />
+              <input className={`${field} mt-1`} inputMode="numeric" autoComplete="cc-exp" placeholder="MM/YY" value={exp} onChange={(e) => setExp(formatExpiryInput(e.target.value))} />
             </label>
             <label className="block">
               <span className="text-[13px] font-[600] text-[var(--s-muted)]">Security code</span>
-              <input className={`${field} mt-1`} inputMode="numeric" autoComplete="cc-csc" placeholder="123" value={cvc} onChange={(e) => setCvc(e.target.value)} />
+              <input className={`${field} mt-1`} inputMode="numeric" autoComplete="cc-csc" placeholder="123" value={cvc} onChange={(e) => setCvc(formatCvcInput(e.target.value, pan))} />
             </label>
           </div>
           <ShopButton type="submit" variant="outline" className={busy ? 'w-full opacity-45' : 'w-full'} aria-disabled={busy || undefined} aria-busy={busy || undefined}>
