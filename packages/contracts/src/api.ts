@@ -149,7 +149,15 @@ export const EarnDepositResponse = z.object({
   intent: Intent,
   prepared: PreparedTx,
   /** Quote shown before approval. */
-  quote: z.object({ xrpDrops: z.number().int().positive(), rateMinorPerXrp: PositiveMinor, swapFeeMinor: Minor }),
+  quote: z.object({
+    xrpDrops: z.number().int().positive(),
+    rateMinorPerXrp: PositiveMinor,
+    swapFeeMinor: Minor,
+    /** The rate behind the quote, exactly (XRP/USD in micro-dollars), when it was read and from where. */
+    microUsdPerXrp: z.number().int().positive().optional(),
+    rateAt: IsoTime.optional(),
+    rateSource: z.string().optional(),
+  }),
 })
 export const EarnWithdrawRequest = z.object({ amountDrops: z.number().int().positive() })
 export const EarnWithdrawResponse = z.object({ status: z.literal('requested'), claimableAt: IsoTime })

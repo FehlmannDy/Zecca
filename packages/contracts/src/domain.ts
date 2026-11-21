@@ -221,6 +221,20 @@ export const EarnPosition = z.object({
   history: z.array(z.object({ at: IsoTime, valueDrops: z.number().int().nonnegative() })),
   pendingWithdrawal: z.object({ amountDrops: z.number().int().positive(), claimableAt: IsoTime }).optional(),
   status: z.enum(['none', 'funding', 'opening', 'active']),
+  /** 'mock': the Flare side is simulated (shown as such). */
+  mode: z.enum(['live', 'mock']).optional(),
+  /** The XRP/USD rate the values use. */
+  rate: z.object({ minorPerXrp: PositiveMinor, microUsdPerXrp: z.number().int().positive(), at: IsoTime, source: z.string() }).optional(),
+  /** The deposit on its way into the vault, if any. */
+  inFlight: z
+    .object({ status: z.enum(['funding', 'opening']), xrpDrops: z.number().int().nonnegative(), amountMinor: Minor, since: IsoTime, openedAt: IsoTime.optional() })
+    .optional(),
+  /** English, fit to show: why the last deposit did not go through. */
+  lastFailure: z.string().optional(),
+  /** What the ledgers show: the person's Testnet account, the Flare smart account, the last payment into the vault. */
+  ledger: z.object({ testnetAddress: XrplAddress, smartAccount: z.string().optional(), lastPaymentHash: TxHash.optional() }).optional(),
+  /** The vault could not be read just now: the value is the last one known. */
+  stale: z.boolean().optional(),
 })
 export type EarnPosition = z.infer<typeof EarnPosition>
 

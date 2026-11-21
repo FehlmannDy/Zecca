@@ -69,6 +69,30 @@ describe('additions requested by the API (C)', () => {
   })
 })
 
+describe('additions requested by phase 2 (Earn, L)', () => {
+  it('EarnPosition keeps what the Earn connector returns beyond the base position', () => {
+    const full = {
+      ...F.earnPosition,
+      status: 'opening',
+      mode: 'live',
+      rate: { minorPerXrp: 220, microUsdPerXrp: 2_201_500, at: '2026-11-21T09:00:00.000Z', source: 'FTSO v2 (Coston2) XRP/USD' },
+      inFlight: { status: 'opening', xrpDrops: 10_924_471, amountMinor: 2500, since: '2026-11-21T09:00:00.000Z', openedAt: '2026-11-21T09:01:00.000Z' },
+      lastFailure: "The deposit didn't open. Your money is back.",
+      ledger: { testnetAddress: 'rB5Pc1c7EYx98o4iWfk4Jx96JrCWgqhfZ3', smartAccount: '0x' + 'ab'.repeat(20), lastPaymentHash: 'AB'.repeat(32) },
+      stale: true,
+    }
+    expect(C.EarnPosition.parse(full)).toEqual(full)
+    expect(C.EarnPosition.safeParse({ ...full, mode: 'other' }).success).toBe(false)
+    expect(C.EarnPosition.safeParse({ ...full, inFlight: { ...full.inFlight, status: 'active' } }).success).toBe(false)
+  })
+
+  it('EarnDepositResponse.quote keeps the rate it was quoted at', () => {
+    const quote = { xrpDrops: 10_924_471, rateMinorPerXrp: 220, swapFeeMinor: 7, microUsdPerXrp: 2_201_500, rateAt: '2026-11-21T09:00:00.000Z', rateSource: 'FTSO v2 (Coston2) XRP/USD' }
+    const r = C.EarnDepositResponse.parse({ intent: F.intents.p2pCreated, prepared: F.preparedSend, quote })
+    expect(r.quote).toEqual(quote)
+  })
+})
+
 describe('route table', () => {
   it('every route is under /v1 and unique', () => {
     const keys = Object.values(C.routes).map((r) => `${r.method} ${r.path}`)
