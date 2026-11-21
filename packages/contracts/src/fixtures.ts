@@ -241,7 +241,7 @@ export const receipts = {
   shopZecca: {
     orderNumber: 'SA-1042',
     shopName: 'Sette Archi',
-    items: [{ name: 'Etiopia Guji, 250 g', qty: 1, unitMinor: 1450 }],
+    items: [{ name: 'Ethiopia Guji, 250 g', qty: 1, unitMinor: 1450 }],
     amountMinor: 1450,
     method: 'zecca',
     status: 'completed',
@@ -405,7 +405,7 @@ export const statement: Statement = {
 }
 
 export const shopItems: z.input<typeof A.ShopItem>[] = [
-  { sku: 'guji-250', name: 'Etiopia Guji, 250 g', priceMinor: 1450, description: 'Bergamot, peach, black tea. Light roast.' },
+  { sku: 'guji-250', name: 'Ethiopia Guji, 250 g', priceMinor: 1450, description: 'Bergamot, peach, black tea. Light roast.' },
   { sku: 'huila-250', name: 'Colombia Huila, 250 g', priceMinor: 1250, description: 'Red apple, caramel. Medium roast.' },
   { sku: 'moka-3', name: 'Moka pot, 3 cups', priceMinor: 3200 },
   { sku: 'grinder', name: 'Hand grinder', priceMinor: 9900, description: 'Steel burrs. Built to last.' },

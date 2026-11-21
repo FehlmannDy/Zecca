@@ -345,7 +345,7 @@ describe('POST /v1/demo/shop/charge (the demo shop’s "Pay by card")', () => {
       method: 'card',
       cardLast4: card.last4,
       status: 'authorised',
-      items: [{ name: 'Etiopia Guji, 250 g', qty: 1, unitMinor: 1450 }],
+      items: [{ name: 'Ethiopia Guji, 250 g', qty: 1, unitMinor: 1450 }],
     })
     expect(r.body.receipt.orderNumber).toMatch(/^SA-\d+$/)
     const tx = lithic.txs.get(r.body.receipt.reference)!

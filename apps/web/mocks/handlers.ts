@@ -120,7 +120,7 @@ export function createHandlers(state: MockState, origin: string): HttpHandler[] 
     shopOrderGet: ({ params }) => {
       state.expireRequests()
       const pr = state.data().paymentRequests[params.id.replace(/^ord_/, 'pr_')]
-      const order = { id: params.id, items: [{ sku: 'guji-250', name: 'Etiopia Guji, 250 g', qty: 1, unitMinor: 1450 }], amountMinor: 1450, status: 'pending', createdAt: new Date().toISOString() }
+      const order = { id: params.id, items: [{ sku: 'guji-250', name: 'Ethiopia Guji, 250 g', qty: 1, unitMinor: 1450 }], amountMinor: 1450, status: 'pending', createdAt: new Date().toISOString() }
       if (!pr) return order
       return { ...order, status: pr.status === 'paid' ? 'paid' : 'pending', ...(pr.status === 'paid' ? { method: 'zecca' } : {}), paymentRequestId: pr.id, paymentStatus: pr.status, expiresAt: pr.expiresAt }
     },

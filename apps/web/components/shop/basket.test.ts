@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { addToBasket, basketLines, parseBasket, setQty, toOrderItems } from './basket'
 
 const items = [
-  { sku: 'guji-250', name: 'Etiopia Guji, 250 g', priceMinor: 1450 },
+  { sku: 'guji-250', name: 'Ethiopia Guji, 250 g', priceMinor: 1450 },
   { sku: 'moka-3', name: 'Moka pot, 3 cups', priceMinor: 3200 },
 ]
 

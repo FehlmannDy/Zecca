@@ -39,7 +39,7 @@ describe('demo shop: catalogue', () => {
     expect(priceOrder([{ sku: 'guji-250', qty: 2 }, { sku: 'moka-3', qty: 1 }, { sku: 'guji-250', qty: 1 }])).toEqual({
       amountMinor: 1450 * 3 + 3200,
       lines: [
-        { sku: 'guji-250', name: 'Etiopia Guji, 250 g', qty: 3, unitMinor: 1450 },
+        { sku: 'guji-250', name: 'Ethiopia Guji, 250 g', qty: 3, unitMinor: 1450 },
         { sku: 'moka-3', name: 'Moka pot, 3 cups', qty: 1, unitMinor: 3200 },
       ],
     })
@@ -104,7 +104,7 @@ describe('demo shop: orders', () => {
 
     let o = ShopOrder.parse((await h.json('GET', `/v1/demo/shop/orders/${created.orderId}`)).body)
     expect(o).toMatchObject({ id: created.orderId, status: 'pending', amountMinor: 1450, paymentRequestId: created.paymentRequest.id })
-    expect(o.items).toEqual([{ sku: 'guji-250', name: 'Etiopia Guji, 250 g', qty: 1, unitMinor: 1450 }])
+    expect(o.items).toEqual([{ sku: 'guji-250', name: 'Ethiopia Guji, 250 g', qty: 1, unitMinor: 1450 }])
     expect(o.receipt).toBeUndefined()
     // Reading the order does not mark the request opened (only the customer's pay page does).
     expect(h.app.core.db.prepare('SELECT status FROM payment_requests WHERE id = ?').get(created.paymentRequest.id)).toEqual({ status: 'created' })
@@ -125,7 +125,7 @@ describe('demo shop: orders', () => {
     expect(o.receipt).toMatchObject({
       orderNumber: 'SA-1001',
       shopName: 'Sette Archi',
-      items: [{ name: 'Etiopia Guji, 250 g', qty: 1, unitMinor: 1450 }],
+      items: [{ name: 'Ethiopia Guji, 250 g', qty: 1, unitMinor: 1450 }],
       amountMinor: 1450,
       method: 'zecca',
       status: 'completed',
@@ -198,7 +198,7 @@ describe('demo shop: orders paid by card, and the payment request state', () => 
     store.creditDeposit({ intentId: `int_load_${orderId}`, userId, amountMinor })
     const authToken = `auth_${orderId}`
     expect(store.authorize({ authToken, userId, cardToken: 'lc_1', amountMinor, merchant: 'Sette Archi', orderId }).approved).toBe(true)
-    const receipt = { orderNumber: 'SA-1001', shopName: 'Sette Archi', items: [{ name: 'Etiopia Guji, 250 g', qty: 1, unitMinor: 1450 }], amountMinor, method: 'card' as const, cardLast4: '4417', status: 'authorised' as const, at: h.app.core.iso(), reference: authToken }
+    const receipt = { orderNumber: 'SA-1001', shopName: 'Sette Archi', items: [{ name: 'Ethiopia Guji, 250 g', qty: 1, unitMinor: 1450 }], amountMinor, method: 'card' as const, cardLast4: '4417', status: 'authorised' as const, at: h.app.core.iso(), reference: authToken }
     store.saveCharge(orderId, authToken, receipt)
     return { authToken, receipt }
   }

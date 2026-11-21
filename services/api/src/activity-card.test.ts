@@ -138,7 +138,7 @@ describe('card purchases in GET /v1/activity', () => {
     expect(r.body.approved).toBe(true)
     await h.settle()
     const p = (await purchases(h, ana))[0]
-    expect(p.receipt).toMatchObject({ orderNumber: r.body.receipt.orderNumber, items: [{ name: 'Etiopia Guji, 250 g', qty: 1, unitMinor: 1450 }], status: 'completed', method: 'card' })
+    expect(p.receipt).toMatchObject({ orderNumber: r.body.receipt.orderNumber, items: [{ name: 'Ethiopia Guji, 250 g', qty: 1, unitMinor: 1450 }], status: 'completed', method: 'card' })
   })
 
   it('picks up purchases recorded before the activity row existed, and never shows another person\'s', async () => {

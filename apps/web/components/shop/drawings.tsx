@@ -58,5 +58,5 @@ export function Grinder({ className, label = 'A hand grinder' }: { className?: s
 export function ItemDrawing({ sku, className }: { sku: string; className?: string }) {
   if (sku.startsWith('moka')) return <MokaPot className={className} />
   if (sku.startsWith('grinder')) return <Grinder className={className} />
-  return <CoffeeBag className={className} tone={sku.startsWith('huila') ? 'Huila' : 'Guji'} label={sku.startsWith('huila') ? 'A bag of Colombia Huila coffee' : 'A bag of Etiopia Guji coffee'} />
+  return <CoffeeBag className={className} tone={sku.startsWith('huila') ? 'Huila' : 'Guji'} label={sku.startsWith('huila') ? 'A bag of Colombia Huila coffee' : 'A bag of Ethiopia Guji coffee'} />
 }
