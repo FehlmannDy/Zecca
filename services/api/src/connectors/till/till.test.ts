@@ -1,14 +1,24 @@
 // Zecca Till: pairing a merchant's Android till without Privy on the phone, and the till-scoped charge routes.
 import { describe, expect, it } from 'vitest'
+import { Hono } from 'hono'
 import { PaymentRequest, SalesResponse, matchRoute, routePath, routes, type RouteDef, type RouteName } from '@zecca/contracts'
+import type { AppDeps } from '../../app'
+import { featuresFrom, type Env } from '../../config'
 import { createFakePool, type FakeLedger, type FakePool } from '../../testing/fakes'
 import { eventually, makeHarness } from '../../testing/harness'
+import { clientAddress } from './address'
 import { CODE_ALPHABET, PAIRING_TTL_MS, TillList, TillPairResponse, TillPairingCode, normalizeCode } from './schemas'
 
 const API_ORIGIN = 'https://zecca-api-production.up.railway.app'
 
-async function shop(o: { pool?: FakePool } = {}) {
-  const h = makeHarness<FakeLedger, FakePool>({ env: { API_ORIGIN }, ...o })
+/** Every FEATURE_* flag and DEMO_MODE on: no route can answer 404 (feature off, demo off) before its auth check. */
+const EVERYTHING_ON: Env = {
+  DEMO_MODE: '1',
+  ...Object.fromEntries(Object.keys(featuresFrom({})).map((k) => [`FEATURE_${k.replace(/[A-Z]/g, (m) => `_${m}`).toUpperCase()}`, '1'])),
+}
+
+async function shop(o: { pool?: FakePool; env?: Env; extra?: Partial<AppDeps> } = {}) {
+  const h = makeHarness<FakeLedger, FakePool>({ ...o, env: { API_ORIGIN, ...o.env } })
   const bruno = await h.signUp('caffebruno', { role: 'merchant', businessName: 'Caffè Bruno', displayName: 'Bruno Esposito' })
   const ana = await h.signUp('ana', { displayName: 'Ana Ferri' })
   const newCode = async () => {
@@ -16,8 +26,12 @@ async function shop(o: { pool?: FakePool } = {}) {
     expect(r.status).toBe(200)
     return TillPairingCode.parse(r.body)
   }
-  const pair = async (code: string, ip = '203.0.113.7', name?: string) =>
-    h.json('POST', '/v1/till/pair', { body: { code, ...(name ? { name } : {}) }, headers: { 'x-forwarded-for': ip } } as never)
+  // `ip` is the address Railway's edge puts in X-Real-IP; `forwardedFor` is whatever the caller sends in X-Forwarded-For.
+  const pair = async (code: string, ip = '203.0.113.7', name?: string, forwardedFor?: string) =>
+    h.json('POST', '/v1/till/pair', {
+      body: { code, ...(name ? { name } : {}) },
+      headers: { 'x-real-ip': ip, ...(forwardedFor ? { 'x-forwarded-for': forwardedFor } : {}) },
+    } as never)
   const pairedTill = async (name?: string) => {
     const c = await newCode()
     const r = await pair(c.pairingCode, '203.0.113.7', name)
@@ -88,14 +102,29 @@ describe('till pairing', () => {
     expect(dump).not.toContain(t.tillToken)
   })
 
-  it('pairing is rate limited per address', async () => {
+  it('pairing is rate limited per address: the one the edge sets, whatever X-Forwarded-For the caller sends', async () => {
     const { pair } = await shop()
     const answers: number[] = []
-    for (let i = 0; i < 12; i++) answers.push((await pair('AAAAAAAA', '198.51.100.9')).status)
+    for (let i = 0; i < 12; i++) answers.push((await pair('AAAAAAAA', '198.51.100.9', undefined, `192.0.2.${i}, 198.51.100.9`)).status)
     expect(answers.slice(0, 10).every((s) => s === 400)).toBe(true)
     expect(answers.slice(10)).toEqual([429, 429])
     // Another address is not blocked.
     expect((await pair('AAAAAAAA', '198.51.100.10')).status).toBe(400)
+  })
+
+  it('pairing is also capped for everyone together (300 a minute)', async () => {
+    const { pair } = await shop()
+    for (let i = 0; i < 300; i++) expect((await pair('AAAAAAAA', `10.0.${i >> 8}.${i & 255}`)).status).toBe(400)
+    expect((await pair('AAAAAAAA', '198.51.100.77')).status).toBe(429)
+  })
+
+  it('the client address: X-Real-IP (set by Railway’s edge), else the socket; never the caller’s X-Forwarded-For', async () => {
+    const app = new Hono().get('/', (c) => c.text(clientAddress(c)))
+    const ask = async (headers: Record<string, string>, remoteAddress?: string) =>
+      (await app.request('/', { headers }, remoteAddress ? { incoming: { socket: { remoteAddress } } } : undefined)).text()
+    expect(await ask({ 'x-real-ip': ' 198.51.100.9 ', 'x-forwarded-for': '192.0.2.1' }, '100.64.0.2')).toBe('198.51.100.9')
+    expect(await ask({ 'x-forwarded-for': '192.0.2.1, 192.0.2.2' }, '127.0.0.1')).toBe('127.0.0.1')
+    expect(await ask({ 'x-forwarded-for': '192.0.2.1' })).toBe('local')
   })
 
   it('refuses a wrong body with 400 and an English message', async () => {
@@ -219,33 +248,44 @@ describe('till charges', () => {
 })
 
 describe('till token scope', () => {
-  it('a till token is refused on every other route of the API', async () => {
-    const { h, pairedTill } = await shop()
-    const t = await pairedTill()
-    const all = Object.entries(routes) as [RouteName, RouteDef][]
-    for (const [name, def] of all) {
-      if (def.auth === 'public' || def.auth === 'webhook' || def.auth === 'demo' || def.auth === 'till') continue
-      const params = Object.fromEntries([...def.path.matchAll(/:([a-zA-Z]+)/g)].map((m) => [m[1], 'x']))
-      const res = await h.call(def.method, routePath(name, params), { token: t.tillToken, ...(def.method === 'POST' ? { body: {} } : {}) })
-      const label = `${def.method} ${def.path} -> ${res.status}`
-      // Routes behind an off flag answer 404 feature_off before any auth; every other one refuses the till token.
-      if (def.feature && !h.app.core.settings.features[def.feature as keyof typeof h.app.core.settings.features]) expect(res.status, label).toBe(404)
-      else expect(res.status, label).toBe(401)
+  // Every feature and DEMO_MODE on and every connector mounted, so each route reaches its auth check.
+  const everythingOn = async () => {
+    const s = await shop({ env: EVERYTHING_ON, extra: { connectors: true } })
+    expect(Object.entries(s.h.app.core.settings.features).filter(([, on]) => !on)).toEqual([])
+    return { ...s, t: await s.pairedTill() }
+  }
+
+  it('a till token is refused (401) on every other route of the route table', async () => {
+    const { h, t } = await everythingOn()
+    const call = (method: string, path: string, token?: string) => h.call(method, path, { token, ...(method === 'POST' ? { body: {} } : {}) })
+    let refused = 0
+    for (const [name, def] of Object.entries(routes) as [RouteName, RouteDef][]) {
+      if (def.auth === 'till') continue
+      const path = routePath(name, Object.fromEntries([...def.path.matchAll(/:([a-zA-Z]+)/g)].map((m) => [m[1], 'x'])))
+      const res = await call(def.method, path, t.tillToken)
+      if (def.auth === 'public' || def.auth === 'webhook' || def.auth === 'demo') {
+        // Open to anyone: the till token changes nothing.
+        expect(res.status, `${def.method} ${def.path}`).toBe((await call(def.method, path)).status)
+      } else {
+        expect(res.status, `${def.method} ${def.path}`).toBe(401)
+        refused++
+      }
     }
+    expect(refused).toBe(Object.values(routes).filter((d) => d.auth === 'user' || d.auth === 'merchant' || d.auth === 'dev').length)
     // The merchant's till routes are in the table: the till cannot list, pair or unpair tills.
     expect((await h.call('POST', `/v1/merchant/tills/${t.tillId}/revoke`, { token: t.tillToken })).status).toBe(401)
   })
 
-  it('a till token gets nothing from the routes connectors mount outside the table either', async () => {
-    const h = makeHarness({ extra: { connectors: true } })
-    const bruno = await h.signUp('caffebruno', { role: 'merchant', businessName: 'Caffè Bruno' })
-    const code = (await h.json('POST', '/v1/merchant/tills', { token: bruno.token })).body.pairingCode
-    const t = TillPairResponse.parse((await h.json('POST', '/v1/till/pair', { body: { code } })).body)
+  it('a till token is refused (401) on the routes connectors mount outside the table too', async () => {
+    const { h, t } = await everythingOn()
     const registered = (h.app as unknown as { routes: { method: string; path: string }[] }).routes
-    const offTable = registered.filter((r) => (r.method === 'GET' || r.method === 'POST') && r.path.startsWith('/v1/') && !matchRoute(r.method, r.path.replace(/:([a-zA-Z]+)/g, 'x')))
+    const offTable = registered
+      .filter((r) => (r.method === 'GET' || r.method === 'POST') && r.path.startsWith('/v1/') && !matchRoute(r.method, r.path.replace(/:([a-zA-Z]+)/g, 'x')))
+      .map((r) => ({ method: r.method, path: r.path.replace(/:([a-zA-Z]+)/g, 'x') }))
+    expect(offTable.length).toBeGreaterThan(0)
     for (const r of offTable) {
-      const res = await h.call(r.method as 'GET' | 'POST', r.path.replace(/:([a-zA-Z]+)/g, 'x'), { token: t.tillToken, ...(r.method === 'POST' ? { body: {} } : {}) })
-      expect(res.status, `${r.method} ${r.path}`).toBeGreaterThanOrEqual(400)
+      const res = await h.call(r.method, r.path, { token: t.tillToken, ...(r.method === 'POST' ? { body: {} } : {}) })
+      expect(res.status, `${r.method} ${r.path}`).toBe(401)
     }
   })
 

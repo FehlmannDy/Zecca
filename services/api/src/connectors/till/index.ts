@@ -17,6 +17,7 @@ import { createRateLimiter } from '../../limits'
 import { users, type UserRow } from '../../users'
 import { requests, toPaymentRequest } from '../../paymentRequests/repo'
 import { emitRequest } from '../../paymentRequests/routes'
+import { clientAddress } from './address'
 import { isCode, normalizeCode } from './schemas'
 import { createPairing, ensureTillTables, isTillCharge, listTills, recordCharge, redeemPairing, revokeTill, tillByToken, type TillRow } from './store'
 
@@ -48,8 +49,6 @@ function apiOrigin(core: Core, c: Context): string {
   const host = c.req.header('x-forwarded-host')?.split(',')[0]?.trim() || u.host
   return `${proto}://${host}`
 }
-
-const clientAddress = (c: Context) => c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || c.req.header('x-real-ip') || 'local'
 
 export function mountTill(app: Hono, core: Core): void {
   ensureTillTables(core)
