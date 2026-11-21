@@ -1,6 +1,7 @@
 // The card sub-ledger, in integer cents, on the API's database (port of card-issuer/src/store.js, pool mode).
 // The card balance is what the user moved to the card (card_load deposits to the pool), minus approved purchases,
 // plus voids and refunds. A purchase is answered and spent here only; the ledger is touched after the answer.
+// A refund also stores its way back on the ledger (card settlement account -> pool, returns.ts) in the same transaction.
 // better-sqlite3 is synchronous and each method runs in one transaction: no two authorizations can spend the same cents.
 import type { CardAuthorization, Receipt } from '@zecca/contracts'
 import type { Db } from '../../db'
@@ -41,6 +42,24 @@ export type HoldRow = {
   clearTries?: number
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * A refund's money going back on the ledger, from the card settlement account to the pool (returns.ts), once per refund key.
+ * pending: to send; reserved: built with this sequence and stored before the submit (it may be on the ledger);
+ * sent: on the ledger; stopped: not tried again (outcome unknown, or too many tries), for a person to look at.
+ */
+export type ReturnStatus = 'pending' | 'reserved' | 'sent' | 'stopped'
+export type ReturnRow = {
+  key: string
+  amountMinor: number
+  status: ReturnStatus
+  sequence?: number
+  lastLedger?: number
+  fingerprint?: string
+  txHash?: string
+  error?: string
+  tries: number
 }
 
 type Ctx = { db: Db; iso(ms?: number): string }
@@ -98,6 +117,20 @@ export function ensureCardTables(db: Db): void {
       receipt_json TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS card_returns (
+      key TEXT PRIMARY KEY,
+      ${amount('amount_minor')},
+      status TEXT NOT NULL CHECK (status IN ('pending', 'reserved', 'sent', 'stopped')),
+      sequence INTEGER,
+      last_ledger INTEGER,
+      fingerprint TEXT,
+      tx_hash TEXT,
+      error TEXT,
+      tries INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS card_returns_status ON card_returns (status);
     CREATE TABLE IF NOT EXISTS card_kv (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -182,11 +215,40 @@ export function toAuthorization(h: HoldRow): CardAuthorization {
   }
 }
 
+type ReturnRaw = {
+  key: string
+  amount_minor: number
+  status: ReturnStatus
+  sequence: number | null
+  last_ledger: number | null
+  fingerprint: string | null
+  tx_hash: string | null
+  error: string | null
+  tries: number
+}
+const returnFrom = (r: ReturnRaw | undefined): ReturnRow | undefined =>
+  r && {
+    key: r.key,
+    amountMinor: r.amount_minor,
+    status: r.status,
+    ...(r.sequence !== null ? { sequence: r.sequence } : {}),
+    ...(r.last_ledger !== null ? { lastLedger: r.last_ledger } : {}),
+    ...(r.fingerprint ? { fingerprint: r.fingerprint } : {}),
+    ...(r.tx_hash ? { txHash: r.tx_hash } : {}),
+    ...(r.error ? { error: r.error } : {}),
+    tries: r.tries,
+  }
+
 export type CardStore = ReturnType<typeof cardStore>
 
 export function cardStore(ctx: Ctx) {
   const { db } = ctx
   ensureCardTables(db)
+  // Refunds credited before their way back to the pool existed: the pool still misses that money on the ledger.
+  db.prepare(
+    `INSERT OR IGNORE INTO card_returns (key, amount_minor, status, tries, created_at, updated_at)
+     SELECT auth_token, amount_minor, 'pending', 0, created_at, ? FROM card_holds WHERE status = 'refunded'`,
+  ).run(ctx.iso())
 
   const balance = (userId: string): number =>
     (db.prepare('SELECT balance_minor AS b FROM card_accounts WHERE user_id = ?').get(userId) as { b: number } | undefined)?.b ?? 0
@@ -287,15 +349,19 @@ export function cardStore(ctx: Ctx) {
       })()
     },
 
-    /** Cleared (settled). For less than authorised: the difference goes back and the line shows what was taken. */
+    /**
+     * Cleared (settled). For less than authorised: the difference goes back and the line shows what was taken. For more (a
+     * tip): the extra is taken only when the card balance covers it; otherwise the purchase keeps its authorised amount.
+     */
     complete(authToken: string, settledMinor?: number): boolean {
       return db.transaction(() => {
         const h = hold(authToken)
         if (!h) return false
-        const settled = settledMinor !== undefined && settledMinor >= 0 && settledMinor < h.amountMinor ? settledMinor : h.amountMinor
+        const asked = settledMinor !== undefined && Number.isSafeInteger(settledMinor) && settledMinor >= 0 ? settledMinor : h.amountMinor
+        const settled = asked > h.amountMinor && balance(h.userId) < asked - h.amountMinor ? h.amountMinor : asked
         assertAmount(settled)
         if (!setStatus(authToken, 'authorised', 'completed', { amountMinor: settled })) return false
-        if (settled < h.amountMinor) move(h.userId, h.amountMinor - settled)
+        if (settled !== h.amountMinor) move(h.userId, h.amountMinor - settled)
         return true
       })()
     },
@@ -305,8 +371,53 @@ export function cardStore(ctx: Ctx) {
       assertAmount(r.amountMinor)
       return db.transaction(() => {
         const fresh = insertHold({ authToken: r.key, userId: r.userId, cardToken: r.cardToken, amountMinor: r.amountMinor, merchant: r.merchant, status: 'refunded' })
-        if (fresh) move(r.userId, r.amountMinor)
-        return fresh
+        if (!fresh) return false
+        move(r.userId, r.amountMinor)
+        const at = ctx.iso()
+        db.prepare(`INSERT OR IGNORE INTO card_returns (key, amount_minor, status, tries, created_at, updated_at) VALUES (?, ?, 'pending', 0, ?, ?)`).run(r.key, r.amountMinor, at, at)
+        return true
+      })()
+    },
+
+    returnOf: (key: string) => returnFrom(db.prepare('SELECT * FROM card_returns WHERE key = ?').get(key) as ReturnRaw | undefined),
+    /** Refunds whose money is not back in the pool yet, oldest first (the poller sends or looks them up). */
+    openReturns: () => (db.prepare("SELECT * FROM card_returns WHERE status IN ('pending', 'reserved') ORDER BY created_at, key").all() as ReturnRaw[]).map((r) => returnFrom(r)!),
+    /** One more send attempt; returns the count. */
+    returnTry(key: string): number {
+      db.prepare('UPDATE card_returns SET tries = tries + 1, updated_at = ? WHERE key = ?').run(ctx.iso(), key)
+      return returnFrom(db.prepare('SELECT * FROM card_returns WHERE key = ?').get(key) as ReturnRaw | undefined)?.tries ?? 0
+    },
+    /** Before the submit: a later pass looks this sequence up on the ledger before ever sending again. */
+    reserveReturn(key: string, r: { sequence: number; lastLedger: number; fingerprint?: string }): void {
+      db.prepare("UPDATE card_returns SET status = 'reserved', sequence = ?, last_ledger = ?, fingerprint = ?, updated_at = ? WHERE key = ? AND status IN ('pending', 'reserved')").run(
+        r.sequence,
+        r.lastLedger,
+        r.fingerprint ?? null,
+        ctx.iso(),
+        key,
+      )
+    },
+    /** On the ledger: done, and the refund line loses any earlier failure. */
+    returnSent(key: string, txHash: string): void {
+      db.transaction(() => {
+        const at = ctx.iso()
+        db.prepare("UPDATE card_returns SET status = 'sent', tx_hash = ?, error = NULL, updated_at = ? WHERE key = ?").run(txHash, at, key)
+        db.prepare('UPDATE card_holds SET settle_error = NULL, updated_at = ? WHERE auth_token = ?').run(at, key)
+      })()
+    },
+    /**
+     * A failed attempt, recorded on the row and on the refund line. release: the reserved tx can never apply (send fresh next
+     * time); stop: not tried again; neither: the status stays (a reserved tx whose outcome is not known yet is looked up next).
+     */
+    returnFailed(key: string, error: string, o: { release?: boolean; stop?: boolean } = {}): void {
+      db.transaction(() => {
+        const at = ctx.iso()
+        const e = error.slice(0, 300)
+        if (o.stop) db.prepare("UPDATE card_returns SET status = 'stopped', error = ?, updated_at = ? WHERE key = ?").run(e, at, key)
+        else if (o.release)
+          db.prepare("UPDATE card_returns SET status = 'pending', sequence = NULL, last_ledger = NULL, fingerprint = NULL, error = ?, updated_at = ? WHERE key = ?").run(e, at, key)
+        else db.prepare('UPDATE card_returns SET error = ?, updated_at = ? WHERE key = ?').run(e, at, key)
+        db.prepare('UPDATE card_holds SET settle_error = ?, updated_at = ? WHERE auth_token = ?').run(e, at, key)
       })()
     },
 

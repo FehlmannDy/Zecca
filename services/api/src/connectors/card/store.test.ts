@@ -98,12 +98,63 @@ describe('card sub-ledger', () => {
     expect(store.hold('a1')).toMatchObject({ status: 'completed', amountMinor: 450 })
   })
 
+  it('clearing for more than authorised (a tip) takes the extra only when the card covers it', () => {
+    const { store } = fresh()
+    store.creditDeposit({ intentId: 'int_1', userId: 'u_ana', amountMinor: 1500 })
+    store.authorize(auth('a1', 1000))
+    expect(store.complete('a1', 1150)).toBe(true)
+    expect(store.balance('u_ana')).toBe(350)
+    expect(store.hold('a1')).toMatchObject({ status: 'completed', amountMinor: 1150 })
+    // 350 left: a clearing 400 above its authorization is not covered, the purchase keeps its authorised amount.
+    store.authorize(auth('a2', 100))
+    expect(store.complete('a2', 500)).toBe(true)
+    expect(store.balance('u_ana')).toBe(250)
+    expect(store.hold('a2')).toMatchObject({ status: 'completed', amountMinor: 100 })
+  })
+
   it('a refund (return) credits once per key and shows as its own line', () => {
     const { store } = fresh()
     expect(store.refund({ key: 'ret_1', userId: 'u_ana', cardToken: 'card_tok', amountMinor: 250, merchant: 'Sette Archi' })).toBe(true)
     expect(store.refund({ key: 'ret_1', userId: 'u_ana', cardToken: 'card_tok', amountMinor: 250, merchant: 'Sette Archi' })).toBe(false)
     expect(store.balance('u_ana')).toBe(250)
     expect(store.hold('ret_1')?.status).toBe('refunded')
+  })
+
+  it('a refund stores its way back to the pool on the ledger with it, once per key', () => {
+    const { store } = fresh()
+    store.refund({ key: 'ret_1', userId: 'u_ana', cardToken: 'card_tok', amountMinor: 250, merchant: 'Sette Archi' })
+    store.refund({ key: 'ret_1', userId: 'u_ana', cardToken: 'card_tok', amountMinor: 250, merchant: 'Sette Archi' })
+    expect(store.openReturns()).toEqual([expect.objectContaining({ key: 'ret_1', amountMinor: 250, status: 'pending', tries: 0 })])
+  })
+
+  it('a way back to the pool: reserved before the submit, released on a refusal, sent once, stopped by hand', () => {
+    const { store } = fresh()
+    store.refund({ key: 'ret_1', userId: 'u_ana', cardToken: 'card_tok', amountMinor: 250, merchant: 'Sette Archi' })
+    expect(store.returnTry('ret_1')).toBe(1)
+    store.reserveReturn('ret_1', { sequence: 7, lastLedger: 1020, fingerprint: 'ConfidentialMPTSend:AA' })
+    expect(store.returnOf('ret_1')).toMatchObject({ status: 'reserved', sequence: 7, lastLedger: 1020, fingerprint: 'ConfidentialMPTSend:AA', tries: 1 })
+    store.returnFailed('ret_1', 'tecNO_PERMISSION', { release: true })
+    expect(store.returnOf('ret_1')).toMatchObject({ status: 'pending', error: 'tecNO_PERMISSION' })
+    expect(store.returnOf('ret_1')?.sequence).toBeUndefined()
+    expect(store.hold('ret_1')?.settleError).toBe('tecNO_PERMISSION')
+    store.reserveReturn('ret_1', { sequence: 8, lastLedger: 1030, fingerprint: 'ConfidentialMPTSend:BB' })
+    store.returnSent('ret_1', 'CD'.repeat(32))
+    expect(store.returnOf('ret_1')).toMatchObject({ status: 'sent', txHash: 'CD'.repeat(32) })
+    expect(store.returnOf('ret_1')?.error).toBeUndefined()
+    expect(store.hold('ret_1')?.settleError).toBeUndefined()
+    expect(store.openReturns()).toEqual([])
+
+    store.refund({ key: 'ret_2', userId: 'u_ana', cardToken: 'card_tok', amountMinor: 100, merchant: 'Sette Archi' })
+    store.returnFailed('ret_2', 'sequence 9 is older than the last 200 transactions', { stop: true })
+    expect(store.returnOf('ret_2')).toMatchObject({ status: 'stopped' })
+    expect(store.openReturns()).toEqual([])
+  })
+
+  it('a refund recorded before the way back existed gets one on the next start', () => {
+    const { db, ctx, store } = fresh()
+    store.refund({ key: 'ret_1', userId: 'u_ana', cardToken: 'card_tok', amountMinor: 250, merchant: 'Sette Archi' })
+    db.exec('DELETE FROM card_returns')
+    expect(cardStore(ctx).openReturns().map((r) => [r.key, r.amountMinor])).toEqual([['ret_1', 250]])
   })
 
   it('lists recent authorizations newest first, in the contract shape', () => {
