@@ -1,6 +1,6 @@
 // Zecca Till: pairing a merchant's Android till without Privy on the phone, and the till-scoped charge routes.
 import { describe, expect, it } from 'vitest'
-import { PaymentRequest, SalesResponse, routePath, routes, type RouteDef, type RouteName } from '@zecca/contracts'
+import { PaymentRequest, SalesResponse, matchRoute, routePath, routes, type RouteDef, type RouteName } from '@zecca/contracts'
 import { createFakePool, type FakeLedger, type FakePool } from '../../testing/fakes'
 import { eventually, makeHarness } from '../../testing/harness'
 import { CODE_ALPHABET, PAIRING_TTL_MS, TillList, TillPairResponse, TillPairingCode, normalizeCode } from './schemas'
@@ -234,6 +234,19 @@ describe('till token scope', () => {
     }
     // The merchant's till routes are in the table: the till cannot list, pair or unpair tills.
     expect((await h.call('POST', `/v1/merchant/tills/${t.tillId}/revoke`, { token: t.tillToken })).status).toBe(401)
+  })
+
+  it('a till token gets nothing from the routes connectors mount outside the table either', async () => {
+    const h = makeHarness({ extra: { connectors: true } })
+    const bruno = await h.signUp('caffebruno', { role: 'merchant', businessName: 'Caffè Bruno' })
+    const code = (await h.json('POST', '/v1/merchant/tills', { token: bruno.token })).body.pairingCode
+    const t = TillPairResponse.parse((await h.json('POST', '/v1/till/pair', { body: { code } })).body)
+    const registered = (h.app as unknown as { routes: { method: string; path: string }[] }).routes
+    const offTable = registered.filter((r) => (r.method === 'GET' || r.method === 'POST') && r.path.startsWith('/v1/') && !matchRoute(r.method, r.path.replace(/:([a-zA-Z]+)/g, 'x')))
+    for (const r of offTable) {
+      const res = await h.call(r.method as 'GET' | 'POST', r.path.replace(/:([a-zA-Z]+)/g, 'x'), { token: t.tillToken, ...(r.method === 'POST' ? { body: {} } : {}) })
+      expect(res.status, `${r.method} ${r.path}`).toBeGreaterThanOrEqual(400)
+    }
   })
 
   it('the till routes are in the route table (till token only for the charges) and all mounted', () => {
