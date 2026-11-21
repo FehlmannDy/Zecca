@@ -30,6 +30,7 @@ On in production: top-up (MoonPay), card, Earn, metals, identity, statements, th
 | **Card** | More → Card → Load card → then pay by card in the demo shop | A real Lithic sandbox card; purchases answered from the card balance in a few ms (approved 6.3 ms / declined 2.1 ms measured), settled on Devnet afterwards. |
 | **Face ID** | More → Face ID → Add Face ID | Privy passkey MFA on an XRPL `raw_sign`: the next approval asks for Face ID. Checked on an iPhone. |
 | **Tap to pay** | Android merchant phone with the Zecca NFC app (`apps/merchant-nfc/release/zecca-nfc.apk`): open the till in a current browser (Chrome, or Firefox on an older Android), **Charge**, then **Use NFC** | The till hands the pay link to the app (`zecca-nfc://emit?url=…`); the phone then emulates an NFC tag carrying it. An iPhone or Android customer taps and the pay page opens; on an iPhone with Face ID added, **Approve** asks for Face ID. The QR code and **Copy link** stay as the fallback. |
+| **Zecca Till (Android)** | Merchant Android phone with `apps/merchant-till/release/zecca-till.apk`: in the web merchant space open **Pair a till** (`/merchant/pair`), scan the code with the app (or type it), then **Charge** in the app | One app charges and serves the pay link over NFC itself (no second app, no browser): the amount, the QR code, "Hold the customer's phone to the back of this one", then a full-screen **Paid** with the arches. The till's key can only create and read charges. |
 
 ## Checked by hand on real phones (21 November 2026)
 

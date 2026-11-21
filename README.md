@@ -18,7 +18,7 @@ https://zecca-beta.vercel.app — sign up with an email (you get $50 of demo cre
 | Every fee paid by Zecca | Sponsor co-signature (`Sponsor`, `SponsorSignature`) on each user transaction | `packages/xrpl-core/src/sponsor.ts`, `services/api/src/prepared/` (sponsor policy) |
 | Hidden balances and amounts | Confidential MPT: `ConfidentialMPTConvert`, `ConfidentialMPTSend`, `ConfidentialMPTMergeInbox` (ElGamal ciphertexts and zero-knowledge proofs) | `packages/xrpl-core/src/confidential.ts`, `services/api/src/intents/flow.ts`, `services/pool-worker/src/worker.ts` |
 | Incoming money becomes spendable without an approval | Permission delegation: `DelegateSet` lets Zecca's relayer send `ConfidentialMPTMergeInbox` for the user | `packages/xrpl-core/src/confidential.ts`, `services/api/src/prepared/account-gate.ts` |
-| Pay a shop by QR code or NFC tap | The same confidential deposit to the pool, from a payment request link | `services/api/src/paymentRequests/`, `apps/web/app/pay/`, `apps/merchant-nfc/` |
+| Pay a shop by QR code or NFC tap | The same confidential deposit to the pool, from a payment request link | `services/api/src/paymentRequests/`, `apps/web/app/pay/`, `apps/merchant-nfc/`, `apps/merchant-till/`, `services/api/src/connectors/till/` |
 | Face ID on approvals | Privy passkey check on the `raw_sign` that signs the transaction | `apps/web/lib/passkey/`, `apps/web/lib/wallet/privy.ts` |
 | Verified identity raises limits | Credentials: `CredentialCreate` by Zecca's KYC issuer, `CredentialAccept` signed by the user | `services/api/src/connectors/identity/` |
 | Top up with a card | MoonPay sandbox delivers RLUSD by `Payment` on Testnet (XRP where MoonPay does not offer RLUSD, such as the EU/EEA); once that is checked, Zecca's issuer mints the credit into the pool on Devnet (`Payment`, then `ConfidentialMPTConvert`) and the pool pays it out | `services/api/src/connectors/ramp/` |
@@ -263,6 +263,7 @@ To run against the real XRPL Devnet, set `LEDGER_MODE=devnet` in `.env`, run `np
 apps/
   web/              Next.js: landing, user space, merchant space, pay page, demo shop
   merchant-nfc/     Android app that hands the pay link to the customer's phone over NFC (release/zecca-nfc.apk)
+  merchant-till/    Zecca Till: native Android till, paired to a merchant, charges and serves the pay link over NFC itself (release/zecca-till.apk)
 services/
   api/              HTTP API (Hono): auth, directory, prepared transactions, sponsor policy, intents, events, connectors
   pool-worker/      Worker thread: watches the pool, decrypts and checks deposits, pays out
