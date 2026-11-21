@@ -228,7 +228,7 @@ export function PayScreen({ id }: { id: string }) {
           )}
         </main>
       </div>
-      {config && <LimitSheet open={limitOpen} onClose={() => setLimitOpen(false)} limits={config.limits} details={failure?.kind === 'limit' ? failure.details : undefined} verifyHref={config.features.identity ? '/app/identity' : undefined} />}
+      {config && <LimitSheet open={limitOpen} onClose={() => setLimitOpen(false)} limits={config.limits} details={failure?.kind === 'limit' ? failure.details : undefined} message={failure?.kind === 'limit' ? failure.message : undefined} verifyHref={config.features.identity ? '/app/identity' : undefined} />}
     </div>
   )
 }
