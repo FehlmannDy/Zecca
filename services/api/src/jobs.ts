@@ -9,9 +9,12 @@ import { settleUnknownSubmits } from './prepared/submit'
 import { expireRequests } from './paymentRequests/routes'
 import { users } from './users'
 
+/** Intents that start with the person's deposit approval (send to the pool); a created top-up is minted by recovery instead. */
+const APPROVED_DEPOSIT_KINDS: ReadonlySet<string> = new Set(['p2p', 'merchant', 'card_load', 'earn_deposit', 'market_buy'])
+
 /** created intents whose approval can no longer reach the ledger (LastLedgerSequence passed, or expired) -> expired. */
 export async function expireIntents(core: Core): Promise<number> {
-  const created = intents.withStatus(core, 'created').filter((i) => i.kind === 'p2p' || i.kind === 'merchant')
+  const created = intents.withStatus(core, 'created').filter((i) => APPROVED_DEPOSIT_KINDS.has(i.kind))
   if (!created.length) return 0
   const index = await core.ledger.ledgerIndex()
   let n = 0
