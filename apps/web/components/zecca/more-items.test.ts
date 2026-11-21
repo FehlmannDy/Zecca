@@ -21,4 +21,13 @@ describe('More menu', () => {
   it('top-up shows when the ramp is on or in demo mode', () => {
     expect(labels({ ...cfg({ ramp: false }), demoMode: false }, fx.users.ana as User)).not.toContain('Add money')
   })
+  it('says what Add money does: a card with the ramp on, demo credit without it', () => {
+    const hint = (c: PublicConfig) => moreItems(c, fx.users.ana as User).find((i) => i.label === 'Add money')?.hint
+    expect(hint({ ...cfg({ ramp: true }), demoMode: true })).toBe('Top up with a card')
+    expect(hint({ ...cfg({ ramp: false }), demoMode: true })).toBe('Add demo credit')
+  })
+  it('never promises more than the sandbox card does', () => {
+    const card = moreItems(cfg({ card: true }), fx.users.ana as User).find((i) => i.label === 'Card')
+    expect(card?.hint).toBe('A sandbox card for test purchases')
+  })
 })
