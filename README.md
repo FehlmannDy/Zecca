@@ -7,7 +7,7 @@ Built at the Italian XRPL Hackathon 2026 (Bari), Track 2. Running on XRPL Devnet
 
 ## Try it
 
-https://zecca-beta.vercel.app — sign up with an email (you get $50 of demo credit), send money to someone, open a payment and switch "What the ledger shows" to *Everyone else*. The click path a judge needs, and what each screen proves on the ledger, is in [DEMO.md](DEMO.md).
+https://zecca-beta.vercel.app — sign up with an email (you get $50 of demo credit), send money to someone, open a payment and switch "What the ledger shows" to *Everyone else*. The click path a judge needs, and what each screen proves on the ledger, is in [DEMO.md](DEMO.md); the 5-minute demo video, scene by scene with the customer's iPhone, the Zecca Till and the merchant's laptop, is in [DEMO_FLOW.md](DEMO_FLOW.md).
 
 ## Features
 
@@ -18,12 +18,15 @@ https://zecca-beta.vercel.app — sign up with an email (you get $50 of demo cre
 | Every fee paid by Zecca | Sponsor co-signature (`Sponsor`, `SponsorSignature`) on each user transaction | `packages/xrpl-core/src/sponsor.ts`, `services/api/src/prepared/` (sponsor policy) |
 | Hidden balances and amounts | Confidential MPT: `ConfidentialMPTConvert`, `ConfidentialMPTSend`, `ConfidentialMPTMergeInbox` (ElGamal ciphertexts and zero-knowledge proofs) | `packages/xrpl-core/src/confidential.ts`, `services/api/src/intents/flow.ts`, `services/pool-worker/src/worker.ts` |
 | Incoming money becomes spendable without an approval | Permission delegation: `DelegateSet` lets Zecca's relayer send `ConfidentialMPTMergeInbox` for the user | `packages/xrpl-core/src/confidential.ts`, `services/api/src/prepared/account-gate.ts` |
-| Pay a shop by QR code or NFC tap | The same confidential deposit to the pool, from a payment request link | `services/api/src/paymentRequests/`, `apps/web/app/pay/`, `apps/merchant-nfc/`, `apps/merchant-till/`, `services/api/src/connectors/till/` |
+| Pay a shop by QR code or NFC tap | The same confidential deposit to the pool, from a payment request link. The merchant charges from **Zecca Till**, a native Android till paired once with a code, which shows the QR and serves the link over NFC itself; the web till with the NFC PayLink app is the fallback | `services/api/src/paymentRequests/`, `apps/web/app/pay/`, `apps/merchant-till/`, `services/api/src/connectors/till/`, `apps/merchant-nfc/` |
+| Merchant sales | Every sale with its fee (0.5%, `MERCHANT_FEE_BPS`) and net amount, live, with a CSV export; the payout to the merchant is a confidential send from the pool | `services/api/src/paymentRequests/`, `apps/web/app/merchant/sales/` |
+| "Pay with Zecca" on a website | A shop's checkout creates a payment request; the buyer approves one confidential deposit to the pool | `services/api/src/demoShop/`, `apps/web/app/demo/shop/` |
 | Face ID on approvals | Privy passkey check on the `raw_sign` that signs the transaction | `apps/web/lib/passkey/`, `apps/web/lib/wallet/privy.ts` |
 | Verified identity raises limits | Credentials: `CredentialCreate` by Zecca's KYC issuer, `CredentialAccept` signed by the user | `services/api/src/connectors/identity/` |
 | Top up with a card | MoonPay sandbox delivers RLUSD by `Payment` on Testnet (XRP where MoonPay does not offer RLUSD, such as the EU/EEA); once that is checked, Zecca's issuer mints the credit into the pool on Devnet (`Payment`, then `ConfidentialMPTConvert`) and the pool pays it out | `services/api/src/connectors/ramp/` |
-| Payment card | Lithic sandbox card; purchases settled by a `ConfidentialMPTSend` from the pool to the card settlement account | `services/api/src/connectors/card/` |
-| Earn | A Testnet `Payment` with a memo instruction opens a Flare smart account, which deposits into the Firelight vault on Flare Coston2 | `services/api/src/connectors/earn/` |
+| Cash out to a card (built, **off in production**) | MoonPay sell: the user's confidential deposit to the pool, then one Testnet `Payment` from Zecca's treasury to MoonPay's deposit wallet, for the amount read from MoonPay's own sale record; refunded through the pool if it fails. `FEATURE_WITHDRAW` stays off until one sandbox sell completes end to end | `services/api/src/connectors/ramp/withdraw.ts`, `sell.ts` |
+| Payment card | Lithic sandbox virtual card, loaded from the confidential balance (a deposit to the pool); each purchase is answered in milliseconds from the card balance, works at a normal card checkout (the demo shop's "Pay by card"), can be frozen; at clearing a `ConfidentialMPTSend` from the pool pays the card settlement account | `services/api/src/connectors/card/` |
+| Earn | A Testnet `Payment` with a memo instruction opens a Flare smart account, which mints FXRP and deposits it into the Firelight vault on Flare Coston2. The way back: Firelight withdrawal, claim after its period, FXRP redeemed to XRP by an agent, the user credited through the pool | `services/api/src/connectors/earn/` |
 | Gold, silver, palladium | One MPT per metal; prices published on the ledger with `OracleSet` | `services/api/src/connectors/market/` |
 | Statements with proofs | A proof per line that a `ConfidentialMPTSend` ciphertext encrypts the amount shown, checked against a public node | `services/api/src/connectors/proofs/` |
 
@@ -38,17 +41,18 @@ The web app talks to one HTTP API; the API prepares each transaction the user ap
 ```mermaid
 %%{init: {"flowchart": {"nodeSpacing": 30, "subGraphTitleMargin": {"top": 4, "bottom": 16}}}}%%
 flowchart TB
-  nfc["Android NFC app<br/>apps/merchant-nfc"]
-  web["Web app, Next.js<br/>apps/web"]
+  till["Zecca Till, Android<br/>apps/merchant-till<br/>QR + NFC tag of the pay link"]
+  nfc["NFC PayLink, Android<br/>apps/merchant-nfc<br/>web till fallback"]
+  web["Web app, Next.js<br/>apps/web<br/>user · merchant · pay page · demo shop"]
   privy["Privy<br/>email or Google sign-in,<br/>embedded wallet: the user's key,<br/>raw_sign, Face ID"]
 
   subgraph api["Zecca API (Hono)"]
-    auth["auth"]
+    auth["auth<br/>sessions · till tokens"]
     dir["directory"]
     events["events, SSE"]
     prep["prepared transactions<br/>+ sponsor policy"]
-    intents["intents"]
-    conn["connectors<br/>ramp · card · earn<br/>market · identity · proofs"]
+    intents["intents<br/>transfers · payment requests"]
+    conn["connectors<br/>ramp · card · earn · market<br/>identity · proofs · till"]
     auth ~~~ prep
     dir ~~~ intents
     events ~~~ conn
@@ -61,7 +65,9 @@ flowchart TB
   devnet[["XRPL Devnet<br/>every payment"]]
   outside["MoonPay and Lithic sandboxes,<br/>EUDI verifier, XRPL Testnet,<br/>Flare Coston2"]
 
-  nfc -- "tap: pay link" --> web
+  till -- "till token:<br/>create, poll, cancel charges" --> auth
+  till -. "tap: pay link" .-> web
+  nfc -. "tap: pay link" .-> web
   web -- "sign in, raw_sign" --> privy
   privy -. "auth verifies the token" .- auth
   web -- "HTTPS + SSE" --> auth
@@ -143,25 +149,24 @@ sequenceDiagram
 
 ### Paying a merchant by QR code or NFC
 
-A charge on the till is a payment request whose link is the QR code, or the NFC tag the Android app emulates; the till shows "Paid" when the pool has checked the deposit, and the payout follows in the background.
+A charge is a payment request whose link is the QR code, or an NFC Type 4 tag holding the link. The merchant pairs **Zecca Till** once (an 8-character code from the merchant space, valid 10 minutes, used once); its till token can only create, read and cancel its own charges. The till shows "Paid" when the pool has checked the deposit, and the payout follows in the background. The web till, with the NFC PayLink app for taps, works the same way.
 
 ```mermaid
 sequenceDiagram
   autonumber
-  actor M as Merchant till
+  actor M as Zecca Till (Android)
   participant API as Zecca API
-  participant N as Android NFC app
   actor C as Customer phone
   participant L as XRPL Devnet
   participant PW as Pool worker
 
-  M->>API: POST /v1/payment-requests, $4.50
+  Note over M,API: once: POST /v1/till/pair with the code from<br/>the merchant space, the till keeps its token
+  M->>API: POST /v1/till/charges, $4.50 (till token)
   API-->>M: request with its link /pay/:id
   alt QR code
     M->>C: the customer scans the QR code
   else NFC tap
-    M->>N: zecca-nfc://emit?url=link
-    N->>C: tap: an NFC Type 4 tag holding the link
+    M->>C: the till itself serves an NFC Type 4 tag holding the link
   end
   C->>API: GET /v1/payment-requests/:id (pay page /pay/:id), "Pay $4.50 to Caffè Bruno"
   C->>API: POST /v1/payment-requests/:id/pay
@@ -170,7 +175,8 @@ sequenceDiagram
   API->>L: sponsor co-signs, deposit to the pool
   L-->>PW: deposit validated
   PW-->>API: received, amount checked
-  API-->>M: SSE: Paid, fee $0.02, net $4.48
+  M->>API: GET /v1/till/charges/:id, every 2 s
+  API-->>M: Paid (the web till and the sales page get it by SSE: fee $0.02, net $4.48)
   API->>PW: pay out the net amount, then merge
   PW->>L: ConfidentialMPTSend pool to merchant
 ```
@@ -210,11 +216,13 @@ Each connector is behind its own `FEATURE_*` flag and ends in an XRP Ledger tran
 ```mermaid
 flowchart LR
   id["Identity"] --> id2["EU wallet presents a PID<br/>OpenID4VP, EUDI verifier"] --> id3["CredentialCreate<br/>CredentialAccept<br/>Devnet"]
-  earn["Earn"] --> e2["deposit to the pool<br/>Devnet"] --> e3["Testnet Payment + memo<br/>Flare smart account<br/>FXRP into Firelight<br/>Coston2"]
+  earn["Earn"] --> e2["deposit to the pool<br/>Devnet"] --> e3["Testnet Payment + memo<br/>Flare smart account<br/>FXRP into Firelight<br/>Coston2"] --> e4["way back: claim after the period,<br/>FXRP redeemed to XRP,<br/>user credited through the pool"]
   metals["Metals"] --> m2["deposit to the pool<br/>Devnet"] --> m3["metal MPT from the issuer<br/>price from OracleSet<br/>Devnet"]
   st["Statements"] --> s2["statement<br/>signed by Zecca"] --> s3["proof per line:<br/>ciphertext = amount shown<br/>checked on a public node"]
   card["Card"] --> c2["Lithic ASA answered<br/>from the card balance"] --> c3["at clearing: pool pays<br/>the card settlement account<br/>Devnet"]
   topup["Top-up"] --> t2["MoonPay delivers RLUSD,<br/>or XRP where RLUSD<br/>is not offered,<br/>to Zecca's treasury<br/>Testnet"] --> t3["delivery checked, minted<br/>into the pool, paid out<br/>Devnet"]
+  cash["Cash out<br/>(built, off)"] --> w2["deposit to the pool<br/>Devnet"] --> w3["treasury pays MoonPay's<br/>deposit wallet, amount from<br/>MoonPay's sale record<br/>Testnet"]
+  till2["Zecca Till"] --> tl2["paired by a one-time code,<br/>till token: its own charges only"] --> tl3["payment request:<br/>deposit to the pool<br/>Devnet"]
 ```
 
 ## Proven on the ledger
@@ -273,7 +281,7 @@ packages/
   xrpl-core/        Signer, sponsor co-signature, Batch builder, confidential helpers, live ledger client
   keystore/         Key store interface and its encrypted-file implementation
   ledger-mock/      In-memory ledger with the same state machine (LEDGER_MODE=mock)
-scripts/            setup-env, import-keys, bootstrap-ledger, tunnel, smoke test
+scripts/            setup-env, import-keys, bootstrap-ledger, bootstrap-market, dev (API + web), tunnel, smoke test, deploy (Railway variables)
 e2e/                Playwright: the demo path
 docs/               SPEC.md (product and ledger model), UI.md (interface), DECISIONS.md
 ```
