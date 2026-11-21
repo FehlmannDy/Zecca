@@ -10,6 +10,8 @@ import { useApp } from '@/lib/app'
 import { useSession } from '@/lib/session'
 import { Button, EmptyState, Skeleton } from '@/components/zecca/bits'
 import { GlassRoot, Panel } from '@/components/zecca/glass'
+import { SpaceSwitch } from '@/components/zecca/space-switch'
+import { hasSpaceSwitch } from '@/components/zecca/space-switch-model'
 import { useHydrated } from '@/components/zecca/user-shell'
 import { Logo } from '@/components/zecca/wordmark'
 import { TILL_APK_URL, formatCode, newTillAfter, tillSubtitle, type PairingCode, type TillView } from '@/app/merchant/pair/pair-model'
@@ -36,9 +38,12 @@ export function PairTill() {
     <GlassRoot>
       <div className="mx-auto w-full max-w-[1120px] px-4 pb-16 pt-[max(16px,env(safe-area-inset-top))] lg:px-8">
         <header className="flex h-14 items-center justify-between gap-3">
-          <Link href="/merchant" aria-label="Business home" className="rounded-[10px]">
-            <Logo />
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/merchant" aria-label="Business home" className="inline-flex min-h-11 items-center rounded-[10px]">
+              <Logo className={hasSpaceSwitch(user) ? 'max-sm:[&>span]:hidden' : undefined} />
+            </Link>
+            <SpaceSwitch user={user} />
+          </div>
           <Link href="/merchant" className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-surface/70 px-4 text-[13.5px] font-[650]">
             <ArrowLeft className="size-4" aria-hidden="true" />
             Back
