@@ -43,7 +43,7 @@ function Pool() {
       </ul>
       <p className="mx-auto mt-8 max-w-[760px] text-[14px] text-muted">
         The pool’s address is public:{' '}
-        <a href={explorerAccount('devnet', POOL_ADDRESS)} target="_blank" rel="noreferrer" className="break-all font-mono text-[13px] text-ink underline decoration-line underline-offset-4 hover:decoration-ink">
+        <a href={explorerAccount('devnet', POOL_ADDRESS)} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center break-all font-mono text-[13px] text-ink underline decoration-line underline-offset-4 hover:decoration-ink">
           {POOL_ADDRESS}
         </a>
       </p>

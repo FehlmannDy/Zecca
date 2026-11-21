@@ -5,6 +5,9 @@
 import { DEFAULTS, formatUsd, type FeatureName } from '@zecca/contracts'
 import { marketAssets, shopItems } from '@zecca/contracts/fixtures'
 import { TOPUP_CHIPS } from '../topup/topup'
+import { heroTitle } from './hero-title'
+
+export { heroTitle }
 
 /** 50 -> "0.5%". Integer arithmetic only. */
 export function percentFromBps(bps: number): string {
@@ -23,7 +26,7 @@ export const REPO_URL = 'https://github.com/FehlmannDy/Zecca'
 export const POOL_ADDRESS = 'rNwvGErbykbsfcRnmq6fXhqmrrL94WcZSZ'
 
 export const HERO = {
-  title: 'Pay, spend, earn and own gold. One app, on the XRP Ledger.',
+  title: heroTitle({ card: true, earn: true, market: true }),
   sub: 'Sign in with an email and you are ready. No seed phrase, no network fees, and the amounts you move stay hidden on the public ledger.',
   actions: [
     { label: 'Open the app', href: '/app' },
@@ -42,7 +45,7 @@ export const PHONE = {
   actions: ['Send', 'Pay', 'Top up', 'Request'],
   /** UI.md §5.10's card ending. */
   card: { title: 'Card', last4: '4417', action: 'Load' },
-  earn: { title: 'Earn', note: 'Firelight vault on Flare', rate: 'Variable rate' },
+  earn: { title: 'Earn', note: 'Firelight on Flare', rate: 'Variable rate' },
   activity: [
     { name: COFFEE.name, note: COFFEE.note, amountMinor: COFFEE.amountMinor, direction: 'out' },
     { name: 'Demo credit', note: 'Welcome to Zecca', amountMinor: DEFAULTS.WELCOME_CREDIT_MINOR, direction: 'in' },
@@ -98,8 +101,26 @@ export const FEATURE_ART = {
   metalsNote: { unit: 'Per gram', source: 'Price on the ledger' },
   tap: { done: 'Paid', or: 'Or scan the QR code' },
   faceid: { action: 'Approve with Face ID' },
-  identity: { source: 'EU Digital Identity Wallet', status: 'Verified', fields: ['Name', 'Date of birth'], result: 'Limits raised' },
-  statement: { title: 'Statement', check: 'Checked on the ledger' },
+  identity: {
+    source: 'EU Digital Identity Wallet',
+    status: 'Verified',
+    // The birth date is masked: the picture shows that it was shared, not a date.
+    fields: [
+      { label: 'Name', value: PHONE.holder },
+      { label: 'Date of birth', value: '•• •• 19••' },
+    ],
+    result: 'Limits raised',
+  },
+  /** Three ledger payments of the demo, newest first: the shop's first item, the coffee, the welcome credit. */
+  statement: {
+    title: 'Statement',
+    check: 'Checked on the ledger',
+    lines: [
+      { name: 'Sette Archi', amountMinor: shopItems[0].priceMinor, direction: 'out' },
+      { name: COFFEE.name, amountMinor: COFFEE.amountMinor, direction: 'out' },
+      { name: 'Demo credit', amountMinor: DEFAULTS.WELCOME_CREDIT_MINOR, direction: 'in' },
+    ],
+  },
   topupChips: [...TOPUP_CHIPS] as number[],
   topup: { action: 'Continue with MoonPay', methods: ['Card', 'Bank transfer'] },
 } as const
@@ -150,7 +171,7 @@ export const PAYMENT = {
       observer: { addresses: 'The pool and the merchant: visible', amount: 'Sealed' },
     },
   ],
-  outcome: 'Someone watching sees two separate payments, one into the pool and one out of it. Never one from you to the merchant, and never an amount.',
+  outcome: 'Someone watching sees one payment into the pool and one out of it, both with sealed amounts.',
 } as const
 
 export type BlockIcon = 'sponsor' | 'sealed' | 'batch' | 'credential'

@@ -44,8 +44,17 @@ describe('hero: the product first', () => {
     expect(coffee).toMatchObject({ name: copy.COFFEE.name, amountMinor: copy.COFFEE.amountMinor, direction: 'out' })
     expect(copy.PHONE.balanceMinor).toBe(DEFAULTS.WELCOME_CREDIT_MINOR - copy.COFFEE.amountMinor)
     expect(copy.PHONE.toast).toBe(`Paid. ${formatUsd(copy.COFFEE.amountMinor)} to ${copy.COFFEE.name}.`)
-    // Earn on the phone names the vault and that the rate moves, never a rate.
+    // Earn on the phone names the vault and that the rate moves, never a rate. The short name fits the phone's row.
     expect(strings(copy.PHONE.earn).join(' ')).not.toMatch(/\d/)
+    expect(copy.PHONE.earn.note).toBe(copy.FEATURE_ART.earn.source)
+  })
+  it('the headline names only what is switched on: the card spends, Earn earns, the market owns gold', () => {
+    const on = { card: true, earn: true, market: true }
+    expect(copy.heroTitle(on)).toBe(copy.HERO.title)
+    expect(copy.heroTitle({ ...on, market: false })).toBe('Pay, spend and earn. One app, on the XRP Ledger.')
+    expect(copy.heroTitle({ ...on, card: false })).toBe('Pay, earn and own gold. One app, on the XRP Ledger.')
+    expect(copy.heroTitle({ ...on, earn: false, market: false })).toBe('Pay and spend. One app, on the XRP Ledger.')
+    expect(copy.heroTitle({ card: false, earn: false, market: false })).toBe('Pay. One app, on the XRP Ledger.')
   })
 })
 
@@ -98,6 +107,18 @@ describe('features: the product, in the owner’s order', () => {
     for (const m of copy.FEATURE_ART.metals) expect(m.history).toEqual(marketAssets.find((a) => a.symbol === m.symbol)!.history)
     expect(copy.FEATURE_ART.topupChips).toEqual([...TOPUP_CHIPS])
   })
+  it('identity and statement show real values from the demo, not placeholder bars', () => {
+    const [name, born] = copy.FEATURE_ART.identity.fields
+    expect(name).toEqual({ label: 'Name', value: copy.PHONE.holder })
+    // The birth date is masked: the picture shows that it was shared, not a date.
+    expect(born.label).toBe('Date of birth')
+    expect(born.value).not.toMatch(/\d{4}|\d{2}[./-]\d{2}/)
+    expect(copy.FEATURE_ART.statement.lines).toEqual([
+      { name: 'Sette Archi', amountMinor: shopItems[0].priceMinor, direction: 'out' },
+      { name: copy.COFFEE.name, amountMinor: copy.COFFEE.amountMinor, direction: 'out' },
+      { name: 'Demo credit', amountMinor: DEFAULTS.WELCOME_CREDIT_MINOR, direction: 'in' },
+    ])
+  })
 })
 
 describe('privacy, the pool, the ledger, the earnings', () => {
@@ -119,6 +140,11 @@ describe('privacy, the pool, the ledger, the earnings', () => {
       expect(hop.observer.addresses).toMatch(/visible/i)
       expect(hop.observer.amount).toMatch(/sealed/i)
     }
+  })
+  it('the outcome says what a watcher sees, and promises no unlinkability (SPEC §11: timing can link the two)', () => {
+    expect(copy.PAYMENT.outcome).toMatch(/one payment into the pool and one out of it/i)
+    expect(copy.PAYMENT.outcome).toMatch(/sealed/i)
+    expect(copy.PAYMENT.outcome).not.toMatch(/never one from you|never/i)
   })
   it('says who seals the amount: Zecca builds the payment and its proof, you only approve and sign (SPEC §2.3, §11)', () => {
     expect(copy.PAYMENT.hops[0].body).toBe('Zecca seals the amount, and you approve and sign the payment with your own key.')
@@ -169,6 +195,7 @@ describe('SPEC §11: no claim beyond what is true today, and no list of negative
     ['Mainnet', /main ?net/i],
     ['available in Europe', /available in (the )?(EU|Europe)/i],
     ['a fixed yield', /\b(APY|APR)\b|\d+(\.\d+)?% (a|per) year|guaranteed/i],
+    ['that a payment cannot be linked to its payout', /unlinkab|can(not|.t) be linked|never one from you/i],
   ])('never claims %s', (_, re) => {
     expect(shown).not.toMatch(re)
   })

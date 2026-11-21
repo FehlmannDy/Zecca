@@ -17,7 +17,8 @@ const tint = (token: string, pct: number) => ({ background: `color-mix(in srgb, 
 
 function Pill({ children, tone = 'ink', className }: { children: ReactNode; tone?: 'ink' | 'in' | 'brass' | 'muted'; className?: string }) {
   const style = tone === 'in' ? tint('in', 12) : tone === 'brass' ? tint('brass', 14) : tone === 'muted' ? tint('muted', 10) : undefined
-  const color = { ink: 'bg-ink text-paper', in: 'text-in', brass: 'text-ink', muted: 'text-muted' }[tone]
+  // The muted pill's text is darker than --muted: muted on its own tint falls just under 4.5:1 in light mode.
+  const color = { ink: 'bg-ink text-paper', in: 'text-in', brass: 'text-ink', muted: 'text-ink/70' }[tone]
   return (
     <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-[680] leading-none', color, className)} style={style}>
       {children}
@@ -178,11 +179,11 @@ function IdentityArtwork() {
             {id.result}
           </Pill>
         </div>
-        <dl className="mt-3 space-y-2">
-          {id.fields.map((f, i) => (
-            <div key={f} className="flex items-center justify-between gap-3">
-              <dt className="text-[11px] text-muted">{f}</dt>
-              <dd className="h-2 rounded-full bg-line" style={{ width: i === 0 ? 92 : 64 }} />
+        <dl className="mt-3 space-y-1.5">
+          {id.fields.map((f) => (
+            <div key={f.label} className="flex items-center justify-between gap-3">
+              <dt className="text-[11px] text-muted">{f.label}</dt>
+              <dd className="tabular text-[12px] font-[680] text-ink">{f.value}</dd>
             </div>
           ))}
         </dl>
@@ -204,14 +205,14 @@ function StatementArtwork() {
           <span className="text-[12.5px] font-[740] text-ink">{FEATURE_ART.statement.title}</span>
           <LogoMark className="h-4 text-ink" title="" />
         </div>
-        <ul className="mt-3 space-y-2">
-          {[78, 58, 70].map((w, i) => (
-            <li key={i} className="flex items-center gap-2">
+        <ul className="mt-2.5 space-y-1.5">
+          {FEATURE_ART.statement.lines.map((l) => (
+            <li key={l.name} className="flex items-center gap-2">
               <span className="grid size-4 shrink-0 place-items-center rounded-full text-in" style={tint('in', 14)}>
                 <Check className="size-2.5" strokeWidth={3} aria-hidden="true" />
               </span>
-              <span className="h-1.5 rounded-full bg-ink/70" style={{ width: w }} />
-              <span className="ml-auto h-1.5 w-8 rounded-full bg-line" />
+              <span className="min-w-0 flex-1 truncate text-[12px] font-[650] text-ink">{l.name}</span>
+              <Amount minor={l.amountMinor} direction={l.direction} size="sm" />
             </li>
           ))}
         </ul>

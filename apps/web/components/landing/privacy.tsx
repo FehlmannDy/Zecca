@@ -39,10 +39,10 @@ function YouSee() {
               {you.status}
             </span>
           </dt>
-          <dd className="mt-3 flex flex-1 items-center justify-between gap-3 rounded-[14px] px-4 py-3.5" style={{ background: 'color-mix(in srgb, var(--paper) 70%, transparent)' }}>
+          <dd className="mt-3 flex flex-1 flex-col justify-center gap-1.5 rounded-[14px] px-4 py-3.5" style={{ background: 'color-mix(in srgb, var(--paper) 70%, transparent)' }}>
             <Amount minor={you.amountMinor} size="hero" />
             <span className="sr-only">{you.status}</span>
-            <span className="hidden truncate text-right text-[13.5px] text-muted sm:block">{you.note}</span>
+            <span className="text-[13.5px] text-muted">{you.note}</span>
           </dd>
         </div>
       </dl>
@@ -55,6 +55,8 @@ function OthersSee() {
   const hex = sealedHex(PRIVACY.you.amountMinor, 4, 12)
   const row = ROW
   const rule = { borderColor: 'color-mix(in srgb, var(--sealed) 22%, var(--line))' }
+  // Darker than --muted: muted on the sealed tint falls just under 4.5:1 in light mode.
+  const label = 'text-ink/70'
   return (
     <figure
       className="flex min-w-0 flex-col rounded-[20px] border p-6 sm:p-8"
@@ -66,15 +68,15 @@ function OthersSee() {
       </figcaption>
       <dl className="mt-5 flex flex-1 flex-col text-[15px]">
         <div className={row} style={rule}>
-          <dt className="text-muted">From</dt>
+          <dt className={label}>From</dt>
           <dd className="font-[650] text-ink">{o.from}</dd>
         </div>
         <div className={row} style={rule}>
-          <dt className="text-muted">To</dt>
+          <dt className={label}>To</dt>
           <dd className="font-[650] text-ink">{o.to}</dd>
         </div>
         <div className="flex flex-1 flex-col pt-3.5">
-          <dt className="flex items-center justify-between text-muted">
+          <dt className={`flex items-center justify-between ${label}`}>
             Amount
             <span aria-hidden="true" className="inline-flex items-center gap-1.5 text-[13px] font-[680] text-sealed">
               <Lock className="size-3.5" strokeWidth={2} aria-hidden="true" />

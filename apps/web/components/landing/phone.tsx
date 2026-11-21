@@ -6,6 +6,7 @@ import { LogoMark } from '@/components/zecca/wordmark'
 import { cn } from '@/lib/cn'
 import { CardArt } from './card-art'
 import { COFFEE, PHONE } from './content'
+import { FeatureGate } from './feature-status'
 
 const ACTION_ICONS = [ArrowUpRight, ScanLine, Plus, ArrowDownLeft]
 const DOCK_ICONS = [House, ScanLine, CreditCard, Ellipsis]
@@ -95,26 +96,30 @@ function HomeScreen() {
           </div>
 
           <Panel className="divide-y divide-line/80">
-            <div className="flex items-center gap-2.5 px-3 py-2.5">
-              <CardArt holder={PHONE.holder} last4={PHONE.card.last4} details={false} className="w-[46px] shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p className="text-[12px] font-[700] leading-tight text-ink">{PHONE.card.title}</p>
-                <p className="tabular text-[10px] text-muted">•••• {PHONE.card.last4}</p>
+            <FeatureGate feature="card">
+              <div className="flex items-center gap-2.5 px-3 py-2.5">
+                <CardArt holder={PHONE.holder} last4={PHONE.card.last4} details={false} className="w-[46px] shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12px] font-[700] leading-tight text-ink">{PHONE.card.title}</p>
+                  <p className="tabular text-[10px] text-muted">•••• {PHONE.card.last4}</p>
+                </div>
+                <span className="rounded-full bg-ink px-2.5 py-1 text-[9.5px] font-[700] text-paper">{PHONE.card.action}</span>
               </div>
-              <span className="rounded-full bg-ink px-2.5 py-1 text-[9.5px] font-[700] text-paper">{PHONE.card.action}</span>
-            </div>
-            <div className="flex items-center gap-2.5 px-3 py-2.5">
-              <span className="grid h-[29px] w-[46px] shrink-0 place-items-center rounded-[6px] border border-brass/50 text-brass">
-                <Sprout className="size-[15px]" strokeWidth={1.8} aria-hidden="true" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[12px] font-[700] leading-tight text-ink">{PHONE.earn.title}</p>
-                <p className="truncate text-[10px] text-muted">{PHONE.earn.note}</p>
+            </FeatureGate>
+            <FeatureGate feature="earn">
+              <div className="flex items-center gap-2.5 px-3 py-2.5">
+                <span className="grid h-[29px] w-[46px] shrink-0 place-items-center rounded-[6px] border border-brass/50 text-brass">
+                  <Sprout className="size-[15px]" strokeWidth={1.8} aria-hidden="true" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12px] font-[700] leading-tight text-ink">{PHONE.earn.title}</p>
+                  <p className="truncate text-[10px] text-muted">{PHONE.earn.note}</p>
+                </div>
+                <span className="shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-[9px] font-[700] text-in" style={{ background: 'color-mix(in srgb, var(--in) 12%, transparent)' }}>
+                  {PHONE.earn.rate}
+                </span>
               </div>
-              <span className="rounded-full px-2 py-1 text-[9px] font-[700] text-in" style={{ background: 'color-mix(in srgb, var(--in) 12%, transparent)' }}>
-                {PHONE.earn.rate}
-              </span>
-            </div>
+            </FeatureGate>
           </Panel>
 
           <Panel className="px-3 pb-1 pt-2.5">

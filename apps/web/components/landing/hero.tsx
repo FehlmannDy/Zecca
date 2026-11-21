@@ -1,8 +1,10 @@
 // Landing hero: the product first. One money app on the XRP Ledger, the two ways in, and the Zecca home on a phone
-// with the card in front of it. One entrance on load (phone, then card, then the "Paid" note), off with reduced motion.
+// with the card beside it. One entrance on load (phone, then card, then the "Paid" note), off with reduced motion.
+// The headline and the card follow the feature flags, so a build with a feature off does not show it.
 import { Check } from 'lucide-react'
 import { CardArt } from './card-art'
 import { HERO, PHONE } from './content'
+import { FeatureGate, HeroTitle } from './feature-status'
 import { LinkButton } from './parts'
 import { Phone } from './phone'
 
@@ -27,12 +29,15 @@ function HeroVisual() {
     <div className="relative mx-auto w-full max-w-[480px] pb-4 pt-2" role="img" aria-label="The Zecca app on a phone: the balance, the four actions, the card, Earn and the latest payments, with the Zecca card in front">
       <div className="relative mx-auto mt-10 w-[292px] motion-safe:animate-[z-sheet-in_700ms_var(--ease-out-soft)_both]">
         <Niche />
-        {/* The card is tucked behind the phone, its brass mint showing on the right. */}
-        <CardArt
-          holder={PHONE.holder}
-          last4={PHONE.card.last4}
-          className="absolute -right-[30%] top-[24%] w-[220px] rotate-[11deg] drop-shadow-[0_26px_28px_rgb(12_12_13/38%)] motion-safe:animate-[z-sheet-in_800ms_var(--ease-out-soft)_250ms_both] sm:-right-[52%] sm:w-[260px]"
-        />
+        {/* From sm up the card is tucked behind the phone, its brass mint showing on the right. On a phone there is no
+            room beside it, so the card leans in front of the phone's lower corner, across from the "Paid" note. */}
+        <FeatureGate feature="card">
+          <CardArt
+            holder={PHONE.holder}
+            last4={PHONE.card.last4}
+            className="absolute -right-[5%] top-[84%] z-10 w-[156px] -rotate-[8deg] drop-shadow-[0_18px_22px_rgb(12_12_13/40%)] motion-safe:animate-[z-sheet-in_800ms_var(--ease-out-soft)_250ms_both] sm:-right-[52%] sm:top-[24%] sm:z-auto sm:w-[260px] sm:rotate-[11deg] sm:drop-shadow-[0_26px_28px_rgb(12_12_13/38%)]"
+          />
+        </FeatureGate>
         <Phone className="relative" />
         <div className="absolute -left-[4%] top-[7%] flex items-center gap-2.5 rounded-[16px] border border-line bg-surface py-2.5 pl-2.5 pr-4 shadow-[var(--shadow-float)] motion-safe:animate-[z-pop_400ms_var(--ease-out-soft)_700ms_both] sm:-left-[34%]">
           <span className="grid size-8 place-items-center rounded-full text-in" style={{ background: 'color-mix(in srgb, var(--in) 13%, transparent)' }}>
@@ -52,7 +57,7 @@ export function Hero() {
       <div className="mx-auto grid w-full max-w-[1120px] items-center gap-12 px-4 pb-6 pt-10 sm:px-6 md:pt-16 lg:grid-cols-[1.08fr_1fr] lg:gap-8 lg:pb-10 lg:pt-16">
         <div>
           <h1 id="hero-title" className="max-w-[15ch] text-balance text-[42px] font-[760] leading-[1.02] tracking-[-0.045em] text-ink sm:text-[56px] lg:text-[66px]">
-            {HERO.title}
+            <HeroTitle />
           </h1>
           <p className="mt-6 max-w-[46ch] text-[17px] leading-[1.6] text-muted md:text-[19px]">{HERO.sub}</p>
           <div className="mt-9 flex flex-col gap-3 sm:flex-row">
