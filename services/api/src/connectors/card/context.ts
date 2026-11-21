@@ -30,6 +30,8 @@ export type CardCtx = {
   /** Purchases whose clearing call is in flight (shop, test purchase or poller). */
   clearing: Set<string>
   syncing: boolean
+  /** Refunds' sends back to the pool in flight (returns.ts): one run at a time, apart from the Lithic poll. */
+  returning: boolean
   timer?: NodeJS.Timeout
 }
 
@@ -58,6 +60,7 @@ export function cardCtx(core: Core, opts: CardOptions = {}): CardCtx {
     charging: new Set(),
     clearing: new Set(),
     syncing: false,
+    returning: false,
   }
   contexts.set(core, ctx)
   return ctx

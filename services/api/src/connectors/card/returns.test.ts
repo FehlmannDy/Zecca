@@ -210,6 +210,42 @@ describe('a refund on the ledger: card settlement account -> pool', () => {
     await w.done()
   })
 
+  it('a slow send back to the pool does not hold up the poller: a void on the next pass goes back to the card', async () => {
+    const w = await world()
+    await load(w, w.ana, 1000)
+    w.env.ledger.mock.credit(w.settlement, 1000)
+    // The settlement account's send waits until released (a slow proof, or a submit waiting for its last ledger).
+    let release!: () => void
+    const slow = new Promise<void>((r) => (release = r))
+    let reached = false
+    const real = w.env.ledger.submitAs.bind(w.env.ledger)
+    w.env.ledger.submitAs = async (role, tx) => {
+      if (role === 'cardSettlement' && tx.TransactionType === 'ConfidentialMPTSend') {
+        reached = true
+        await slow
+      }
+      return real(role, tx)
+    }
+    const { token: ret } = await w.lithic.simulateReturn({ amount: 250, descriptor: 'SETTE ARCHI', pan: await panOf(w) })
+    const first = cardSync(w.h.app.core)
+    await eventually(() => expect(reached).toBe(true), 5000)
+
+    const { token } = await w.lithic.simulateAuthorize({ amount: 400, descriptor: 'CAFFE BRUNO', pan: await panOf(w) })
+    await w.lithic.simulateVoid({ token })
+    await cardSync(w.h.app.core)
+    expect(hold(w, token)?.status).toBe('voided')
+    expect(cardBalanceOf(w.h.app.core, w.ana.user.id)).toBe(1250)
+    expect(w.sends(w.settlement, w.poolAddress)).toHaveLength(0)
+
+    release()
+    await first
+    await w.h.app.core.idle()
+    expect(row(w, `${ret}:return`)?.status).toBe('sent')
+    expect(w.sends(w.settlement, w.poolAddress)).toHaveLength(1)
+    w.env.ledger.submitAs = real
+    await w.done()
+  })
+
   it(`stops after ${MAX_RETURN_TRIES} tries and says so`, async () => {
     const w = await world()
     const key = await shopRefunds(w, 250)

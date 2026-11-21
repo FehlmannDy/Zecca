@@ -113,13 +113,22 @@ async function sendReturn(core: Core, ctx: CardCtx, r: ReturnRow): Promise<void>
   core.log.warn(`[card] return ${r.key}: ${why}; sequence ${String(tx.Sequence)} is looked up before sending again`)
 }
 
-/** Every refund whose money is not back in the pool yet, one at a time (one account, one sequence). Never throws. */
+/**
+ * Every refund whose money is not back in the pool yet, one at a time (one account, one sequence). Returns at once while
+ * another run is going. Never throws.
+ */
 export async function sendReturns(core: Core, ctx: CardCtx): Promise<void> {
-  for (const r of ctx.store.openReturns()) {
-    try {
-      await sendReturn(core, ctx, r)
-    } catch (e) {
-      core.log.error(`[card] return ${r.key}: ${msg(e)}`)
+  if (ctx.returning) return
+  ctx.returning = true
+  try {
+    for (const r of ctx.store.openReturns()) {
+      try {
+        await sendReturn(core, ctx, r)
+      } catch (e) {
+        core.log.error(`[card] return ${r.key}: ${msg(e)}`)
+      }
     }
+  } finally {
+    ctx.returning = false
   }
 }

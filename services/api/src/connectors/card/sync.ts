@@ -137,7 +137,8 @@ export async function cardSync(core: Core): Promise<void> {
         core.log.warn(`[card] sync returns for a card: ${(e as Error).message}`)
       }
     }
-    await sendReturns(core, ctx)
+    // In the background: a slow ledger step (proof, merge, waiting for validation) must not hold up voids and refunds.
+    core.track(sendReturns(core, ctx), 'card returns')
   } finally {
     ctx.syncing = false
   }
