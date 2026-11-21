@@ -231,6 +231,7 @@ Transactions from our test runs and from production on 20 and 21 November 2026. 
 | The relayer merges the recipient's inbox (delegated `ConfidentialMPTMergeInbox`) | Devnet | [`F1B54C10…8F94`](https://devnet.xrpl.org/transactions/F1B54C10C43A917A6B8D0124E7C7FC7BABBD1F43054E0FD59EB6FB15ADB68F94) |
 | MoonPay sandbox purchase delivered as RLUSD | Testnet | [`548D695E…8939`](https://testnet.xrpl.org/transactions/548D695E91F1F48720D64F0380C084DE3E0A6A4F97CA1599B79324FB5A1F8939) |
 | One XRPL payment into the Firelight vault on Flare | Testnet | [`B53177C7…5307`](https://testnet.xrpl.org/transactions/B53177C7D31A4CC4F786824150F72A4EFE206DC7818989E98CC80A74E71B5307) |
+| Earn withdrawal: claim from Firelight, redeemed back to XRP and credited to the user ($9.42) | Testnet | [`19A9E042…2052`](https://testnet.xrpl.org/transactions/19A9E04234635BEC7CCCD7EB489F3A33045C3DA1E7CF32A3E31B17B359B72052) |
 
 Long-lived Devnet accounts: pool [`rNwvGErbykbsfcRnmq6fXhqmrrL94WcZSZ`](https://devnet.xrpl.org/accounts/rNwvGErbykbsfcRnmq6fXhqmrrL94WcZSZ), sponsor [`rBCtijgiPFRnLxazz8LMqbkP8zBicWhFxT`](https://devnet.xrpl.org/accounts/rBCtijgiPFRnLxazz8LMqbkP8zBicWhFxT), issuer [`rB5Pc1c7EYx98o4iWfk4Jx96JrCWgqhfZ3`](https://devnet.xrpl.org/accounts/rB5Pc1c7EYx98o4iWfk4Jx96JrCWgqhfZ3); confidential token (MPT issuance) `006C6AA175853178147D8F0D592D9DE3658C836F69985AB9`.
 
