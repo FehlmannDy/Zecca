@@ -160,6 +160,7 @@ class MainActivity : Activity() {
         screen = next
         stopPolling()
         pulse?.cancel()
+        pulse = null
         content.removeAllViews()
         when (next) {
             Screen.PAIR -> buildPair()
