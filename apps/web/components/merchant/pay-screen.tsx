@@ -1,11 +1,12 @@
 'use client'
 // The pay page (UI.md §5.5). Opens from an NFC tap or a QR scan, often in a fresh browser, and shows the request at
 // once, signed out too. Signed in: "Pay $4.50 to Caffè Bruno" / "Approve" -> the arches -> "Paid" with a tick and the time.
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Check } from 'lucide-react'
 import { formatUsd, type PaymentRequest } from '@zecca/contracts'
 import { useApp } from '@/lib/app'
+import { isApiError } from '@/lib/api'
 import { activityWhen } from '@/lib/activity'
 import { approveStatus, archesFill } from '@/lib/arches'
 import { safeNextPath } from '@/lib/next-path'
@@ -24,13 +25,22 @@ import { mergeRequest } from './till-model'
 import { useInterval, useRequestStream } from './use-request-stream'
 
 const EXPECTED_MS = 10_000
+const SLOW = 'Taking longer than usual. You can leave this page: the payment shows in your activity.'
 const linkCls = 'inline-flex min-h-12 w-full items-center justify-center rounded-[14px] px-5 text-[15px] font-[680]'
 
 export function PayScreen({ id }: { id: string }) {
   const { api, config, getSigner } = useApp()
   const session = useSession()
   const hydrated = useHydrated()
-  const load = useResource(() => api.call('paymentRequestGet', { params: { id } }), [api, id])
+  const [missing, setMissing] = useState(false)
+  const load = useResource(
+    () =>
+      api.call('paymentRequestGet', { params: { id } }).catch((e: unknown) => {
+        setMissing(isApiError(e) && e.code === 'not_found')
+        throw e
+      }),
+    [api, id],
+  )
   const [request, setRequest] = useState<PaymentRequest | null>(null)
   const [paying, setPaying] = useState(false)
   const [paidByMe, setPaidByMe] = useState(false)
@@ -67,9 +77,14 @@ export function PayScreen({ id }: { id: string }) {
   }, [paidByMe, request?.status])
 
   const signedIn = hydrated && !!session?.user
-  const state = payState({ request, loadError: load.error, signedIn, userId: session?.user?.id, paying, paidByMe, failure })
+  const state = payState({ request, loadError: load.error, missing, signedIn, userId: session?.user?.id, paying, paidByMe, failure })
 
   useInterval(() => setStatus(approveStatus(archesFill(performance.now() - startedAt, EXPECTED_MS), false)), 250, state.kind === 'working')
+  // Approve unmounts with the click: put focus on what replaced it, the title while working, then "Paid".
+  const focusTarget = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (state.kind === 'working' || state.kind === 'paid') focusTarget.current?.focus()
+  }, [state.kind])
 
   async function approve() {
     if (!request) return
@@ -95,15 +110,22 @@ export function PayScreen({ id }: { id: string }) {
   const hrefs = payHrefs(id, returnTo)
   const doneHref = returnTo ?? '/app'
   const doneLabel = returnTo ? `Back to ${request?.merchantName ?? 'the shop'}` : 'Done'
+  // One live region, mounted from the start, so the progress and the result are announced (UI.md §6).
+  const announcement = state.kind === 'working' ? (slow ? SLOW : status) : state.kind === 'paid' && request ? paidAnnouncement(request) : ''
 
   return (
     <div className="relative min-h-svh">
       <GlassBackdrop />
       <div className="mx-auto flex min-h-svh max-w-[440px] flex-col px-5 pb-[max(24px,env(safe-area-inset-bottom))] pt-[max(20px,env(safe-area-inset-top))] lg:max-w-[520px] lg:justify-center">
-        <Link href="/app" aria-label="Zecca" className="self-start rounded-[10px]">
-          <Logo />
-        </Link>
+        <header className="self-start">
+          <Link href="/app" aria-label="Zecca" className="block rounded-[10px]">
+            <Logo />
+          </Link>
+        </header>
         <main className="flex flex-1 flex-col items-center justify-center text-center lg:my-10 lg:flex-none lg:rounded-[28px] lg:border lg:border-[color-mix(in_srgb,var(--ink)_8%,transparent)] lg:bg-[color-mix(in_srgb,var(--surface)_72%,transparent)] lg:px-10 lg:py-12 lg:shadow-[var(--shadow-float)] lg:backdrop-blur-md">
+          <p className="sr-only" aria-live="polite" aria-atomic="true">
+            {announcement}
+          </p>
           {state.kind === 'loading' ? (
             <div className="flex flex-col items-center gap-4" aria-busy="true" aria-label="Loading the request">
               <Skeleton className="size-16 rounded-[16px]" />
@@ -120,8 +142,12 @@ export function PayScreen({ id }: { id: string }) {
                 Try again
               </Button>
             </div>
+          ) : state.kind === 'not_found' ? (
+            <div className="flex w-full flex-col items-center">
+              <Notice title="This payment link is not valid." line="Check the link, or ask the merchant for a new one." href={doneHref} label={returnTo ? 'Back to the shop' : 'Go to home'} />
+            </div>
           ) : state.kind === 'paid' && request ? (
-            <PaidView request={request} at={state.at} doneHref={doneHref} doneLabel={doneLabel} />
+            <PaidView request={request} at={state.at} doneHref={doneHref} doneLabel={doneLabel} headingRef={focusTarget} />
           ) : (
             request && (
               <>
@@ -150,11 +176,11 @@ export function PayScreen({ id }: { id: string }) {
                   )}
                   {state.kind === 'working' && (
                     <>
-                      <p className="text-[17px] font-[680]">{payTitle(request)}</p>
-                      <ArchesProgress state="running" expectedMs={EXPECTED_MS} className="mt-7 h-11" label={status || 'Payment progress'} />
-                      <p className="mt-4 min-h-6 text-[15px] text-muted" aria-live="polite">
-                        {slow ? 'Taking longer than usual. You can leave this page: the payment shows in your activity.' : status}
+                      <p ref={(el) => void (focusTarget.current = el)} tabIndex={-1} className="text-[17px] font-[680] outline-none">
+                        {payTitle(request)}
                       </p>
+                      <ArchesProgress state="running" expectedMs={EXPECTED_MS} className="mt-7 h-11" label={status || 'Payment progress'} />
+                      <p className="mt-4 min-h-6 text-[15px] text-muted">{slow ? SLOW : status}</p>
                     </>
                   )}
                   {state.kind === 'own' && <p className="max-w-[32ch] text-[15px] text-muted">This is your own request. Show the code to your customer to get paid.</p>}
@@ -221,25 +247,36 @@ function Notice({ title, line, href, label }: { title: string; line: string; hre
   )
 }
 
-function PaidView({ request, at, doneHref, doneLabel }: { request: PaymentRequest; at?: string; doneHref: string; doneLabel: string }) {
+function PaidView({
+  request,
+  at,
+  doneHref,
+  doneLabel,
+  headingRef,
+}: {
+  request: PaymentRequest
+  at?: string
+  doneHref: string
+  doneLabel: string
+  headingRef: React.RefObject<HTMLElement | null>
+}) {
   return (
     <div className="flex flex-col items-center">
       <span className="grid size-24 place-items-center rounded-full bg-[var(--in)] text-[var(--paper)] motion-safe:animate-[z-fade-in_240ms_ease-out]" aria-hidden="true">
         <Check className="size-12" strokeWidth={2.6} />
       </span>
-      <h1 className="mt-6 text-[34px] font-[760] tracking-[-0.035em]">Paid</h1>
+      <h1 ref={(el) => void (headingRef.current = el)} tabIndex={-1} className="mt-6 text-[34px] font-[760] tracking-[-0.035em] outline-none">
+        Paid
+      </h1>
       <p className="mt-2 text-[17px]">
         <span className="tabular font-[700]">{formatUsd(request.amountMinor)}</span> to {request.merchantName}
       </p>
       {request.reference && <p className="mt-1 text-[15px] text-muted">{request.reference}</p>}
       <p className="mt-1 text-[15px] text-muted">{activityWhen(at ?? new Date().toISOString())}</p>
       <ArchesProgress state="done" className="mt-7 h-8" label="Payment complete" />
-      <Link href={doneHref} className={`${linkCls} mt-8 bg-ink text-paper hover:opacity-90`} autoFocus>
+      <Link href={doneHref} className={`${linkCls} mt-8 bg-ink text-paper hover:opacity-90`}>
         {doneLabel}
       </Link>
-      <p className="sr-only" aria-live="assertive">
-        {paidAnnouncement(request)}
-      </p>
     </div>
   )
 }

@@ -27,6 +27,11 @@ describe('pay page view model', () => {
     expect(payState({ request: pr('created'), signedIn: true }).kind).toBe('ready')
   })
 
+  it('state: an unknown request id is not found (no retry), a network error can be retried', () => {
+    expect(payState({ request: null, loadError: "We couldn't find this request.", missing: true, signedIn: true })).toEqual({ kind: 'not_found' })
+    expect(payState({ request: null, loadError: "Can't reach Zecca right now.", missing: false, signedIn: true }).kind).toBe('error')
+  })
+
   it('state: the merchant opening their own request sees it, cannot pay it', () => {
     expect(payState({ request: pr('created'), signedIn: true, userId: 'usr_b' }).kind).toBe('own')
   })

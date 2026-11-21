@@ -12,6 +12,7 @@ export type PayFailure =
 export type PayState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
+  | { kind: 'not_found' }
   | { kind: 'signin' }
   | { kind: 'ready' }
   | { kind: 'own' }
@@ -28,6 +29,8 @@ export const paidAnnouncement = (r: Pick<PaymentRequest, 'amountMinor' | 'mercha
 export function payState(o: {
   request: PaymentRequest | null
   loadError?: string | null
+  /** The load failed with not_found: the link is wrong, retrying will not help. */
+  missing?: boolean
   signedIn: boolean
   userId?: string
   /** An approval of ours is in flight (prepare, sign, submit, wait for the deposit). */
@@ -37,7 +40,7 @@ export function payState(o: {
   failure?: PayFailure | null
 }): PayState {
   const r = o.request
-  if (!r) return o.loadError ? { kind: 'error', message: o.loadError } : { kind: 'loading' }
+  if (!r) return o.loadError ? (o.missing ? { kind: 'not_found' } : { kind: 'error', message: o.loadError }) : { kind: 'loading' }
   // The paid event can arrive before our submit answer: while our approval runs, keep the arches going.
   if (r.status === 'paid') return o.paidByMe ? { kind: 'paid', at: r.paidAt } : o.paying ? { kind: 'working' } : { kind: 'already_paid' }
   if (r.status === 'expired') return { kind: 'expired' }
