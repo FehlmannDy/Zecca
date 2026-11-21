@@ -143,7 +143,7 @@ function PairScreen() {
               </p>
               <p className="mt-4 max-w-[34ch] text-[15.5px] font-[600]">Open Zecca Till on the merchant phone and scan this code.</p>
               <p className="mt-1.5 text-[13.5px] text-muted">
-                No camera? Type the code in the app. Expires in <span className="tabular">{expiresIn(code.expiresAt, now)}</span>.
+                No camera? Type the code in the app. <span className="whitespace-nowrap">Expires in <span className="tabular">{expiresIn(code.expiresAt, now)}</span>.</span>
               </p>
             </>
           ) : loadingCode && !code ? (
