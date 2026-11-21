@@ -4,7 +4,7 @@
 import { createHash, createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import xrpl from 'xrpl'
-import { getBalance } from '../../books'
+import { adjustBalance, getBalance } from '../../books'
 import { intents } from '../../intents/repo'
 import { makeHarness } from '../../testing/harness'
 import { fakeKeyStore } from '../../testing/fakes'
@@ -69,7 +69,7 @@ function fakeTestnet() {
 
 type Mode = 'ok' | 'tec' | 'unknown' | 'throwBeforeSign' | 'throwAfterSign'
 function fakeTreasury() {
-  const ledger = new Map<string, { validated: boolean; engineResult: string }>()
+  const ledger = new Map<string, { final: boolean; engineResult: string }>()
   const payments: { destination: string; tag?: number; amount: unknown; hash: string }[] = []
   const modes: Mode[] = []
   let can = true
@@ -94,10 +94,10 @@ function fakeTreasury() {
       if (mode === 'throwAfterSign') throw new Error('socket dropped')
       if (mode === 'unknown') return { validated: false, engineResult: 'SUBMIT_ERROR', hash }
       if (mode === 'tec') {
-        ledger.set(hash, { validated: true, engineResult: 'tecPATH_DRY' })
+        ledger.set(hash, { final: true, engineResult: 'tecPATH_DRY' })
         return { validated: false, engineResult: 'tecPATH_DRY', hash, ledgerIndex: index }
       }
-      ledger.set(hash, { validated: true, engineResult: 'tesSUCCESS' })
+      ledger.set(hash, { final: true, engineResult: 'tesSUCCESS' })
       return { validated: true, engineResult: 'tesSUCCESS', hash, ledgerIndex: index }
     },
     async txResult(hash) {
@@ -293,7 +293,7 @@ describe('POST /v1/ramp/sell/deposit (the widget asked us to deposit)', () => {
     expect((await w.h.submit(ana, d.body.prepared)).body.status).toBe('validated')
     await w.h.settle()
     expect(w.treasury.payments).toEqual([{ destination: MP_DEPOSIT, tag: 424242, amount: { currency: RLUSD_HEX, issuer: RLUSD_TESTNET_ISSUER, value: '19.65' }, hash: expect.stringMatching(/^[0-9A-F]{64}$/) }])
-    expect(intents.byId(w.core, d.body.intent.id)).toMatchObject({ status: 'paid_out' })
+    expect(intents.byId(w.core, d.body.intent.id)).toMatchObject({ status: 'received' }) // paid_out once MoonPay pays the card
     expect((await w.status(ana.token, d.body.intent.id)).body).toMatchObject({ status: 'sent', refunded: false })
     expect(getBalance(w.core, ana.user.id).availableMinor).toBe(5000 - 1965)
     expect(w.h.pool.payouts).toEqual([]) // nothing comes back from the pool
@@ -413,7 +413,7 @@ describe('the treasury payment: once, settled from the ledger, refunded when it 
     const b = await w.withdraw(ana, { baseCurrencyAmount: 21 })
     expect(withdrawals.byIntent(w.core.db, b.id)).toMatchObject({ status: 'sent', payLls: 120 })
     // a landed; b never reached the ledger and its LastLedgerSequence passed.
-    w.treasury.ledger.set(withdrawals.byIntent(w.core.db, a.id)!.payHash!, { validated: true, engineResult: 'tesSUCCESS' })
+    w.treasury.ledger.set(withdrawals.byIntent(w.core.db, a.id)!.payHash!, { final: true, engineResult: 'tesSUCCESS' })
     w.treasury.setIndex(121)
     await w.scan()
     expect(withdrawals.byIntent(w.core.db, a.id)?.status).toBe('delivered')
@@ -490,5 +490,177 @@ describe("MoonPay's status: signed sell webhooks and the poll", () => {
     await w.scan()
     expect((await w.status(ana.token, a.id)).body).toMatchObject({ status: 'paid_out', moonpayStatus: 'completed' })
     expect((await w.status(bo.token, a.id)).status).toBe(404)
+  })
+})
+
+describe('review fixes', () => {
+  it('a payment settled from its stored hash that validated with a tec code is a failure: refunded once, never "delivered"', async () => {
+    const w = world()
+    const ana = await w.h.signUp('ana')
+    w.treasury.modes.push('unknown')
+    const { id } = await w.withdraw(ana)
+    const row = withdrawals.byIntent(w.core.db, id)!
+    expect(row.status).toBe('sent')
+    // What the live txResult returns for a validated tec (in a validated ledger, result not tesSUCCESS).
+    w.treasury.ledger.set(row.payHash!, { final: true, engineResult: 'tecPATH_DRY' })
+    await w.scan()
+    expect(withdrawals.byIntent(w.core.db, id)).toMatchObject({ status: 'failed', refundIntentId: expect.any(String) })
+    expect(intents.byId(w.core, id)?.status).toBe('failed')
+    expect(getBalance(w.core, ana.user.id).availableMinor).toBe(5000)
+    await w.scan()
+    expect(w.h.pool.payouts).toHaveLength(1)
+  })
+
+  it("pays with MoonPay's deposit tag when the approval had none; refunds when MoonPay's tag (API or signed webhook) differs from the approved one", async () => {
+    const cases: { widgetTag?: string; via: 'api' | 'webhook'; paid: boolean }[] = [
+      { via: 'api', paid: true },
+      { widgetTag: '424242', via: 'api', paid: false },
+      { widgetTag: '424242', via: 'webhook', paid: false },
+    ]
+    for (const c of cases) {
+      const w = world()
+      const ana = await w.h.signUp('ana')
+      const s = await w.session(ana.token)
+      const tx = w.sale(s.body.externalId)
+      const d = await w.deposit(ana.token, { externalId: s.body.externalId, transactionId: tx.id, depositWalletAddress: MP_DEPOSIT, ...(c.widgetTag ? { depositWalletAddressTag: c.widgetTag } : {}) })
+      expect(d.status).toBe(200)
+      const wallet = { depositWallet: { walletAddress: MP_DEPOSIT, walletAddressTag: '99' } }
+      if (c.via === 'api') w.moonpay.sells.set(tx.id, { ...tx, ...wallet })
+      else await w.webhook({ type: 'sell_transaction_updated', data: { ...tx, ...wallet } })
+      await w.h.submit(ana, d.body.prepared)
+      await w.h.settle()
+      const row = withdrawals.byIntent(w.core.db, d.body.intent.id)
+      if (c.paid) {
+        expect(w.treasury.payments, JSON.stringify(c)).toEqual([expect.objectContaining({ destination: MP_DEPOSIT, tag: 99 })])
+        expect(row).toMatchObject({ status: 'delivered', destinationTag: 99, destinationSource: 'moonpay' })
+      } else {
+        expect(w.treasury.payments, JSON.stringify(c)).toEqual([])
+        expect(row).toMatchObject({ status: 'failed', reason: expect.stringContaining('tag') })
+        expect(getBalance(w.core, ana.user.id).availableMinor).toBe(5000)
+      }
+    }
+  })
+
+  it('two deposits for the same sale at the same time leave exactly one open approval, and never a 500', async () => {
+    for (const slowFirst of [false, true]) {
+      const w = world()
+      const ana = await w.h.signUp('ana')
+      const s = await w.session(ana.token)
+      const tx = w.sale(s.body.externalId)
+      const get = w.moonpay.getSellTransaction
+      let reads = 0
+      w.moonpay.getSellTransaction = async (id) => {
+        const r = await get(id)
+        if (slowFirst && ++reads === 1) await new Promise((t) => setTimeout(t, 50))
+        return r
+      }
+      const body = { externalId: s.body.externalId, transactionId: tx.id, depositWalletAddress: MP_DEPOSIT }
+      const rs = await Promise.all([w.deposit(ana.token, body), w.deposit(ana.token, body)])
+      for (const r of rs) expect([200, 409], JSON.stringify(r.body)).toContain(r.status)
+      const winner = withdrawals.byMoonPayId(w.core.db, tx.id)!.intentId
+      expect(w.core.db.prepare("SELECT id FROM intents WHERE kind = 'withdraw' AND status = 'created'").all()).toEqual([{ id: winner }])
+      for (const r of rs.filter((r) => r.status === 200 && r.body.intent.id !== winner)) expect((await w.h.submit(ana, r.body.prepared)).status).toBe(403)
+      const ok = rs.find((r) => r.status === 200 && r.body.intent.id === winner)!
+      expect((await w.h.submit(ana, ok.body.prepared)).body.status).toBe('validated')
+      await w.h.settle()
+      expect(w.treasury.payments).toHaveLength(1)
+      expect(getBalance(w.core, ana.user.id).availableMinor).toBe(5000 - 1965)
+    }
+  })
+
+  it('a deposit for the same sale while another one landed and started being sent is refused: the sale keeps the approval being sent', async () => {
+    const w = world()
+    const ana = await w.h.signUp('ana')
+    const s = await w.session(ana.token)
+    const tx = w.sale(s.body.externalId)
+    const body = { externalId: s.body.externalId, transactionId: tx.id, depositWalletAddress: MP_DEPOSIT }
+    const get = w.moonpay.getSellTransaction
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    let reads = 0
+    w.moonpay.getSellTransaction = async (id) => {
+      const r = await get(id)
+      if (++reads === 1) await gate // the first deposit waits on MoonPay...
+      return r
+    }
+    const slow = w.deposit(ana.token, body)
+    while (reads < 1) await new Promise((t) => setTimeout(t, 1))
+    const fast = await w.deposit(ana.token, body) // ...while a second one lands
+    expect(fast.status).toBe(200)
+    // and starts being sent (the submit handler's claim, before the ledger answers).
+    w.core.db.prepare('UPDATE intents SET submitted_at = ? WHERE id = ?').run(w.core.iso(), fast.body.intent.id)
+    release()
+    expect((await slow).status).toBe(409)
+    expect(withdrawals.byMoonPayId(w.core.db, tx.id)?.intentId).toBe(fast.body.intent.id)
+    expect(w.core.db.prepare("SELECT id FROM intents WHERE kind = 'withdraw' AND status = 'created'").all()).toEqual([{ id: fast.body.intent.id }])
+  })
+
+  it("a received 'withdraw' intent with no withdrawal recorded goes back to the user through the pool", async () => {
+    const w = world()
+    const ana = await w.h.signUp('ana')
+    const id = w.core.id('int')
+    intents.insert(w.core, { id, kind: 'withdraw', status: 'received', fromUserId: ana.user.id, amountMinor: 1000, feeMinor: 0, submittedAt: w.core.iso() })
+    await w.core.receivedHandlers.get('withdraw')!(w.core, id)
+    await w.h.settle()
+    expect(intents.byId(w.core, id)?.status).toBe('failed')
+    expect(w.h.pool.payouts).toEqual([expect.objectContaining({ to: ana.user.address, amountMinor: 1000 })])
+    await w.core.receivedHandlers.get('withdraw')!(w.core, id)
+    await w.h.settle()
+    expect(w.h.pool.payouts).toHaveLength(1)
+  })
+
+  it("withdrawals count against the tier-0 monthly send cap and the daily cap (session and deposit), and a new one closes the user's other open approval", async () => {
+    const w = world()
+    const ana = await w.h.signUp('ana') // tier 0: $50 per payment, $150 sent per month
+    for (let n = 0; n < 3; n++) {
+      await w.withdraw(ana, { baseCurrencyAmount: 40 })
+      adjustBalance(w.core, ana.user.id, { available: 4000 })
+    }
+    expect(getBalance(w.core, ana.user.id).availableMinor).toBe(5000)
+    // $120 out this month: $40 more is over $150, at the session and at the deposit.
+    expect((await w.session(ana.token, { direction: 'sell', fiatAmount: 40 })).body.error).toMatchObject({ code: 'limit_reached', details: { limit: 'monthly_send' } })
+    const s = await w.session(ana.token, { direction: 'sell', fiatAmount: 25 })
+    const tx = w.sale(s.body.externalId, { baseCurrencyAmount: 40 })
+    expect((await w.deposit(ana.token, { externalId: s.body.externalId, transactionId: tx.id, depositWalletAddress: MP_DEPOSIT })).body.error).toMatchObject({
+      code: 'limit_reached',
+      details: { limit: 'monthly_send' },
+    })
+
+    // Tier 1: the daily cap.
+    const bo = await w.h.signUp('bob')
+    w.core.db.prepare('UPDATE users SET tier = 1 WHERE id = ?').run(bo.user.id)
+    w.core.settings.dailyCapMinor = 6000
+    await w.withdraw(bo, { baseCurrencyAmount: 40 })
+    expect((await w.session(bo.token, { direction: 'sell', fiatAmount: 25 })).body.error).toMatchObject({ code: 'limit_reached', details: { limit: 'daily_cap' } })
+    w.core.settings.dailyCapMinor = 100_000
+
+    // Two open approvals for two sales: the newer one closes the older (one open withdrawal per user).
+    adjustBalance(w.core, bo.user.id, { available: 10_000 })
+    const opened = []
+    for (let n = 0; n < 2; n++) {
+      const sn = await w.session(bo.token)
+      const t = w.sale(sn.body.externalId)
+      opened.push(await w.deposit(bo.token, { externalId: sn.body.externalId, transactionId: t.id, depositWalletAddress: MP_DEPOSIT }))
+    }
+    expect(opened.map((r) => r.status)).toEqual([200, 200])
+    expect(intents.byId(w.core, opened[0].body.intent.id)).toMatchObject({ status: 'failed', failure: { code: 'replaced' } })
+    expect((await w.h.submit(bo, opened[0].body.prepared)).status).toBe(403)
+    expect((await w.h.submit(bo, opened[1].body.prepared)).body.status).toBe('validated')
+  })
+
+  it("after the treasury pays, the withdrawal stays in progress until MoonPay pays out; MoonPay failing it shows as failed in the activity", async () => {
+    const w = world()
+    const ana = await w.h.signUp('ana')
+    const a = await w.withdraw(ana, { baseCurrencyAmount: 20 })
+    expect(intents.byId(w.core, a.id)?.status).toBe('received')
+    await w.webhook({ type: 'sell_transaction_updated', data: { ...a.tx, status: 'completed' } })
+    expect(intents.byId(w.core, a.id)?.status).toBe('paid_out')
+
+    const b = await w.withdraw(ana, { baseCurrencyAmount: 20 })
+    await w.webhook({ type: 'sell_transaction_failed', data: { ...b.tx, status: 'failed', failureReason: 'card declined' } })
+    expect(intents.byId(w.core, b.id)).toMatchObject({ status: 'failed', failure: { code: 'moonpay_failed', message: "MoonPay couldn't pay this out. Our team has been told and will return your money." } })
+    const items = (await w.h.json('GET', '/v1/activity', { token: ana.token })).body.items
+    expect(items.find((x: any) => x.intentId === b.id)).toMatchObject({ kind: 'withdraw', status: 'failed' })
+    expect(items.find((x: any) => x.intentId === a.id)).toMatchObject({ kind: 'withdraw', status: 'done' })
   })
 })

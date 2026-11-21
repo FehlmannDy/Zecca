@@ -29,12 +29,14 @@ describe('Testnet treasury payer (withdrawal)', () => {
     expect(r).toMatchObject({ validated: true, engineResult: 'tesSUCCESS' })
     expect(signed?.hash).toBe(r.hash)
     expect(signed!.lastLedgerSequence).toBeGreaterThan(0)
-    expect(await payer.txResult(r.hash)).toEqual({ validated: true, engineResult: 'tesSUCCESS' })
+    expect(await payer.txResult(r.hash)).toEqual({ final: true, engineResult: 'tesSUCCESS' })
     expect(await payer.txResult('0'.repeat(63) + '1')).toBeNull()
     expect(await payer.ledgerIndex()).toBeGreaterThanOrEqual(r.ledgerIndex!)
 
     const bad = await payer.pay({ destination: PROBE_WALLET, amount: paymentAmount('RLUSD', '1') }, () => {})
     expect(bad.validated).toBe(false)
     expect(bad.engineResult).toMatch(/^tec/)
+    // Read back by hash (how a restart settles it), a validated tec is final and not a success.
+    expect(await payer.txResult(bad.hash)).toEqual({ final: true, engineResult: bad.engineResult })
   })
 })

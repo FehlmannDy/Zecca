@@ -12,8 +12,11 @@ export interface TreasuryPayer {
   /** True when the treasury holds `amount` above what it must keep (XRP: reserve and a fee margin; RLUSD: its trust line balance). */
   canPay(amount: TreasuryAmount): Promise<boolean>
   pay(p: { destination: string; tag?: number; amount: TreasuryAmount }, onSigned: (s: SignedPayment) => void): Promise<SubmitResult>
-  /** The validated outcome of a payment, { validated: false } while it is pending, null when the ledger does not know it. */
-  txResult(hash: string): Promise<{ validated: boolean; engineResult: string } | null>
+  /**
+   * A payment as the ledger knows it: `final` once it is in a validated ledger (its engineResult then decides: only tesSUCCESS
+   * delivered; a validated tec did not), { final: false } while pending, null when the ledger does not know it.
+   */
+  txResult(hash: string): Promise<{ final: boolean; engineResult: string } | null>
   /** Last validated ledger index (a payment not found once this passes its LastLedgerSequence never applied). */
   ledgerIndex(): Promise<number>
 }
@@ -72,7 +75,7 @@ export function createLiveTreasuryPayer(o: { keystore: KeyStore; client?: XrplCl
     async txResult(hash) {
       try {
         const r = (await client.request({ command: 'tx', transaction: hash })).result
-        return { validated: Boolean(r.validated), engineResult: String(r.meta?.TransactionResult ?? 'unknown') }
+        return { final: Boolean(r.validated), engineResult: String(r.meta?.TransactionResult ?? 'unknown') }
       } catch (e) {
         if ((e as { data?: { error?: string } })?.data?.error === 'txnNotFound') return null
         throw e

@@ -105,12 +105,13 @@ const fromRaw = (r: Raw): Withdrawal => ({
   updatedAt: r.updated_at,
 })
 
-type Patch = Partial<Pick<Withdrawal, 'moonpayStatus' | 'refundIntentId' | 'reason' | 'destinationSource'>>
+type Patch = Partial<Pick<Withdrawal, 'moonpayStatus' | 'refundIntentId' | 'reason' | 'destinationSource' | 'destinationTag'>>
 const PATCH_COLS: Record<keyof Patch, string> = {
   moonpayStatus: 'moonpay_status',
   refundIntentId: 'refund_intent_id',
   reason: 'reason',
   destinationSource: 'destination_source',
+  destinationTag: 'destination_tag',
 }
 
 export const withdrawals = {

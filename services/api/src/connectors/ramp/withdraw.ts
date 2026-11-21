@@ -11,13 +11,13 @@ import { z } from 'zod'
 import { formatUsd, type Intent, type PreparedTx } from '@zecca/contracts'
 import { OUTCOME_UNKNOWN } from '@zecca/xrpl-core'
 import type { Core } from '../../core'
-import { ApiErr, Err } from '../../errors'
+import { ApiErr, COPY, Err } from '../../errors'
 import { zodMessage } from '../../http'
 import { lookupSession } from '../../auth/sessions'
 import { claimEffect, getBalance } from '../../books'
 import { applyReceived, ciphertextPreviewOf, emitIntent } from '../../intents/flow'
 import { intents, toIntent, ZECCA } from '../../intents/repo'
-import { checkOutgoing } from '../../limits'
+import { checkOutgoing, sentSince } from '../../limits'
 import { storePrepared } from '../../prepared/store'
 import type { UserRow } from '../../users'
 import { ipHash, redactUrl, signedWidgetUrl, type MoonPayApi, type MoonPayKeys } from './moonpay'
@@ -84,8 +84,30 @@ export function createWithdraw(ctx: SellCtx) {
     return { keys, treasury }
   }
 
+  /** What the user has withdrawn since `fromMs` (submitted, not failed or refunded). limits.ts's sentSince counts only p2p and merchant. */
+  function withdrawnSince(userId: string, fromMs: number): number {
+    const r = core.db
+      .prepare(
+        `SELECT COALESCE(SUM(amount_minor), 0) AS s FROM intents
+         WHERE from_user_id = ? AND kind = 'withdraw' AND submitted_at IS NOT NULL AND submitted_at >= ? AND status NOT IN ('failed', 'expired')`,
+      )
+      .get(userId, core.iso(fromMs)) as { s: number }
+    return r.s
+  }
+
+  /** The limits of a payment (SPEC §4.8), withdrawals counted as money sent, and the balance. */
   function canAfford(u: UserRow, amountMinor: number): void {
     checkOutgoing(core, u, undefined, amountMinor, 0)
+    const st = core.settings
+    const now = new Date(core.now())
+    if (u.tier === 0) {
+      const from = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+      const month = sentSince(core, u.id, from) + withdrawnSince(u.id, from)
+      if (month + amountMinor > st.tier0.monthlySendCapMinor) throw Err.limit('monthly_send', st.tier0.monthlySendCapMinor, month, COPY.tier0Limit)
+    }
+    const from = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    const day = sentSince(core, u.id, from) + withdrawnSince(u.id, from)
+    if (day + amountMinor > st.dailyCapMinor) throw Err.limit('daily_cap', st.dailyCapMinor, day, `You've reached today's limit of ${formatUsd(st.dailyCapMinor)}. Try again tomorrow.`)
     const b = getBalance(core, u.id)
     if (b.availableMinor < amountMinor) throw Err.insufficient(amountMinor - b.availableMinor)
   }
@@ -256,15 +278,22 @@ export function createWithdraw(ctx: SellCtx) {
     core.rateLimit(u.address)
 
     const intentId = core.id('int')
+    let replaced: string[] = []
     core.db.transaction(() => {
-      if (existing) {
-        // The same sale again: the earlier approval was never sent. Close it, unless it is being sent right now.
-        const closed = core.db
-          .prepare("UPDATE intents SET status = 'failed', failure_code = 'replaced', failure_message = ?, updated_at = ? WHERE id = ? AND status = 'created' AND submitted_at IS NULL")
-          .run(SELL_COPY.replaced, core.iso(), existing.intentId).changes
-        const prev = intents.byId(core, existing.intentId)
-        if (!closed && prev?.status !== 'failed' && prev?.status !== 'expired') throw Err.conflict(SELL_COPY.already)
-      }
+      // Re-read here, not before the awaits: another deposit for this sale may have landed meanwhile.
+      const prev = withdrawals.byMoonPayId(core.db, body.transactionId)
+      if (prev && prev.userId !== u.id) throw Err.badRequest(SELL_COPY.badLink)
+      if (prev && prev.status !== 'awaiting_approval') throw Err.conflict(SELL_COPY.already)
+      canAfford(u, amountMinor) // again, atomic with the insert
+      // One open withdrawal per user: close every approval of theirs never sent (this sale's earlier one included).
+      const open = core.db.prepare("SELECT id FROM intents WHERE from_user_id = ? AND kind = 'withdraw' AND status = 'created' AND submitted_at IS NULL").all(u.id) as { id: string }[]
+      const close = core.db.prepare(
+        "UPDATE intents SET status = 'failed', failure_code = 'replaced', failure_message = ?, updated_at = ? WHERE id = ? AND status = 'created' AND submitted_at IS NULL",
+      )
+      replaced = open.filter((o) => close.run(SELL_COPY.replaced, core.iso(), o.id).changes === 1).map((o) => o.id)
+      // This sale's earlier approval being sent right now (or sent) cannot be replaced.
+      const pi = prev && intents.byId(core, prev.intentId)
+      if (pi && pi.status !== 'failed' && pi.status !== 'expired') throw Err.conflict(SELL_COPY.already)
       intents.insert(core, { id: intentId, kind: 'withdraw', status: 'created', fromUserId: u.id, amountMinor, feeMinor: 0, note: 'To your card' })
       const row = {
         moonpayTxId: body.transactionId,
@@ -281,6 +310,7 @@ export function createWithdraw(ctx: SellCtx) {
       withdrawals.upsert(core.db, row, core.iso())
       if (withdrawals.byMoonPayId(core.db, body.transactionId)?.intentId !== intentId) throw Err.conflict(SELL_COPY.already)
     })()
+    for (const id of replaced) emitIntent(core, id)
     let prepared: PreparedTx
     try {
       const tx = () =>
@@ -299,8 +329,12 @@ export function createWithdraw(ctx: SellCtx) {
       intents.transition(core, intentId, 'created', 'failed', { failure: { code: 'prepare_failed', message: "We couldn't prepare this. Try again." } })
       throw Err.ledger()
     }
+    // A newer deposit (this sale again, or another withdrawal) may have replaced this one while it was being prepared.
+    const now = withdrawals.byIntent(core.db, intentId)
+    const i = intents.byId(core, intentId)
+    if (!now || i?.status !== 'created') throw Err.conflict(SELL_COPY.replaced)
     core.log.info(`[ramp/sell] withdrawal ${intentId} @${u.handle}: ${amountMinor} for ${sale.cryptoAmount} ${sale.currency} (sale ${body.transactionId}, address from ${dest.source})`)
-    return { intent: toIntent(intents.byId(core, intentId)!), prepared, withdrawal: view(withdrawals.byIntent(core.db, intentId)!) }
+    return { intent: toIntent(i), prepared, withdrawal: view(now) }
   }
 
   function view(w: Withdrawal): WithdrawalView {
@@ -333,9 +367,9 @@ export function createWithdraw(ctx: SellCtx) {
     running.add(intentId)
     try {
       const i = intents.byId(core, intentId)
-      let w = withdrawals.byIntent(core.db, intentId)
-      if (!w) return core.log.error(`[ramp/sell] ${intentId}: received, but no withdrawal recorded (money stays in the pool)`)
       if (!i || i.status !== 'received') return
+      let w = withdrawals.byIntent(core.db, intentId)
+      if (!w) return refund(intentId, 'received, but no withdrawal recorded')
       withdrawals.move(core.db, intentId, ['awaiting_approval'], 'paying', core.iso())
       w = withdrawals.byIntent(core.db, intentId)!
       if (w.status === 'sent') return await settleSent(w)
@@ -348,22 +382,31 @@ export function createWithdraw(ctx: SellCtx) {
         res.status === 404 ? { ok: false, reason: 'MoonPay does not know this sale' } : checkSellTx(res.body, { transactionId: w.moonpayTxId, externalId: w.externalId, currencyCode: currencyCodeOf(w) })
       if (sale.ok) record(res.body, w.externalId, 'api')
       const known = sellTxs.get(core.db, w.moonpayTxId)
+      // MoonPay's deposit wallet now (its API, or a signed webhook) against the one approved: address and destination tag.
+      const dest = sale.ok
+        ? resolveDestination(
+            { moonpay: { address: sale.depositAddress ?? known?.depositAddress, tag: sale.depositTag ?? known?.depositTag }, widget: { address: w.destination, tag: w.destinationTag } },
+            ctx.treasuryAddress(),
+          )
+        : undefined
       const why = !sale.ok
         ? sale.reason
         : sale.status !== 'waitingForDeposit'
           ? `MoonPay status ${sale.status}`
           : sale.currency !== w.currency || sale.cryptoAmount !== w.cryptoAmount
             ? `MoonPay now asks ${sale.cryptoAmount} ${sale.currency}, not ${w.cryptoAmount} ${w.currency}`
-            : [sale.depositAddress, known?.depositAddress].some((a) => a && a !== w!.destination)
-              ? 'MoonPay deposit address differs from the one approved'
+            : !dest!.ok
+              ? `MoonPay deposit wallet is not the one approved: ${dest!.reason}`
               : undefined
-      if (why) return refund(intentId, why)
-      const confirmed = (sale.ok ? sale.depositAddress : undefined) ?? known?.depositAddress
-      if (w.destinationSource === 'widget' && confirmed === w.destination) withdrawals.patch(core.db, intentId, { destinationSource: 'moonpay' }, core.iso())
+      if (why || !dest?.ok) return refund(intentId, why ?? 'no deposit wallet')
+      // MoonPay's record may add the tag the widget left out: pay where MoonPay says, and keep it on the row.
+      if (dest.source !== w.destinationSource || dest.tag !== w.destinationTag) {
+        withdrawals.patch(core.db, intentId, { destinationSource: dest.source, destinationTag: dest.tag }, core.iso())
+      }
 
       let result
       try {
-        result = await ctx.treasury().pay({ destination: w.destination, tag: w.destinationTag, amount: paymentAmount(w.currency, w.cryptoAmount) }, (sgn) => {
+        result = await ctx.treasury().pay({ destination: dest.address, tag: dest.tag, amount: paymentAmount(w.currency, w.cryptoAmount) }, (sgn) => {
           if (!withdrawals.markSent(core.db, intentId, sgn.hash, sgn.lastLedgerSequence, core.iso())) throw new Error('withdrawal is no longer waiting to be paid')
           rampSessions.markDone(core.db, w!.externalId, core.iso())
         })
@@ -382,8 +425,8 @@ export function createWithdraw(ctx: SellCtx) {
 
   async function finish(w: Withdrawal, r: { validated: boolean; engineResult: string; hash?: string }): Promise<void> {
     if (r.validated) {
+      // The intent stays 'received' until MoonPay pays the card out (or fails the sale): see applyStatus.
       if (!withdrawals.move(core.db, w.intentId, ['sent'], 'delivered', core.iso())) return
-      if (intents.transition(core, w.intentId, 'received', 'paid_out')) emitIntent(core, w.intentId)
       core.log.info(`[ramp/sell] ${w.intentId}: paid ${w.cryptoAmount} ${w.currency} to MoonPay in ${w.payHash} (Testnet)`)
       return
     }
@@ -396,7 +439,8 @@ export function createWithdraw(ctx: SellCtx) {
     if (!w.payHash) return
     try {
       const r = await ctx.treasury().txResult(w.payHash)
-      if (r?.validated) return await finish(w, r)
+      // In a validated ledger: final. Only tesSUCCESS delivered; a validated tec (no path, tag needed, ...) gets the refund.
+      if (r?.final) return await finish(w, { validated: r.engineResult === 'tesSUCCESS', engineResult: r.engineResult })
       if (r) return // pending
       const index = await ctx.treasury().ledgerIndex()
       if (w.payLls !== undefined && index > w.payLls) return refund(w.intentId, `treasury payment ${w.payHash} never reached the ledger`)
@@ -407,19 +451,21 @@ export function createWithdraw(ctx: SellCtx) {
 
   /** The payment to MoonPay did not happen: the dollars go back from the pool to the user, like a failed Earn deposit. Once. */
   function refund(intentId: string, reason: string): void {
-    const w = withdrawals.byIntent(core.db, intentId)!
+    const i = intents.byId(core, intentId)!
+    const w = withdrawals.byIntent(core.db, intentId) // none only if the row was lost: the pool holds the money all the same
     const refundId = core.id('int')
     const created = core.db.transaction(() => {
-      if (!withdrawals.move(core.db, intentId, ['paying', 'sent'], 'failed', core.iso(), { reason })) return false
-      intents.transition(core, intentId, 'received', 'failed', { failure: { code: 'withdraw_failed', message: SELL_COPY.refunded } })
+      if (w && !withdrawals.move(core.db, intentId, ['paying', 'sent'], 'failed', core.iso(), { reason })) return false
+      const moved = intents.transition(core, intentId, 'received', 'failed', { failure: { code: 'withdraw_failed', message: SELL_COPY.refunded } })
+      if (!w && !moved) return false
       if (!claimEffect(core, `${intentId}:withdraw_refund`)) return false
       // A credit from Zecca's pool like a top-up ('topup' has no received handler: the usual payout and merge settle it).
-      intents.insert(core, { id: refundId, kind: 'topup', status: 'submitted', fromUserId: ZECCA, toUserId: w.userId, amountMinor: w.amountMinor, feeMinor: 0, note: 'Back from a withdrawal', submittedAt: core.iso() })
-      withdrawals.patch(core.db, intentId, { refundIntentId: refundId }, core.iso())
+      intents.insert(core, { id: refundId, kind: 'topup', status: 'submitted', fromUserId: ZECCA, toUserId: i.fromUserId, amountMinor: i.amountMinor, feeMinor: 0, note: 'Back from a withdrawal', submittedAt: core.iso() })
+      if (w) withdrawals.patch(core.db, intentId, { refundIntentId: refundId }, core.iso())
       return true
     })()
     if (!created) return
-    core.log.error(`[ramp/sell] ${intentId} not paid to MoonPay (${reason}); returning ${w.amountMinor} to the user as ${refundId}`)
+    core.log.error(`[ramp/sell] ${intentId} not paid to MoonPay (${reason}); returning ${i.amountMinor} to the user as ${refundId}`)
     emitIntent(core, intentId)
     applyReceived(core, refundId)
   }
@@ -430,10 +476,13 @@ export function createWithdraw(ctx: SellCtx) {
     if (w.moonpayStatus !== status) withdrawals.patch(core.db, w.intentId, { moonpayStatus: status }, core.iso())
     if (status === 'completed' && withdrawals.move(core.db, w.intentId, ['delivered'], 'paid_out', core.iso())) {
       core.log.info(`[ramp/sell] ${w.intentId}: MoonPay paid it out to the card`)
+      intents.transition(core, w.intentId, 'received', 'paid_out')
       emitIntent(core, w.intentId)
     }
     if (status === 'failed') {
       if (withdrawals.move(core.db, w.intentId, ['delivered'], 'moonpay_failed', core.iso(), { reason: String(failureReason ?? 'no reason given') })) {
+        // Honest in the activity: not paid out. The dollars are returned by hand (MoonPay refunds the crypto to the treasury).
+        intents.transition(core, w.intentId, 'received', 'failed', { failure: { code: 'moonpay_failed', message: SELL_COPY.moonpayFailed } })
         core.log.error(`[ramp/sell] ${w.intentId}: MoonPay failed the sale after our payment ${w.payHash} (${failureReason ?? 'no reason given'}); its refund goes to the treasury, return ${w.amountMinor} to the user by hand`)
         emitIntent(core, w.intentId)
       } else if (w.status === 'paying') core.track(pay(w.intentId), 'withdraw pay')
