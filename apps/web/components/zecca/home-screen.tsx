@@ -16,6 +16,7 @@ import { ActivityRow, ActivityRowSkeleton } from './activity-row'
 import { Amount } from './amount'
 import { Button, EmptyState, Skeleton } from './bits'
 import { Metric, Panel } from './glass'
+import { homeLinks } from './home-model'
 
 const wholeUsd = (minor: number) => (minor % 100 === 0 ? `$${splitUsd(minor).dollars}` : formatUsd(minor))
 
@@ -52,12 +53,20 @@ export function HomeScreen() {
   const totalMinor = b ? b.availableMinor + b.pendingMinor : 0
   const series = useMemo(() => (b ? balanceSeries(items, totalMinor) : null), [items, b, totalMinor])
   const tier0 = session?.user?.tier === 0
-  const features = config?.features
+  const links = homeLinks(config)
+  const tierText = config ? `Limit ${wholeUsd(config.limits.tier0.balanceCapMinor)}. Verify to lift it.` : ''
+  const tierLine = links.verifyHref ? (
+    <Link href={links.verifyHref} className="underline decoration-line underline-offset-4 hover:text-ink">
+      {tierText}
+    </Link>
+  ) : (
+    tierText
+  )
 
   const actions: { href: string; label: string; icon: ReactNode; show: boolean }[] = [
     { href: '/app/send', label: 'Send', icon: <ArrowUpRight className="size-5" aria-hidden="true" />, show: true },
     { href: '/app/pay', label: 'Pay', icon: <ScanLine className="size-5" aria-hidden="true" />, show: true },
-    { href: '/app/topup', label: 'Top up', icon: <Plus className="size-5" aria-hidden="true" />, show: features?.ramp !== false },
+    { href: '/app/topup', label: 'Top up', icon: <Plus className="size-5" aria-hidden="true" />, show: links.topup },
     { href: '/app/request', label: 'Request', icon: <ArrowDownLeft className="size-5" aria-hidden="true" />, show: true },
   ]
 
@@ -85,7 +94,7 @@ export function HomeScreen() {
               Arriving: {formatUsd(b.pendingMinor)}
             </p>
           )}
-          {tier0 && config && <p className="mt-4 border-t border-line pt-3 text-[13.5px] text-muted">Limit {wholeUsd(config.limits.tier0.balanceCapMinor)}. Verify to lift it.</p>}
+          {tier0 && config && <p className="mt-4 border-t border-line pt-3 text-[13.5px] text-muted">{tierLine}</p>}
         </>
       )}
     </Panel>
@@ -113,7 +122,7 @@ export function HomeScreen() {
           font='"Manrope Variable", Manrope, system-ui, sans-serif'
           formatValue={(v) => formatUsd(Math.max(0, Math.round(v)))}
         />
-        {tier0 && config && <p className="text-[13.5px] text-muted">Limit {wholeUsd(config.limits.tier0.balanceCapMinor)}. Verify to lift it.</p>}
+        {tier0 && config && <p className="text-[13.5px] text-muted">{tierLine}</p>}
       </div>
     ) : null
 
@@ -144,7 +153,7 @@ export function HomeScreen() {
         <EmptyState
           title="Nothing yet. Top up to get started."
           action={
-            features?.ramp !== false ? (
+            links.topup ? (
               <Link href="/app/topup" className="inline-flex min-h-11 items-center rounded-[14px] border border-line bg-surface px-4 text-[14px] font-[650]">
                 Top up
               </Link>
