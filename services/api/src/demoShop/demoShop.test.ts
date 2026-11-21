@@ -236,6 +236,51 @@ describe('demo shop: orders paid by card, and the payment request state', () => 
     expect((await h.json('POST', `/v1/payment-requests/${created.paymentRequest.id}/pay`, { token: ana.token })).status).toBe(200)
   })
 
+  it('a Zecca payment prepared before the order was paid by card is refused at submit: the buyer never pays twice', async () => {
+    const { h } = await world({ env: { FEATURE_CARD: '1' } })
+    const ana = await h.signUp('ana')
+    const created = ShopOrderCreated.parse((await order(h, [{ sku: 'guji-250', qty: 1 }])).body)
+    const pay = await h.json('POST', `/v1/payment-requests/${created.paymentRequest.id}/pay`, { token: ana.token })
+    expect(pay.status).toBe(200)
+    const before = (await h.json('GET', '/v1/balance', { token: ana.token })).body.availableMinor
+    const { authToken } = payByCard(h, ana.user.id, created.orderId, 1450)
+
+    const s = await h.submit(ana, pay.body.prepared)
+    expect([s.status, s.body.error?.code, s.body.error?.message]).toEqual([409, 'already_paid', 'This order was already paid by card.'])
+    expect((await h.json('GET', '/v1/balance', { token: ana.token })).body.availableMinor).toBe(before)
+    expect(h.app.core.db.prepare('SELECT status, claimed_intent_id FROM payment_requests WHERE id = ?').get(created.paymentRequest.id)).toEqual({
+      status: 'created',
+      claimed_intent_id: null,
+    })
+    expect(ShopOrder.parse((await h.json('GET', `/v1/demo/shop/orders/${created.orderId}`)).body)).toMatchObject({ status: 'paid', method: 'card' })
+
+    // Once the card purchase is voided, the same prepared payment can go through.
+    cardCtx(h.app.core).store.voidHold(authToken)
+    expect((await h.submit(ana, pay.body.prepared)).body.status).toBe('validated')
+  })
+
+  it('refuses a Zecca payment while a card payment of the order is on its way, or its approved purchase was not recorded yet', async () => {
+    const { h } = await world({ env: { FEATURE_CARD: '1' } })
+    const ana = await h.signUp('ana')
+    const created = ShopOrderCreated.parse((await order(h, [{ sku: 'guji-250', qty: 1 }])).body)
+    const pay = await h.json('POST', `/v1/payment-requests/${created.paymentRequest.id}/pay`, { token: ana.token })
+    const ctx = cardCtx(h.app.core)
+
+    ctx.charging.add(created.orderId)
+    const inFlight = await h.submit(ana, pay.body.prepared)
+    expect([inFlight.status, inFlight.body.error?.code]).toEqual([409, 'conflict'])
+    expect(inFlight.body.error.message).toBe('This order is being paid by card. Wait a moment.')
+    ctx.charging.delete(created.orderId)
+
+    // Lithic approved the purchase but the shop did not record it yet (the buyer saw an error): the money is held.
+    ctx.store.linkCard(ana.user.id, { id: 'card_1', token: 'lc_1', last4: '4417', expMonth: 11, expYear: 2029, state: 'OPEN', holderName: 'Ana Ferri' })
+    ctx.store.creditDeposit({ intentId: 'int_load_1', userId: ana.user.id, amountMinor: 1450 })
+    ctx.store.authorize({ authToken: 'auth_held', userId: ana.user.id, cardToken: 'lc_1', amountMinor: 1450, merchant: 'Sette Archi', orderId: created.orderId })
+    const held = await h.submit(ana, pay.body.prepared)
+    expect([held.status, held.body.error?.code]).toEqual([409, 'already_paid'])
+    expect((await h.json('POST', `/v1/payment-requests/${created.paymentRequest.id}/pay`, { token: ana.token })).status).toBe(409)
+  })
+
   it('leaves other payment requests alone', async () => {
     const { h } = await world({ env: { FEATURE_CARD: '1' } })
     const ana = await h.signUp('ana')

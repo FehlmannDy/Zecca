@@ -2,12 +2,14 @@
 // shop merchant (src/seed.ts), order status from that request, and the receipt on the buyer's activity once paid.
 // Public, only with DEMO_MODE=1 and the demoShop flag (enforced by mount() from the route table).
 // An order can also be paid by card (connectors/card, "Pay by card"): then it reads as paid by card, and its Zecca payment
-// request refuses to be paid as well.
+// request refuses to be paid as well, at prepare and at submit.
 import type { Hono } from 'hono'
 import type { Receipt } from '@zecca/contracts'
 import type { Core } from '../core'
 import { ApiErr, Err } from '../errors'
 import { cardChargeForOrder } from '../connectors/card'
+import { cardCtx } from '../connectors/card/context'
+import { guardRequestPayment } from '../intents/flow'
 import { mount } from '../http'
 import { emitActivity } from '../books'
 import { seedDemoShop } from '../seed'
@@ -58,6 +60,19 @@ const orderNumber = (o: OrderRow) => `SA-${o.seq}`
 const cardCharge = (core: Core, orderId: string) => (core.settings.features.card ? cardChargeForOrder(core, orderId) : undefined)
 const PAID_BY_CARD = 'This order was already paid by card.'
 
+/**
+ * "Pay with Zecca" on an order's request, at prepare and again at submit (in the same transaction as the claim): refused
+ * while a card payment of the order stands, its approved purchase is held, or a card charge is on its way.
+ */
+function refusePaidByCard(core: Core, paymentRequestId: string): void {
+  if (!core.settings.features.card) return
+  const orderId = orders.idOfRequest(core, paymentRequestId)
+  if (!orderId) return
+  const ctx = cardCtx(core)
+  if (ctx.store.charge(orderId) || ctx.store.liveHoldOfOrder(orderId)) throw new ApiErr(409, 'already_paid', PAID_BY_CARD)
+  if (ctx.charging.has(orderId)) throw Err.conflict('This order is being paid by card. Wait a moment.')
+}
+
 function receiptOf(o: OrderRow, pr: RequestRow): Receipt {
   return {
     orderNumber: orderNumber(o),
@@ -99,10 +114,10 @@ export function mountDemoShop(app: Hono, core: Core): void {
   ensureTable(core)
 
   app.use('/v1/payment-requests/:id/pay', async (c, next) => {
-    const orderId = c.req.method === 'POST' ? orders.idOfRequest(core, c.req.param('id')) : undefined
-    if (orderId && cardCharge(core, orderId)) throw new ApiErr(409, 'already_paid', PAID_BY_CARD)
+    if (c.req.method === 'POST') refusePaidByCard(core, c.req.param('id'))
     await next()
   })
+  guardRequestPayment(core, refusePaidByCard)
 
   mount(app, core, 'shopItems', () => catalog())
 

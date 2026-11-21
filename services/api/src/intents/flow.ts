@@ -73,6 +73,13 @@ export async function createSendIntent(
 // ---------- submit (kind 'send') ----------
 const NOT_TAKEN = "The payment didn't go through. Nothing was taken from your balance."
 
+/** A last check on paying a request, run at submit just before the claim (the demo shop: an order paid by card). Throws to refuse. */
+const payGuards = new WeakMap<Core, (core: Core, paymentRequestId: string) => void>()
+/** Set by the demo shop module (avoids an import cycle). */
+export function guardRequestPayment(core: Core, f: (core: Core, paymentRequestId: string) => void): void {
+  payGuards.set(core, f)
+}
+
 export function registerSendHandler(core: Core): void {
   core.submitHandlers.set('send', {
     before(core, p) {
@@ -89,7 +96,10 @@ export function registerSendHandler(core: Core): void {
         checkOutgoing(core, sender, recipient, i.amountMinor, i.feeMinor, { excludeIntentId: i.id })
         const b = getBalance(core, sender.id)
         if (b.availableMinor < i.amountMinor) throw Err.insufficient(i.amountMinor - b.availableMinor)
-        if (i.paymentRequestId) claimRequest(core, i.paymentRequestId, i.id)
+        if (i.paymentRequestId) {
+          payGuards.get(core)?.(core, i.paymentRequestId)
+          claimRequest(core, i.paymentRequestId, i.id)
+        }
         adjustBalance(core, sender.id, { available: -i.amountMinor })
       })()
     },
