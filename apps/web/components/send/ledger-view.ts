@@ -27,6 +27,16 @@ const PARTY_WITHOUT_PROFILE: Record<string, string> = {
   withdraw: 'Withdrawal',
 }
 
+/** Where a top-up came from, by the note the API gives it; the same names as the statement (proofs connector). */
+const TOPUP_SOURCE: Record<string, string> = {
+  'Demo credit': 'Zecca demo credit',
+  'From Earn': 'Earn',
+  Sandbox: 'Top up (sandbox)',
+}
+
+const partyWithoutProfile = (a: Activity): string =>
+  a.receipt?.shopName ?? (a.kind === 'topup' && a.note ? TOPUP_SOURCE[a.note] : undefined) ?? PARTY_WITHOUT_PROFILE[a.kind] ?? 'Zecca'
+
 export function explorerHref(explorer: PublicConfig['explorer'], network: Network, hash: string): string {
   const base = explorer[network]
   return `${base.replace(/\/+$/, '')}/${hash}`
@@ -40,7 +50,7 @@ export function ledgerRows(a: Activity, mode: LedgerMode, opts: { explorer: Publ
   if (mode === 'you') {
     const party: LedgerRow = a.counterparty
       ? { key: 'party', label: partyLabel, kind: 'party', text: a.counterparty.displayName, sub: `@${a.counterparty.handle}` }
-      : { key: 'party', label: partyLabel, kind: 'party', text: a.receipt?.shopName ?? PARTY_WITHOUT_PROFILE[a.kind] ?? 'Zecca' }
+      : { key: 'party', label: partyLabel, kind: 'party', text: partyWithoutProfile(a) }
     return [
       { key: 'amount', label: 'Amount', kind: 'amount', minor: a.amountMinor, direction: a.direction },
       party,

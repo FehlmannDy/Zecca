@@ -27,6 +27,14 @@ describe('ledgerRows: You', () => {
     expect(rows[1]).toEqual({ key: 'party', label: 'From', kind: 'party', text: 'Zecca' })
   })
 
+  it('names where a top-up came from, as the statement does', () => {
+    const from = (note?: string) => ledgerRows({ ...fx.activity.topup, ...(note ? { note } : {}) }, 'you', { explorer })[1]
+    expect(from('Demo credit')).toEqual({ key: 'party', label: 'From', kind: 'party', text: 'Zecca demo credit' })
+    expect(from('From Earn')).toMatchObject({ text: 'Earn' })
+    expect(from('Sandbox')).toMatchObject({ text: 'Top up (sandbox)' })
+    expect(from()).toMatchObject({ text: 'Top up' })
+  })
+
   it('never shows a hash', () => {
     expect(ledgerRows(fx.activity.sentCarla, 'you', { explorer }).some((r) => r.kind === 'hash')).toBe(false)
   })
