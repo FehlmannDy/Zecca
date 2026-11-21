@@ -6,6 +6,7 @@ import type { Core } from '../../core'
 import { Err } from '../../errors'
 import { mount } from '../../http'
 import { activityById, toActivity, type ActivityRow } from '../../books'
+import { intents } from '../../intents/repo'
 import { proveLine } from './amount-proof'
 import { signStatement, statementKeyFrom, type UnsignedStatement } from './statement'
 
@@ -18,7 +19,6 @@ type StatementLine = Statement['lines'][number]
 /** Who the other side is when there is no Zecca user on it. */
 const NO_COUNTERPARTY: Record<string, string> = {
   welcome: 'Zecca demo credit',
-  topup: 'Top up',
   card_load: 'Zecca card',
   earn_deposit: 'Earn',
   market_buy: 'Metals market',
@@ -37,11 +37,19 @@ function ensureTables(core: Core): void {
   `)
 }
 
-function lineOf(a: Activity): StatementLine {
+/** A top-up says where the money came from, and simulated money says so (BUILD §8 rule 9): a demo credit, the card sandbox. */
+function topupSource(core: Core, a: Activity): string {
+  const reference = intents.byId(core, a.intentId)?.reference ?? ''
+  if (reference.startsWith('dev-credit:')) return 'Zecca demo credit'
+  if (reference.startsWith('earn:')) return 'Earn'
+  return a.note === 'Sandbox' ? 'Top up (sandbox)' : 'Top up'
+}
+
+function lineOf(core: Core, a: Activity): StatementLine {
   return {
     activityId: a.id,
     date: a.at,
-    counterparty: a.counterparty?.displayName ?? NO_COUNTERPARTY[a.kind] ?? 'External account',
+    counterparty: a.counterparty?.displayName ?? (a.kind === 'topup' ? topupSource(core, a) : undefined) ?? NO_COUNTERPARTY[a.kind] ?? 'External account',
     direction: a.direction,
     amountMinor: a.amountMinor,
     feeMinor: a.feeMinor,
@@ -88,7 +96,7 @@ export function mountProofs(app: Hono, core: Core): void {
     if (acts.some((a) => a.status !== 'done')) throw Err.conflict('Only completed payments can go on a statement.')
 
     const key = statementKey(core)
-    const lines = await withAmountProofs(core, me.address, acts.map(lineOf))
+    const lines = await withAmountProofs(core, me.address, acts.map((a) => lineOf(core, a)))
     const unsigned: UnsignedStatement = {
       id: core.id('stm'),
       createdAt: core.iso(),

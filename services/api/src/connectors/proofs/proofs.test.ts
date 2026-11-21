@@ -80,6 +80,25 @@ describe('POST /v1/disclosures and GET /v1/disclosures/:id', () => {
     expect(verifyStatement(s)).toEqual({ ok: true, signerAddress: kycAddress })
   })
 
+  it('a demo credit says so on the statement, and so does a sandbox top-up', async () => {
+    const { h } = setup()
+    const ana = await h.signUp('ana')
+    expect((await h.json('POST', '/v1/dev/credit', { token: ana.token, body: { amountMinor: 5000 } })).status).toBe(200)
+    await h.settle()
+    const credit = (await activity(h, ana)).find((a) => a.kind === 'topup')!
+    expect(credit.status).toBe('done')
+    // A top-up from the card sandbox (MoonPay test mode): the ramp connector writes note 'Sandbox' and the Testnet delivery hash.
+    h.app.core.db.prepare("UPDATE intents SET reference = 'ABC', note = 'Sandbox' WHERE id = ?").run(credit.intentId)
+    h.app.core.db.prepare("UPDATE activities SET note = 'Sandbox' WHERE id = ?").run(credit.id)
+    const sandboxLine = async () => {
+      const res = await h.json('POST', '/v1/disclosures', { token: ana.token, body: { activityIds: [credit.id] } })
+      return Statement.parse((await h.json('GET', `/v1/disclosures/${res.body.id}`)).body).lines[0]
+    }
+    expect((await sandboxLine()).counterparty).toBe('Top up (sandbox)')
+    h.app.core.db.prepare("UPDATE intents SET reference = ?, note = 'Demo credit' WHERE id = ?").run(`dev-credit:${credit.intentId}`, credit.intentId)
+    expect((await sandboxLine()).counterparty).toBe('Zecca demo credit')
+  })
+
   it("refuses another user's activity id, and an unknown one, without storing anything", async () => {
     const { h } = setup()
     const ana = await h.signUp('ana')
