@@ -71,7 +71,7 @@ function StillSending({ amountMinor, message, onAgain, onDetails }: { amountMino
 }
 
 const inputCls =
-  'h-12 w-full rounded-[14px] border border-line bg-surface px-4 text-[16px] text-ink placeholder:text-muted/80 outline-none transition-colors focus-visible:border-ink/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brass)]'
+  'h-12 w-full rounded-[14px] border border-line bg-surface px-4 text-[16px] text-ink placeholder:text-muted/80 outline-none transition-colors focus-visible:border-ink/40 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-[var(--brass)]'
 
 export function SendScreen() {
   const { api, config, getSigner } = useApp()
@@ -149,11 +149,25 @@ export function SendScreen() {
     resolver.current?.input(text)
   }
 
+  // Picked from the keyboard (Enter on a row or in the field): the amount field takes focus, instead of <body>.
+  const amountInput = useRef<HTMLInputElement>(null)
+  const focusAmount = useRef(false)
   const pick = useCallback((p: PublicProfile) => {
+    try {
+      focusAmount.current = !!document.activeElement?.matches(':focus-visible')
+    } catch {
+      focusAmount.current = false
+    }
     setRecipient(p)
     setProblem(null)
     setStep('amount')
   }, [])
+
+  useEffect(() => {
+    if (step !== 'amount' || !focusAmount.current) return
+    focusAmount.current = false
+    amountInput.current?.focus()
+  }, [step])
 
   useEffect(() => {
     if (rs.kind === 'idle' || rs.kind === 'waiting' || autoPick.current === null) return
@@ -274,6 +288,7 @@ export function SendScreen() {
         ) : (
           <Panel className="flex flex-col items-center gap-2">
             <AmountKeypad
+              inputRef={amountInput}
               value={amountText}
               onChange={(text, minor) => {
                 setAmountText(text)
@@ -292,7 +307,14 @@ export function SendScreen() {
               Note (optional)
             </label>
             <input id="send-note" className={cn(inputCls, 'mt-1')} value={note} maxLength={140} onChange={(e) => setNote(e.target.value)} placeholder="Add a note (optional)" autoComplete="off" />
-            <Button className="mt-1 w-full" onClick={onContinue} disabled={!amountMinor || !config || creating} aria-busy={creating || undefined}>
+            {/* Busy is aria-disabled, not disabled: the button keeps focus, so the approve sheet gives it back on close. */}
+            <Button
+              className={cn('mt-1 w-full', creating && 'opacity-40')}
+              onClick={onContinue}
+              disabled={!amountMinor || !config}
+              aria-disabled={creating || undefined}
+              aria-busy={creating || undefined}
+            >
               Continue
             </Button>
           </Panel>

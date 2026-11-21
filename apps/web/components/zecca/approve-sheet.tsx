@@ -100,7 +100,7 @@ export function ApproveSheet({
   const archState = phase === 'review' ? 'idle' : phase === 'failure' ? 'failed' : phase === 'working' ? 'running' : 'done'
 
   return (
-    <Sheet open={open} onClose={onClose} title={phase === 'success' && outcome ? outcome.title : title} hideTitle dismissible={!busy}>
+    <Sheet open={open} onClose={onClose} title={phase === 'success' && outcome ? outcome.title : title} hideTitle dismissible={!busy} focusKey={phase}>
       <div className="flex flex-col items-center text-center">
         {phase === 'review' && (
           <>

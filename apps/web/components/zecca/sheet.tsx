@@ -1,6 +1,8 @@
 'use client'
 // Bottom sheet (phone) / centred card (wide). Slides up, traps focus, closes on Escape and on the scrim,
-// gives focus back to what opened it. `dismissible={false}` while a signature is in flight.
+// gives focus back to what opened it. `dismissible={false}` while a signature is in flight. `focusKey`: when the content
+// changes step (review, working, success), focus moves to its [data-autofocus] instead of falling to <body>.
+// Taller than the screen (a phone in landscape): the panel scrolls inside, so the title and Close stay reachable.
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
@@ -16,6 +18,7 @@ export function Sheet({
   dismissible = true,
   children,
   className,
+  focusKey,
 }: {
   open: boolean
   onClose: () => void
@@ -24,6 +27,7 @@ export function Sheet({
   dismissible?: boolean
   children: ReactNode
   className?: string
+  focusKey?: string
 }) {
   const panel = useRef<HTMLDivElement>(null)
   const opener = useRef<Element | null>(null)
@@ -69,6 +73,16 @@ export function Sheet({
     }
   }, [open, mounted])
 
+  // A new step: focus its [data-autofocus] (or the first control, or the panel) unless focus is already on a control in it.
+  useEffect(() => {
+    const p = panel.current
+    if (!open || !mounted || focusKey === undefined || !p) return
+    const a = document.activeElement
+    if (a && a !== p && p.contains(a)) return
+    const first = p.querySelector<HTMLElement>('[data-autofocus]') ?? p.querySelector<HTMLElement>(FOCUSABLE)
+    ;(first ?? p).focus()
+  }, [focusKey, open, mounted])
+
   if (!mounted || !open) return null
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center md:items-center">
@@ -80,7 +94,7 @@ export function Sheet({
         aria-labelledby={titleId}
         tabIndex={-1}
         className={cn(
-          'relative w-full max-w-[480px] rounded-t-[24px] bg-surface px-5 pb-[calc(20px+env(safe-area-inset-bottom))] pt-3 text-ink shadow-[var(--shadow-float)] outline-none md:rounded-[24px] md:pb-6',
+          'relative max-h-[calc(100dvh-8px)] w-full max-w-[480px] overflow-x-hidden overflow-y-auto overscroll-contain rounded-t-[24px] bg-surface px-5 pb-[calc(20px+env(safe-area-inset-bottom))] pt-3 text-ink shadow-[var(--shadow-float)] outline-none md:rounded-[24px] md:pb-6',
           'motion-safe:animate-[z-sheet-in_260ms_cubic-bezier(0.22,0.8,0.3,1)]',
           className,
         )}
@@ -91,7 +105,7 @@ export function Sheet({
             {title}
           </h2>
           {dismissible && (
-            <button type="button" onClick={onClose} className="-mr-2 grid size-11 place-items-center rounded-full text-muted hover:bg-paper hover:text-ink" aria-label="Close">
+            <button type="button" onClick={onClose} className="-mr-2 grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-paper hover:text-ink" aria-label="Close">
               <X className="size-5" aria-hidden="true" />
             </button>
           )}

@@ -1,7 +1,7 @@
 'use client'
 // Amount entry: a large field with the numeric keyboard (inputmode="decimal") and, for tills and phones, an
 // on-screen keypad. The value is parsed with the contracts' parseUsdInput (integer cents, never floats).
-import { useId } from 'react'
+import { useId, type Ref } from 'react'
 import { Delete } from 'lucide-react'
 import { parseUsdInput } from '@zecca/contracts'
 import { keypadPress, sanitizeAmountInput } from '@/lib/keypad'
@@ -15,6 +15,7 @@ export function AmountKeypad({
   error,
   hint,
   className,
+  inputRef,
 }: {
   value: string
   /** The typed text and its value in cents (null when empty or not a valid amount). */
@@ -24,6 +25,8 @@ export function AmountKeypad({
   error?: string
   hint?: string
   className?: string
+  /** The amount field, for screens that move keyboard focus to it. */
+  inputRef?: Ref<HTMLInputElement>
 }) {
   const id = useId()
   const set = (next: string) => onChange(next, next ? parseUsdInput(next) : null)
@@ -40,13 +43,14 @@ export function AmountKeypad({
           {shown}
         </span>
         <input
+          ref={inputRef}
           id={id}
           inputMode="decimal"
           autoComplete="off"
           enterKeyHint="done"
           value={value}
           onChange={(e) => set(sanitizeAmountInput(e.target.value))}
-          className="absolute inset-0 w-full cursor-text bg-transparent text-transparent caret-transparent outline-none focus-visible:rounded-[14px] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--brass)]"
+          className="absolute inset-0 w-full cursor-text bg-transparent text-transparent caret-transparent outline-none focus-visible:rounded-[14px] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-4 focus-visible:outline-[var(--brass)]"
           aria-describedby={`${id}-msg`}
           aria-invalid={!!error}
         />

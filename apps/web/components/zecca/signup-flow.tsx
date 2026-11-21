@@ -1,6 +1,7 @@
 'use client'
 // Sign-up (UI.md §5.2): welcome and email, handle and name (business switch), one approval, done.
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { AtSign, Check, Circle, LoaderCircle } from 'lucide-react'
 import { formatUsd, type User } from '@zecca/contracts'
@@ -44,7 +45,7 @@ function Field({ label, id, children, help, helpTone }: { label: string; id: str
 }
 
 const inputCls =
-  'h-12 w-full rounded-[14px] border border-line bg-surface px-4 text-[16px] text-ink placeholder:text-muted/80 outline-none transition-colors focus-visible:border-ink/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brass)] aria-[invalid=true]:border-alert'
+  'h-12 w-full rounded-[14px] border border-line bg-surface px-4 text-[16px] text-ink placeholder:text-muted/80 outline-none transition-colors focus-visible:border-ink/40 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-[var(--brass)] aria-[invalid=true]:border-alert'
 
 export function SignupFlow({ business = false, homeHref = '/app', onFinished }: { business?: boolean; homeHref?: string; /** Replaces the navigation at the end (e.g. /merchant switches to the till in place). */ onFinished?: (user: User) => void }) {
   const { api, config, configError, reloadConfig, signIn, getSigner, signOut } = useApp()
@@ -202,7 +203,9 @@ export function SignupFlow({ business = false, homeHref = '/app', onFinished }: 
   return (
     <div className="mx-auto flex min-h-svh w-full max-w-[440px] flex-col px-5 pb-10 pt-6 lg:max-w-[520px] lg:justify-center">
       <header className="flex items-center justify-between">
-        <Logo />
+        <Link href="/" aria-label="Zecca home" className="inline-flex min-h-11 items-center rounded-[10px]">
+          <Logo />
+        </Link>
         {(step === 'handle' || step === 'approve') && (
           <span className="label-caps text-muted" aria-label={`Step ${step === 'handle' ? 2 : 3} of 3`}>
             {step === 'handle' ? '2' : '3'} / 3
