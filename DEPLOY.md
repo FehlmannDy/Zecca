@@ -31,16 +31,16 @@ What the image is:
 
 Every variable, with its default, is in [`.env.example`](.env.example). For a Devnet deployment:
 
-| Variable | Value |
-|---|---|
-| `LEDGER_MODE` | `devnet` |
-| `SIGNER_MODE` | `privy` (or `mock` for a test deployment with the local signer) |
-| `KEYSTORE_PASSPHRASE` | The passphrase of the key store in `/data` (secret) |
-| `PRIVY_APP_ID`, `PRIVY_APP_SECRET` | The Privy app (secret) |
-| `WEB_ORIGIN` | The Vercel URL, e.g. `https://zecca.vercel.app` (CORS and links) |
-| `API_ORIGIN`, `PUBLIC_WEBHOOK_BASE` | This service's public URL |
-| `MOONPAY_*`, `LITHIC_*`, `RAMP_SANDBOX_SCALE` | When top-up and card are switched on |
-| `DEMO_MODE`, `FEATURE_*` | What the demo shows |
+| Variable                                      | Value                                                            |
+| --------------------------------------------- | ---------------------------------------------------------------- |
+| `LEDGER_MODE`                                 | `devnet`                                                         |
+| `SIGNER_MODE`                                 | `privy` (or `mock` for a test deployment with the local signer)  |
+| `KEYSTORE_PASSPHRASE`                         | The passphrase of the key store in `/data` (secret)              |
+| `PRIVY_APP_ID`, `PRIVY_APP_SECRET`            | The Privy app (secret)                                           |
+| `WEB_ORIGIN`                                  | The Vercel URL, e.g. `https://zecca.vercel.app` (CORS and links) |
+| `API_ORIGIN`, `PUBLIC_WEBHOOK_BASE`           | This service's public URL                                        |
+| `MOONPAY_*`, `LITHIC_*`, `RAMP_SANDBOX_SCALE` | When top-up and card are switched on                             |
+| `DEMO_MODE`, `FEATURE_*`                      | What the demo shows                                              |
 
 Mock mode (`LEDGER_MODE=mock`) is for a quick look only: its ledger lives in memory and is empty after every restart, so also set `DATABASE_PATH=:memory:`.
 

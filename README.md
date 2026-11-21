@@ -7,28 +7,28 @@ Built at the Italian XRPL Hackathon 2026 (Bari), Track 2. Running on XRPL Devnet
 
 ## Try it
 
-https://zecca-beta.vercel.app — sign up with an email (you get $50 of demo credit), send money to someone, open a payment and switch "What the ledger shows" to *Everyone else*. The click path a judge needs, and what each screen proves on the ledger, is in [DEMO.md](DEMO.md); the 5-minute demo video, scene by scene with the customer's iPhone, the Zecca Till and the merchant's laptop, is in [DEMO_FLOW.md](DEMO_FLOW.md).
+<https://zecca-beta.vercel.app> — sign up with an email (you get $50 of demo credit), send money to someone, open a payment and switch "What the ledger shows" to _Everyone else_. The click path a judge needs, and what each screen proves on the ledger, is in [DEMO.md](DEMO.md); the 5-minute demo video, scene by scene with the customer's iPhone, the Zecca Till and the merchant's laptop, is in [DEMO_FLOW.md](DEMO_FLOW.md).
 
 ## Features
 
-| Feature | XRP Ledger primitive | Where in the code |
-|---|---|---|
-| An account without holding XRP | Sponsored account creation: a 1-drop `Payment` with `tfSponsorCreatedAccount` from Zecca's sponsor | `packages/xrpl-core/src/ledger.ts` (`ensureAccount`) |
-| Sign-up in one approval | `Batch`, all or nothing, signed once by the user | `services/api/src/onboarding.ts`, `packages/xrpl-core/src/confidential.ts` (`buildOnboarding`), `packages/xrpl-core/src/batch.ts` |
-| Every fee paid by Zecca | Sponsor co-signature (`Sponsor`, `SponsorSignature`) on each user transaction | `packages/xrpl-core/src/sponsor.ts`, `services/api/src/prepared/` (sponsor policy) |
-| Hidden balances and amounts | Confidential MPT: `ConfidentialMPTConvert`, `ConfidentialMPTSend`, `ConfidentialMPTMergeInbox` (ElGamal ciphertexts and zero-knowledge proofs) | `packages/xrpl-core/src/confidential.ts`, `services/api/src/intents/flow.ts`, `services/pool-worker/src/worker.ts` |
-| Incoming money becomes spendable without an approval | Permission delegation: `DelegateSet` lets Zecca's relayer send `ConfidentialMPTMergeInbox` for the user | `packages/xrpl-core/src/confidential.ts`, `services/api/src/prepared/account-gate.ts` |
-| Pay a shop by QR code or NFC tap | The same confidential deposit to the pool, from a payment request link. The merchant charges from **Zecca Till**, a native Android till paired once with a code, which shows the QR and serves the link over NFC itself; the web till with the NFC PayLink app is the fallback | `services/api/src/paymentRequests/`, `apps/web/app/pay/`, `apps/merchant-till/`, `services/api/src/connectors/till/`, `apps/merchant-nfc/` |
-| Merchant sales | Every sale with its fee (0.5%, `MERCHANT_FEE_BPS`) and net amount, live, with a CSV export; the payout to the merchant is a confidential send from the pool | `services/api/src/paymentRequests/`, `apps/web/app/merchant/sales/` |
-| "Pay with Zecca" on a website | A shop's checkout creates a payment request; the buyer approves one confidential deposit to the pool | `services/api/src/demoShop/`, `apps/web/app/demo/shop/` |
-| Face ID on approvals | Privy passkey check on the `raw_sign` that signs the transaction | `apps/web/lib/passkey/`, `apps/web/lib/wallet/privy.ts` |
-| Verified identity raises limits | Credentials: `CredentialCreate` by Zecca's KYC issuer, `CredentialAccept` signed by the user | `services/api/src/connectors/identity/` |
-| Top up with a card | MoonPay sandbox delivers RLUSD by `Payment` on Testnet (XRP where MoonPay does not offer RLUSD, such as the EU/EEA); once that is checked, Zecca's issuer mints the credit into the pool on Devnet (`Payment`, then `ConfidentialMPTConvert`) and the pool pays it out | `services/api/src/connectors/ramp/` |
-| Cash out to a card (built, **off in production**) | MoonPay sell: the user's confidential deposit to the pool, then one Testnet `Payment` from Zecca's treasury to MoonPay's deposit wallet, for the amount read from MoonPay's own sale record; refunded through the pool if it fails. `FEATURE_WITHDRAW` stays off until one sandbox sell completes end to end | `services/api/src/connectors/ramp/withdraw.ts`, `sell.ts` |
-| Payment card | Lithic sandbox virtual card, loaded from the confidential balance (a deposit to the pool); each purchase is answered in milliseconds from the card balance, works at a normal card checkout (the demo shop's "Pay by card"), can be frozen; at clearing a `ConfidentialMPTSend` from the pool pays the card settlement account | `services/api/src/connectors/card/` |
-| Earn | A Testnet `Payment` with a memo instruction opens a Flare smart account, which mints FXRP and deposits it into the Firelight vault on Flare Coston2. The way back: Firelight withdrawal, claim after its period, FXRP redeemed to XRP by an agent, the user credited through the pool | `services/api/src/connectors/earn/` |
-| Gold, silver, palladium | One MPT per metal; prices published on the ledger with `OracleSet` | `services/api/src/connectors/market/` |
-| Statements with proofs | A proof per line that a `ConfidentialMPTSend` ciphertext encrypts the amount shown, checked against a public node | `services/api/src/connectors/proofs/` |
+| Feature                                              | XRP Ledger primitive                                                                                                                                                                                                                                                                                                           | Where in the code                                                                                                                          |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| An account without holding XRP                       | Sponsored account creation: a 1-drop `Payment` with `tfSponsorCreatedAccount` from Zecca's sponsor                                                                                                                                                                                                                             | `packages/xrpl-core/src/ledger.ts` (`ensureAccount`)                                                                                       |
+| Sign-up in one approval                              | `Batch`, all or nothing, signed once by the user                                                                                                                                                                                                                                                                               | `services/api/src/onboarding.ts`, `packages/xrpl-core/src/confidential.ts` (`buildOnboarding`), `packages/xrpl-core/src/batch.ts`          |
+| Every fee paid by Zecca                              | Sponsor co-signature (`Sponsor`, `SponsorSignature`) on each user transaction                                                                                                                                                                                                                                                  | `packages/xrpl-core/src/sponsor.ts`, `services/api/src/prepared/` (sponsor policy)                                                         |
+| Hidden balances and amounts                          | Confidential MPT: `ConfidentialMPTConvert`, `ConfidentialMPTSend`, `ConfidentialMPTMergeInbox` (ElGamal ciphertexts and zero-knowledge proofs)                                                                                                                                                                                 | `packages/xrpl-core/src/confidential.ts`, `services/api/src/intents/flow.ts`, `services/pool-worker/src/worker.ts`                         |
+| Incoming money becomes spendable without an approval | Permission delegation: `DelegateSet` lets Zecca's relayer send `ConfidentialMPTMergeInbox` for the user                                                                                                                                                                                                                        | `packages/xrpl-core/src/confidential.ts`, `services/api/src/prepared/account-gate.ts`                                                      |
+| Pay a shop by QR code or NFC tap                     | The same confidential deposit to the pool, from a payment request link. The merchant charges from **Zecca Till**, a native Android till paired once with a code, which shows the QR and serves the link over NFC itself; the web till with the NFC PayLink app is the fallback                                                 | `services/api/src/paymentRequests/`, `apps/web/app/pay/`, `apps/merchant-till/`, `services/api/src/connectors/till/`, `apps/merchant-nfc/` |
+| Merchant sales                                       | Every sale with its fee (0.5%, `MERCHANT_FEE_BPS`) and net amount, live, with a CSV export; the payout to the merchant is a confidential send from the pool                                                                                                                                                                    | `services/api/src/paymentRequests/`, `apps/web/app/merchant/sales/`                                                                        |
+| "Pay with Zecca" on a website                        | A shop's checkout creates a payment request; the buyer approves one confidential deposit to the pool                                                                                                                                                                                                                           | `services/api/src/demoShop/`, `apps/web/app/demo/shop/`                                                                                    |
+| Face ID on approvals                                 | Privy passkey check on the `raw_sign` that signs the transaction                                                                                                                                                                                                                                                               | `apps/web/lib/passkey/`, `apps/web/lib/wallet/privy.ts`                                                                                    |
+| Verified identity raises limits                      | Credentials: `CredentialCreate` by Zecca's KYC issuer, `CredentialAccept` signed by the user                                                                                                                                                                                                                                   | `services/api/src/connectors/identity/`                                                                                                    |
+| Top up with a card                                   | MoonPay sandbox delivers RLUSD by `Payment` on Testnet (XRP where MoonPay does not offer RLUSD, such as the EU/EEA); once that is checked, Zecca's issuer mints the credit into the pool on Devnet (`Payment`, then `ConfidentialMPTConvert`) and the pool pays it out                                                         | `services/api/src/connectors/ramp/`                                                                                                        |
+| Cash out to a card (built, **off in production**)    | MoonPay sell: the user's confidential deposit to the pool, then one Testnet `Payment` from Zecca's treasury to MoonPay's deposit wallet, for the amount read from MoonPay's own sale record; refunded through the pool if it fails. `FEATURE_WITHDRAW` stays off until one sandbox sell completes end to end                   | `services/api/src/connectors/ramp/withdraw.ts`, `sell.ts`                                                                                  |
+| Payment card                                         | Lithic sandbox virtual card, loaded from the confidential balance (a deposit to the pool); each purchase is answered in milliseconds from the card balance, works at a normal card checkout (the demo shop's "Pay by card"), can be frozen; at clearing a `ConfidentialMPTSend` from the pool pays the card settlement account | `services/api/src/connectors/card/`                                                                                                        |
+| Earn                                                 | A Testnet `Payment` with a memo instruction opens a Flare smart account, which mints FXRP and deposits it into the Firelight vault on Flare Coston2. The way back: Firelight withdrawal, claim after its period, FXRP redeemed to XRP by an agent, the user credited through the pool                                          | `services/api/src/connectors/earn/`                                                                                                        |
+| Gold, silver, palladium                              | One MPT per metal; prices published on the ledger with `OracleSet`                                                                                                                                                                                                                                                             | `services/api/src/connectors/market/`                                                                                                      |
+| Statements with proofs                               | A proof per line that a `ConfidentialMPTSend` ciphertext encrypts the amount shown, checked against a public node                                                                                                                                                                                                              | `services/api/src/connectors/proofs/`                                                                                                      |
 
 ## How it works
 
@@ -201,13 +201,13 @@ flowchart TB
   i -. "payout" .-> t2
 ```
 
-| | Public ledger | Zecca |
-|---|---|---|
-| Addresses | Visible | Visible |
-| Balances and amounts | ElGamal ciphertexts, with zero-knowledge proofs | Decrypted with the keys in its key store |
-| Who paid whom | Payer to pool, pool to recipient | The intent links the deposit to its payout |
-| Names and emails | Not on the ledger | In its database |
-| Time of each transaction | Visible | Visible |
+|                          | Public ledger                                   | Zecca                                      |
+| ------------------------ | ----------------------------------------------- | ------------------------------------------ |
+| Addresses                | Visible                                         | Visible                                    |
+| Balances and amounts     | ElGamal ciphertexts, with zero-knowledge proofs | Decrypted with the keys in its key store   |
+| Who paid whom            | Payer to pool, pool to recipient                | The intent links the deposit to its payout |
+| Names and emails         | Not on the ledger                               | In its database                            |
+| Time of each transaction | Visible                                         | Visible                                    |
 
 ### Phase-2 connectors at a glance
 
@@ -229,16 +229,16 @@ flowchart LR
 
 Transactions from our test runs and from production on 20 and 21 November 2026. Devnet is reset from time to time, so these links can expire.
 
-| What | Network | Transaction |
-|---|---|---|
-| Account created by the sponsor with 1 drop | Devnet | [`C4225559…40EC`](https://devnet.xrpl.org/transactions/C42255597710602E16C35FF416082D506C96598377F4210D5E42E847119740EC) |
-| One-signature sign-up Batch (authorize, credit, convert to confidential, merge) | Devnet | [`C8594C53…AB55`](https://devnet.xrpl.org/transactions/C8594C5337AC38A74A7E3EBCF8333706372667453307E25DFAFA1C8E6ADCAB55) |
-| Sign-up Batch on production, with the relayer's `DelegateSet` | Devnet | [`64DB5BCA…8B10`](https://devnet.xrpl.org/transactions/64DB5BCA3C9CB50F1966221BE53DDAB6C273813B7DA46D4B0661C2C2FD9F8B10) |
-| Confidential send to the pool, fee sponsored | Devnet | [`D1DAE5A9…3777`](https://devnet.xrpl.org/transactions/D1DAE5A97DDCA1590AE6E3E489378AA7EAEDD44500DD7B0E76670CA135A83777) |
-| Payout: confidential send from the pool to the recipient | Devnet | [`9D7B2D19…7A60`](https://devnet.xrpl.org/transactions/9D7B2D19449EC3934F899DEDB7C181E3FF01027FCA56A82B136A636C4C537A60) |
-| The relayer merges the recipient's inbox (delegated `ConfidentialMPTMergeInbox`) | Devnet | [`F1B54C10…8F94`](https://devnet.xrpl.org/transactions/F1B54C10C43A917A6B8D0124E7C7FC7BABBD1F43054E0FD59EB6FB15ADB68F94) |
-| MoonPay sandbox purchase delivered as RLUSD | Testnet | [`548D695E…8939`](https://testnet.xrpl.org/transactions/548D695E91F1F48720D64F0380C084DE3E0A6A4F97CA1599B79324FB5A1F8939) |
-| One XRPL payment into the Firelight vault on Flare | Testnet | [`B53177C7…5307`](https://testnet.xrpl.org/transactions/B53177C7D31A4CC4F786824150F72A4EFE206DC7818989E98CC80A74E71B5307) |
+| What                                                                                         | Network | Transaction                                                                                                               |
+| -------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Account created by the sponsor with 1 drop                                                   | Devnet  | [`C4225559…40EC`](https://devnet.xrpl.org/transactions/C42255597710602E16C35FF416082D506C96598377F4210D5E42E847119740EC)  |
+| One-signature sign-up Batch (authorize, credit, convert to confidential, merge)              | Devnet  | [`C8594C53…AB55`](https://devnet.xrpl.org/transactions/C8594C5337AC38A74A7E3EBCF8333706372667453307E25DFAFA1C8E6ADCAB55)  |
+| Sign-up Batch on production, with the relayer's `DelegateSet`                                | Devnet  | [`64DB5BCA…8B10`](https://devnet.xrpl.org/transactions/64DB5BCA3C9CB50F1966221BE53DDAB6C273813B7DA46D4B0661C2C2FD9F8B10)  |
+| Confidential send to the pool, fee sponsored                                                 | Devnet  | [`D1DAE5A9…3777`](https://devnet.xrpl.org/transactions/D1DAE5A97DDCA1590AE6E3E489378AA7EAEDD44500DD7B0E76670CA135A83777)  |
+| Payout: confidential send from the pool to the recipient                                     | Devnet  | [`9D7B2D19…7A60`](https://devnet.xrpl.org/transactions/9D7B2D19449EC3934F899DEDB7C181E3FF01027FCA56A82B136A636C4C537A60)  |
+| The relayer merges the recipient's inbox (delegated `ConfidentialMPTMergeInbox`)             | Devnet  | [`F1B54C10…8F94`](https://devnet.xrpl.org/transactions/F1B54C10C43A917A6B8D0124E7C7FC7BABBD1F43054E0FD59EB6FB15ADB68F94)  |
+| MoonPay sandbox purchase delivered as RLUSD                                                  | Testnet | [`548D695E…8939`](https://testnet.xrpl.org/transactions/548D695E91F1F48720D64F0380C084DE3E0A6A4F97CA1599B79324FB5A1F8939) |
+| One XRPL payment into the Firelight vault on Flare                                           | Testnet | [`B53177C7…5307`](https://testnet.xrpl.org/transactions/B53177C7D31A4CC4F786824150F72A4EFE206DC7818989E98CC80A74E71B5307) |
 | Earn withdrawal: claim from Firelight, redeemed back to XRP and credited to the user ($9.42) | Testnet | [`19A9E042…2052`](https://testnet.xrpl.org/transactions/19A9E04234635BEC7CCCD7EB489F3A33045C3DA1E7CF32A3E31B17B359B72052) |
 
 Long-lived Devnet accounts: pool [`rNwvGErbykbsfcRnmq6fXhqmrrL94WcZSZ`](https://devnet.xrpl.org/accounts/rNwvGErbykbsfcRnmq6fXhqmrrL94WcZSZ), sponsor [`rBCtijgiPFRnLxazz8LMqbkP8zBicWhFxT`](https://devnet.xrpl.org/accounts/rBCtijgiPFRnLxazz8LMqbkP8zBicWhFxT), issuer [`rB5Pc1c7EYx98o4iWfk4Jx96JrCWgqhfZ3`](https://devnet.xrpl.org/accounts/rB5Pc1c7EYx98o4iWfk4Jx96JrCWgqhfZ3); confidential token (MPT issuance) `006C6AA175853178147D8F0D592D9DE3658C836F69985AB9`.
@@ -259,12 +259,12 @@ To run against the real XRPL Devnet, set `LEDGER_MODE=devnet` in `.env`, run `np
 
 ## Tests
 
-| Command | What it runs |
-|---|---|
-| `npm test` | Unit and contract tests on the in-memory ledger (Vitest, a few seconds, no network) |
+| Command               | What it runs                                                                                  |
+| --------------------- | --------------------------------------------------------------------------------------------- |
+| `npm test`            | Unit and contract tests on the in-memory ledger (Vitest, a few seconds, no network)           |
 | `npm run test:ledger` | Real transactions on XRPL Devnet and Testnet (needs the network and a bootstrapped key store) |
-| `npm run test:e2e` | The demo path in a real browser (Playwright): sign up, balance, send, pay a merchant, "Paid" |
-| `npm run typecheck` | TypeScript, strict, over every package |
+| `npm run test:e2e`    | The demo path in a real browser (Playwright): sign up, balance, send, pay a merchant, "Paid"  |
+| `npm run typecheck`   | TypeScript, strict, over every package                                                        |
 
 ## Repository layout
 
