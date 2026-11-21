@@ -2,10 +2,12 @@
 // endpoint, so a small poller reads them from GET /v1/transactions. Void, expiry, or a final decline after our
 // approval (our answer reached Lithic too late) -> the money goes back to the card; clearing -> "Completed" (for less:
 // the difference goes back), then the pool pays what was taken to the card settlement account; a return -> a refund
-// line, credited once. Settling at the clearing, not at the answer, leaves nothing to undo on the ledger for a void.
+// line, credited once, and its money goes back on the ledger card settlement -> pool (returns.ts). Settling at the
+// clearing, not at the answer, leaves nothing to undo on the ledger for a void.
 import type { Core } from '../../core'
 import { cardCtx, displayMerchant, emitAuthorization, settlementAddress, type CardCtx } from './context'
 import type { LithicApi, LithicTx } from './lithic-api'
+import { sendReturns } from './returns'
 import type { HoldRow } from './store'
 
 const evTypes = (tx: LithicTx) => (tx.events ?? []).map((e) => e.type)
@@ -55,6 +57,9 @@ export function applyTransaction(core: Core, ctx: CardCtx, h: HoldRow, tx: Lithi
     const clearings = (tx.events ?? []).filter((e) => e.type === 'CLEARING' && Number.isSafeInteger(e.amount))
     const settled = Number.isSafeInteger(tx.settled_amount) && (tx.settled_amount as number) > 0 ? tx.settled_amount : clearings.length ? clearings.reduce((s, e) => s + Math.abs(e.amount!), 0) : undefined
     if (!ctx.store.complete(h.authToken, settled)) return false
+    const taken = ctx.store.hold(h.authToken)?.amountMinor ?? h.amountMinor
+    if (settled !== undefined && settled > taken)
+      core.log.warn(`[card] ${h.authToken}: cleared ${settled}, authorised ${h.amountMinor}; the extra ${settled - h.amountMinor} is not covered by the card balance, ${taken} taken and settled`)
     completed(core, ctx, h.authToken)
     return true
   }
@@ -132,6 +137,7 @@ export async function cardSync(core: Core): Promise<void> {
         core.log.warn(`[card] sync returns for a card: ${(e as Error).message}`)
       }
     }
+    await sendReturns(core, ctx)
   } finally {
     ctx.syncing = false
   }
