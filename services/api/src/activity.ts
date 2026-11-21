@@ -3,13 +3,19 @@ import type { Hono } from 'hono'
 import type { Core } from './core'
 import { Err } from './errors'
 import { mount } from './http'
-import { activitiesOf, activitiesOfIntent, activityById, getBalance, toActivity } from './books'
+import { activitiesOf, activitiesOfIntent, activityById, backfillCardActivity, getBalance, toActivity } from './books'
+import { cardBalanceOf } from './connectors/card'
 
 export function mountActivity(app: Hono, core: Core): void {
-  mount(app, core, 'balance', ({ user }) => getBalance(core, user!.id))
+  mount(app, core, 'balance', ({ user }) => {
+    const b = getBalance(core, user!.id)
+    const cardMinor = core.settings.features.card ? cardBalanceOf(core, user!.id) : undefined
+    return cardMinor === undefined ? b : { ...b, cardMinor }
+  })
 
   mount(app, core, 'activity', ({ user, query }) => {
     const limit = query.limit ?? 20
+    if (query.cursor === undefined || query.cursor === '') backfillCardActivity(core, user!.id)
     let beforeSeq: number | undefined
     if (query.cursor !== undefined && query.cursor !== '') {
       if (!/^\d{1,15}$/.test(query.cursor)) throw Err.badRequest('That page link is not valid.')

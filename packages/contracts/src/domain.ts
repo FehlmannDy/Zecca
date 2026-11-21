@@ -132,7 +132,8 @@ export const Receipt = z.object({
 export type Receipt = z.infer<typeof Receipt>
 
 // ---------- activity ----------
-export const ActivityKind = z.union([IntentKind, z.enum(['topup', 'welcome'])])
+/** card_purchase: a purchase (or a return) on the Zecca card; its intentId is the card authorization's id. */
+export const ActivityKind = z.union([IntentKind, z.enum(['topup', 'welcome', 'card_purchase'])])
 export type ActivityKind = z.infer<typeof ActivityKind>
 
 export const ActivityLedger = z.object({

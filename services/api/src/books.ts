@@ -1,7 +1,8 @@
 // Our own books (SPEC §4.3): balances per user, activity rows per side of an intent, idempotency keys for effects.
 import type { Activity, Balance, Receipt } from '@zecca/contracts'
-import { activityStatusOf } from '@zecca/contracts'
+import { activityStatusOf, TxHash } from '@zecca/contracts'
 import type { Core } from './core'
+import { cardCtx } from './connectors/card/context'
 import { intents, type IntentRow } from './intents/repo'
 import { toProfile, users } from './users'
 
@@ -127,6 +128,7 @@ export function activitiesOfIntent(core: Core, intentId: string): ActivityRow[] 
 
 /** The Activity shape for one side (SPEC §5): status from the intent, ledger hashes + network, counterparty profile. */
 export function toActivity(core: Core, a: ActivityRow, intent?: IntentRow): Activity {
+  if (a.kind === 'card_purchase') return cardPurchaseActivity(core, a)
   const i = intent ?? intents.byId(core, a.intentId)
   const cp = a.counterpartyUserId ? users.byId(core, a.counterpartyUserId) : undefined
   return {
@@ -147,6 +149,69 @@ export function toActivity(core: Core, a: ActivityRow, intent?: IntentRow): Acti
       ...(i?.ciphertextPreview ? { ciphertextPreview: i.ciphertextPreview } : {}),
     },
     ...(a.receipt ? { receipt: a.receipt } : {}),
+  }
+}
+
+// ---------- card purchases ----------
+// A card purchase is not an intent: it lives in the card connector's sub-ledger (one hold per Lithic authorization). Its
+// activity row (intentId = the authorization id) gives it a place in the list; status, amount and receipt are read from
+// the hold each time, so they follow it (authorised -> completed, declined, voided).
+
+const CARD_COPY = { voided: 'Cancelled by the shop. The money is back on your card.' } as const
+
+function cardPurchaseActivity(core: Core, a: ActivityRow): Activity {
+  const store = cardCtx(core).store
+  const h = store.hold(a.intentId)
+  const base: Activity = { id: a.id, intentId: a.intentId, direction: a.direction, kind: 'card_purchase', amountMinor: a.amountMinor, feeMinor: 0, status: 'pending', at: a.createdAt, ledger: { network: 'devnet' } }
+  if (!h) return base
+  const status: Activity['status'] = h.status === 'completed' || h.status === 'refunded' ? 'done' : h.status === 'authorised' ? 'pending' : 'failed'
+  const note = h.status === 'refunded' ? `Refund from ${h.merchant}` : h.status === 'declined' ? h.declineReason : h.status === 'voided' ? CARD_COPY.voided : undefined
+  const receiptStatus = h.status === 'completed' ? 'completed' : h.status === 'authorised' ? 'authorised' : h.status === 'declined' ? 'declined' : undefined
+  let receipt: Receipt | undefined
+  if (receiptStatus && h.amountMinor > 0) {
+    const shop = store.chargeByAuth(h.authToken)?.receipt
+    const last4 = store.cardByToken(h.cardToken)?.last4
+    receipt = shop
+      ? { ...shop, amountMinor: h.amountMinor, status: receiptStatus }
+      : { orderNumber: h.authToken.slice(0, 8).toUpperCase(), shopName: h.merchant, items: [], amountMinor: h.amountMinor, method: 'card', ...(last4 ? { cardLast4: last4 } : {}), status: receiptStatus, at: h.createdAt, reference: h.authToken }
+  }
+  const settled = h.settleTx && TxHash.safeParse(h.settleTx).success ? h.settleTx : undefined
+  return {
+    ...base,
+    amountMinor: h.amountMinor,
+    status,
+    ...(note ? { note } : {}),
+    at: h.createdAt,
+    ledger: { network: 'devnet', ...(settled ? { payoutTxHash: settled } : {}) },
+    ...(receipt ? { receipt } : {}),
+  }
+}
+
+function cardActivityRow(core: Core, userId: string, authToken: string): string | undefined {
+  const h = cardCtx(core).store.hold(authToken)
+  if (!h || h.userId !== userId) return undefined
+  const direction = h.status === 'refunded' ? 'in' : 'out'
+  return (
+    addActivity(core, { userId, intentId: h.authToken, direction, kind: 'card_purchase', amountMinor: h.amountMinor, feeMinor: 0 }) ??
+    activitiesOfIntent(core, h.authToken).find((x) => x.userId === userId && x.direction === direction)?.id
+  )
+}
+
+/** A card.authorization went to the cardholder: keep their activity row and push it again (the app replaces it by id). Never throws. */
+export function recordCardActivity(core: Core, userId: string, authToken: string): void {
+  try {
+    emitActivity(core, cardActivityRow(core, userId, authToken))
+  } catch (e) {
+    core.log.error(`[books] card activity for ${authToken}: ${(e as Error).message}`)
+  }
+}
+
+/** Rows for card purchases recorded without one (before this existed, or a missed event). Card feature on only. */
+export function backfillCardActivity(core: Core, userId: string): void {
+  if (!core.settings.features.card) return
+  const store = cardCtx(core).store
+  for (const h of store.holdsOf(userId, 200).reverse()) {
+    if (!activitiesOfIntent(core, h.authToken).some((x) => x.userId === userId)) cardActivityRow(core, userId, h.authToken)
   }
 }
 

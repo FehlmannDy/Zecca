@@ -28,6 +28,7 @@ import { mountIdentity, registerIdentity } from './connectors/identity'
 import { mountProofs, registerProofs } from './connectors/proofs'
 import { registerSendHandler, wirePoolEvents } from './intents/flow'
 import { createJobs, type Jobs } from './jobs'
+import { recordCardActivity } from './books'
 
 export { publicConfig } from './config'
 export type { Env } from './config'
@@ -62,6 +63,7 @@ export function createApp(deps: AppDeps): ZeccaApp {
     (settings.privyAppId && settings.privyAppSecret ? createPrivyVerifier({ appId: settings.privyAppId, appSecret: settings.privyAppSecret }) : undefined)
 
   const tasks = new Set<Promise<unknown>>()
+  const bus = createEventBus({ log: (m) => log.warn(m) })
   const core: Core = {
     env: deps.env,
     settings,
@@ -70,7 +72,14 @@ export function createApp(deps: AppDeps): ZeccaApp {
     keystore: deps.keystore,
     pool: deps.poolWorker,
     privy,
-    bus: createEventBus({ log: (m) => log.warn(m) }),
+    bus: {
+      ...bus,
+      // Card purchases live in the card connector's sub-ledger: each card.authorization also keeps the cardholder's activity row.
+      toUser(userId, e) {
+        bus.toUser(userId, e)
+        if (e.type === 'card.authorization') recordCardActivity(core, userId, e.data.id)
+      },
+    },
     log,
     now,
     iso: (ms) => new Date(ms ?? now()).toISOString(),
