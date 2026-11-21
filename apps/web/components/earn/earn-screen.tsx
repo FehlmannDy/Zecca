@@ -10,6 +10,7 @@ import { useApp } from '@/lib/app'
 import { useLiveEvents, useResource } from '@/lib/hooks'
 import { useSession } from '@/lib/session'
 import { useWide } from '@/lib/use-media'
+import { useChartWidth } from '@/components/market/chart-width'
 import { ArchesProgress } from '@/components/zecca/arches'
 import { Button, EmptyState, HashChip, Skeleton } from '@/components/zecca/bits'
 import { Badge, Panel } from '@/components/zecca/glass'
@@ -25,6 +26,7 @@ export function EarnScreen() {
   const earn = useEarnApi()
   const user = useSession()?.user
   const wide = useWide()
+  const chartWidth = useChartWidth()
   const on = !!config?.features.earn
   const verified = user?.tier === 1
   const pos = useResource(() => earn.position(), [earn], on && verified)
@@ -96,12 +98,14 @@ export function EarnScreen() {
   const empty = p.status === 'none' && p.valueDrops === 0 && !p.pendingWithdrawal
   const canWithdraw = p.valueDrops > 0 && !p.pendingWithdrawal && !inFlight
   const mock = p.mode === 'mock'
+  const charted = series.data.length >= 2 && p.valueDrops > 0
 
   const headline =
-    series.data.length >= 2 && p.valueDrops > 0 ? (
-      <div className="flex justify-center">
+    charted ? (
+      // The card's glow paints beyond its width: clip it at the screen edge so a phone never scrolls sideways.
+      <div className="-mx-4 flex justify-center overflow-x-clip px-4">
         <PeakChart
-          width={wide ? 380 : 320}
+          width={wide ? 380 : chartWidth}
           data={series.data}
           labels={series.labels}
           // Display only: the headline takes XRP; every amount above stays in integer drops.
@@ -182,6 +186,13 @@ export function EarnScreen() {
       )}
 
       <Panel className="flex flex-col gap-2 text-[14px] text-muted">
+        {charted && (
+          // The chart's caption is small on a phone: the dollar value is also here, at reading size.
+          <p className="flex justify-between text-ink">
+            <span className="text-muted">Worth about</span>
+            <span className="tabular font-[650]">{formatUsd(p.valueUsdMinor)}</span>
+          </p>
+        )}
         {p.depositedDrops > 0 && (
           <p className="flex justify-between text-ink">
             <span className="text-muted">Deposited</span>
@@ -219,6 +230,7 @@ export function EarnScreen() {
               </>
             )}
           </dl>
+          {mock && <p className="mt-3 text-[12.5px] text-muted">Test mode: these are simulated, not real ledger records.</p>}
         </Panel>
       )}
 

@@ -21,6 +21,7 @@ import { useSession } from '@/lib/session'
 import { useWide } from '@/lib/use-media'
 import { signAndSubmit } from '@/lib/wallet/sign-and-submit'
 import { chartLabels, estimate, gramsText, needsAuthorizeFirst, parseGrams, perGram, priceTime, tradeTitle } from './market-model'
+import { useChartWidth } from './chart-width'
 import { MetalMark, NotAvailable } from './market-screen'
 import { Change, Locked, PriceDate } from './parts'
 
@@ -44,6 +45,7 @@ export function AssetScreen({ symbol }: { symbol: MetalSymbol }) {
   const { api, config, getSigner } = useApp()
   const session = useSession()
   const wide = useWide()
+  const chartWidth = useChartWidth()
   const on = !!config?.features.market
   const assets = useResource(() => api.call('marketAssets'), [api], on)
   const holdings = useResource(() => api.call('marketHoldings'), [api], on)
@@ -189,7 +191,7 @@ export function AssetScreen({ symbol }: { symbol: MetalSymbol }) {
 
       {!asset && !assets.error && <Skeleton className="mx-auto aspect-[540/696] w-full max-w-[340px] rounded-[28px]" />}
 
-      {asset && <Chart asset={asset} width={wide ? 380 : 320} />}
+      {asset && <Chart asset={asset} width={wide ? 380 : chartWidth} />}
 
       {asset && (
         <Panel className="flex flex-col gap-3">
