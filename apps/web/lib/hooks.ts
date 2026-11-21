@@ -12,6 +12,8 @@ export function useResource<T>(load: () => Promise<T>, deps: DependencyList, ena
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(enabled)
   const [n, setN] = useState(0)
+  /** A background refresh failed: what is on screen may be out of date. */
+  const [stale, setStale] = useState(false)
   const loader = useRef(load)
   loader.current = load
   useEffect(() => {
@@ -21,7 +23,11 @@ export function useResource<T>(load: () => Promise<T>, deps: DependencyList, ena
     setError(null)
     loader
       .current()
-      .then((d) => live && setData(d))
+      .then((d) => {
+        if (!live) return
+        setData(d)
+        setStale(false)
+      })
       .catch((e) => live && setError(isApiError(e) || e instanceof Error ? e.message : 'Something went wrong. Try again.'))
       .finally(() => live && setLoading(false))
     return () => {
@@ -33,10 +39,13 @@ export function useResource<T>(load: () => Promise<T>, deps: DependencyList, ena
   const refresh = useCallback(() => {
     loader
       .current()
-      .then((d) => setData(d))
-      .catch(() => {})
+      .then((d) => {
+        setData(d)
+        setStale(false)
+      })
+      .catch(() => setStale(true))
   }, [])
-  return { data, error, loading: loading && !data, reload: () => setN((x) => x + 1), refresh, setData }
+  return { data, error, stale, loading: loading && !data, reload: () => setN((x) => x + 1), refresh, setData }
 }
 
 /** Subscribe to the session's event stream; on a drop, `onPoll` runs every 2 s until it reconnects. */

@@ -5,7 +5,7 @@ import { useCallback, useMemo, type ReactNode } from 'react'
 import Link from 'next/link'
 import { ArrowDownLeft, ArrowUpRight, Clock3, Plus, RotateCw, ScanLine } from 'lucide-react'
 import type { Activity, ZeccaEvent } from '@zecca/contracts'
-import { formatUsd, splitUsd } from '@zecca/contracts'
+import { formatUsd } from '@zecca/contracts'
 import { PeakChart } from '@/components/ui/peak-chart'
 import { useApp } from '@/lib/app'
 import { balanceSeries } from '@/lib/balance-series'
@@ -16,9 +16,7 @@ import { ActivityRow, ActivityRowSkeleton } from './activity-row'
 import { Amount } from './amount'
 import { Button, EmptyState, Skeleton } from './bits'
 import { Metric, Panel } from './glass'
-import { homeLinks } from './home-model'
-
-const wholeUsd = (minor: number) => (minor % 100 === 0 ? `$${splitUsd(minor).dollars}` : formatUsd(minor))
+import { homeLinks, liveLabel, tierText as tierTextOf } from './home-model'
 
 export function HomeScreen() {
   const { api, config } = useApp()
@@ -54,9 +52,10 @@ export function HomeScreen() {
   const series = useMemo(() => (b ? balanceSeries(items, totalMinor) : null), [items, b, totalMinor])
   const tier0 = session?.user?.tier === 0
   const links = homeLinks(config)
-  const tierText = config ? `Limit ${wholeUsd(config.limits.tier0.balanceCapMinor)}. Verify to lift it.` : ''
+  const tierText = tierTextOf(config)
+  const stale = balance.stale || activity.stale
   const tierLine = links.verifyHref ? (
-    <Link href={links.verifyHref} className="underline decoration-line underline-offset-4 hover:text-ink">
+    <Link href={links.verifyHref} className="-my-3 inline-flex min-h-11 items-center underline decoration-line underline-offset-4 hover:text-ink">
       {tierText}
     </Link>
   ) : (
@@ -114,7 +113,7 @@ export function HomeScreen() {
           decimals={2}
           title="Balance"
           caption={b.pendingMinor > 0 ? `Arriving: ${formatUsd(b.pendingMinor)}` : 'Available'}
-          updatedText={stream === 'live' ? 'Live' : 'Updated just now'}
+          updatedText={liveLabel(stream, stale)}
           trend="none"
           periods={[series.mode === 'daily' ? 'By day' : 'Today']}
           period={series.mode === 'daily' ? 'By day' : 'Today'}
@@ -140,7 +139,7 @@ export function HomeScreen() {
   )
 
   const activityPanel = (
-    <Panel title="Activity" aria-label="Activity" action={activity.error && activity.data ? <span className="text-[12px] text-alert">Couldn't refresh</span> : undefined}>
+    <Panel title="Activity" aria-label="Activity" action={(activity.error || stale) && activity.data ? <span className="text-[12px] text-alert">Couldn't refresh</span> : undefined}>
       {activity.error && !activity.data ? (
         <ErrorLine message={activity.error} onRetry={activity.reload} />
       ) : !activity.data ? (
@@ -175,12 +174,13 @@ export function HomeScreen() {
   if (wide) {
     return (
       <div className="grid grid-cols-[400px_minmax(0,1fr)] items-start gap-6 pt-2">
+        <h1 className="sr-only">Home</h1>
         <div className="sticky top-6 flex flex-col gap-4">
           {chart ?? balanceBlock}
-          {b && (
+          {chart && b && b.pendingMinor > 0 && (
             <div className="gd-summary">
               <Metric title="Available" value={<Amount minor={b.availableMinor} size="lg" />} />
-              <Metric title="Arriving" value={<Amount minor={b.pendingMinor} size="lg" tone={b.pendingMinor ? undefined : 'muted'} />} caption={b.pendingMinor ? 'On its way' : 'Nothing pending'} />
+              <Metric title="Arriving" value={<Amount minor={b.pendingMinor} size="lg" />} caption="On its way" />
             </div>
           )}
         </div>
@@ -193,6 +193,7 @@ export function HomeScreen() {
   }
   return (
     <div className="flex flex-col gap-4">
+      <h1 className="sr-only">Home</h1>
       {balanceBlock}
       <div className="px-1">{actionRow}</div>
       {activityPanel}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as fx from '@zecca/contracts/fixtures'
 import type { PublicConfig } from '@zecca/contracts'
-import { homeLinks } from './home-model'
+import { homeLinks, liveLabel, tierText } from './home-model'
 
 const cfg = (o: { ramp?: boolean; identity?: boolean; demoMode?: boolean } = {}): PublicConfig => {
   const base = fx.config as PublicConfig
@@ -23,5 +23,19 @@ describe('home links', () => {
     expect(homeLinks(cfg({ identity: true })).verifyHref).toBe('/app/identity')
     expect(homeLinks(cfg()).verifyHref).toBeUndefined()
     expect(homeLinks(undefined).verifyHref).toBeUndefined()
+  })
+})
+
+describe('home copy', () => {
+  it('only asks to verify when the identity check is on', () => {
+    expect(tierText(cfg({ identity: true }))).toBe('Limit $150. Verify to lift it.')
+    expect(tierText(cfg())).toBe('Limit $150 for unverified accounts.')
+    expect(tierText(null)).toBe('')
+  })
+  it('says the balance could not refresh instead of "Updated just now" once polling fails', () => {
+    expect(liveLabel('live', false)).toBe('Live')
+    expect(liveLabel('polling', false)).toBe('Updated just now')
+    expect(liveLabel('polling', true)).toBe("Couldn't refresh")
+    expect(liveLabel('live', true)).toBe('Live')
   })
 })
