@@ -81,9 +81,9 @@ export function AddToEarnSheet({ open, onClose, onAdded }: { open: boolean; onCl
               setError(undefined)
             }}
             error={error}
-            hint="Converted to XRP at today's rate."
+            hint="Converted to XRP at the rate shown next."
           />
-          <Button className="w-full" disabled={!minor || busy} onClick={review}>
+          <Button className="w-full" disabled={!minor} busy={busy} onClick={review}>
             {busy ? 'Getting the rate…' : 'Continue'}
           </Button>
         </div>
