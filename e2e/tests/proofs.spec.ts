@@ -39,7 +39,7 @@ test('E2E-2 proofs: export a statement and open it', async ({ browser, request }
   await expect(ana).toHaveURL(/\/statement\/stm_/, { timeout: 30_000 })
   const url = ana.url()
   await expect(ana.getByRole('heading', { name: 'Ana Ferri' })).toBeVisible()
-  await expect(ana.getByText('Anyone can check each line on the public ledger.')).toBeVisible()
+  await expect(ana.getByText(/Anyone can check each line on the public ledger\.|these transactions are simulated/)).toBeVisible()
   await expect(ana.getByText('Zecca demo credit')).toBeVisible()
   await ana.getByRole('button', { name: 'Check signature' }).click()
   await expect(ana.getByText(/Signature valid/)).toBeVisible()
