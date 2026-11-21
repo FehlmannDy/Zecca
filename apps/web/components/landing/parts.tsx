@@ -32,7 +32,7 @@ export function LinkButton({ href, variant = 'primary', className, children }: {
 export function Section({ id, label, title, intro, children, className }: { id?: string; label?: string; title: string; intro?: ReactNode; children: ReactNode; className?: string }) {
   const headingId = id ? `${id}-title` : undefined
   return (
-    <section id={id} aria-labelledby={headingId} className={cn('mx-auto w-full max-w-[1120px] px-4 py-16 sm:px-6 md:py-24', className)}>
+    <section id={id} aria-labelledby={headingId} className={cn('mx-auto w-full max-w-[1120px] scroll-mt-16 px-4 py-16 sm:px-6 md:py-24', className)}>
       {label && <p className="label-caps mb-3 text-muted">{label}</p>}
       <h2 id={headingId} className="max-w-[24ch] text-[30px] font-[720] leading-[1.1] tracking-[-0.03em] text-ink md:text-[40px]">
         {title}

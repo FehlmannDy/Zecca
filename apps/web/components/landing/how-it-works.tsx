@@ -62,7 +62,7 @@ function Proofs() {
               href={explorerTx(p.network, p.hash)}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex shrink-0 items-center gap-2 self-start font-mono text-[13px] text-ink underline decoration-line underline-offset-4 hover:decoration-ink sm:self-auto"
+              className="inline-flex min-h-11 shrink-0 items-center gap-2 self-start font-mono text-[13px] text-ink underline decoration-line underline-offset-4 hover:decoration-ink sm:self-auto"
               title={p.hash}
             >
               {short(p.hash)}

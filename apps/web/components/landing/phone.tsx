@@ -157,7 +157,8 @@ function HomeScreen() {
 /** The phone itself: a near-black frame with the island, the screen inside. */
 export function Phone({ className }: { className?: string }) {
   return (
-    <div className={cn('relative aspect-[300/620] w-full rounded-[46px] bg-[#0c0c0d] p-[9px] shadow-[0_40px_80px_-30px_rgb(40_30_10/45%),0_12px_24px_-12px_rgb(40_30_10/25%)] ring-1 ring-line', className)}>
+    // The frame lifts a little off a dark page (ink is light there), and stays near-black on paper.
+    <div style={{ background: 'color-mix(in srgb, var(--ink) 9%, #0c0c0d)' }} className={cn('relative aspect-[300/620] w-full rounded-[46px] p-[9px] shadow-[0_40px_80px_-30px_rgb(40_30_10/45%),0_12px_24px_-12px_rgb(40_30_10/25%)] ring-1 ring-line', className)}>
       <div className="relative h-full overflow-hidden rounded-[38px]">
         <HomeScreen />
         <span className="absolute left-1/2 top-[9px] h-[22px] w-[78px] -translate-x-1/2 rounded-full bg-[#0c0c0d]" aria-hidden="true" />

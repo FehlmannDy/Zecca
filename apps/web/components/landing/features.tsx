@@ -156,9 +156,8 @@ function TapArtwork() {
 function FaceIdArtwork() {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
-      <span className="relative grid size-[84px] place-items-center rounded-[26px] border border-line bg-surface text-ink shadow-[0_10px_26px_-16px_rgb(40_30_10/40%)]">
+      <span className="grid size-[84px] place-items-center rounded-[26px] border border-line bg-surface text-ink shadow-[0_10px_26px_-16px_rgb(40_30_10/40%)]">
         <ScanFace className="size-10" strokeWidth={1.3} aria-hidden="true" />
-        <span className="absolute inset-x-4 top-1/2 h-px bg-brass/80 shadow-[0_0_10px_var(--brass)]" />
       </span>
       <span className="inline-flex min-h-9 items-center rounded-[12px] bg-ink px-4 text-[12.5px] font-[680] text-paper">{FEATURE_ART.faceid.action}</span>
     </div>

@@ -43,11 +43,11 @@ export function SiteFooter() {
           <Logo />
           <p className="max-w-[46ch] text-[14px] leading-[1.6] text-muted">{FOOTER_LINE}</p>
         </div>
-        <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-2 text-[14px] font-[600]">
-          <Link href="/how-it-works" className="text-muted hover:text-ink">
+        <nav aria-label="Footer" className="flex flex-wrap gap-x-6 text-[14px] font-[600]">
+          <Link href="/how-it-works" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
             How it works
           </Link>
-          <a href={REPO_URL} target="_blank" rel="noreferrer" className="text-muted hover:text-ink">
+          <a href={REPO_URL} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
             Source code (MIT)
           </a>
         </nav>
